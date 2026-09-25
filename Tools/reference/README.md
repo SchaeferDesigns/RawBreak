@@ -8,3 +8,6 @@ models, pocket geometry, compliant break solver, rail-speed calibration, rules/r
 - Use them to regenerate or extend expected values when porting a test to `Tests/Core`.
 - Third-party code (pooltool, FooBillard) is intentionally **not** included here; pooltool (Apache-2.0) may be
   installed separately as a cross-check oracle, but its sources are not vendored.
+
+
+Subfolder `human-factors/`: oracles for `Docs/specs/human-factors.md` (stroke model, noise, chalk, tilted-table closed form, routine-shot budgets).
