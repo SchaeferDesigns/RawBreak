@@ -393,6 +393,10 @@ namespace rb::rules
 			{
 				return C.BreakFirstContact == BreakFirstContactRule::HeadBallOrSecondRow ? HeadBallOrSecondRowMask(S) : OnTable; // R 4.3: any ball
 			}
+			if (S.FreeShot)
+			{
+				return OnTable; // FoulCueBall FreeShotPlusVisit (12.1 / 12.5): 3.2 is suspended on the free shot
+			}
 			const EightBallView V = ViewEightBall(S, Claim);
 			if (V.OnEight)
 			{
@@ -1010,7 +1014,9 @@ namespace rb::rules
 				if ((Potted & GroupMask(Theirs)) != 0u && (Potted & GroupMask(Mine)) == 0u) X.Add(Foul::PottedOpponentBallOnly);
 			}
 
-			if (F.IsPocketed(kEightBall) || F.IsOffTable(kEightBall))
+			// Only a POTTED black decides the rack. A black driven off the table is a standard foul: it is spotted
+			// first (rules.md 12.4 spotting order "black, then ...") and the opponent gets a free shot.
+			if (F.IsPocketed(kEightBall))
 			{
 				O.FoulsAfter[Me] = X.IsEmpty() ? 0 : S.Players[Me].ConsecutiveFouls + 1;
 				const bool GroupLeft = !Open && (ObjectBallsLeft(S, F) & GroupMask(Mine)) != 0u;

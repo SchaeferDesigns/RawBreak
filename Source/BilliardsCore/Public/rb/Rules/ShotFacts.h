@@ -163,7 +163,10 @@ namespace rb::rules
 	//  - "Driven to a rail" (F2/F3): BallCushion / BallJaw without ContinuesInitialFreeze, BallRailTop, BallLiner,
 	//    being pocketed (BallPocketed, SupportedOverPocket, a cue ball's BallTouchesPocketedBall) or off the table.
 	//  - F5 wins over F4: a ball that left the table (BallOffTable, or BallExternalContact other than Template) is
-	//    not in Pocketed even if it dropped afterwards. End-snapshot statuses fill in balls the log does not cover.
+	//    not in Pocketed even if it dropped afterwards. End-snapshot statuses fill in balls the log does not cover,
+	//    but only for balls on the table at shot start (a ball pocketed earlier may still be reported Pocketed).
+	//  - F10: contacts with the cue ball while it is in hand (Start.InHand != No, Time < 0: placing / adjusting it)
+	//    are not touched-ball fouls (R 3.6 / 1.6); every other NonTipContact is.
 	//  - F7/F8 judge the cue ball's TipContacts; the frozen-ball envelope of an interval is read from the
 	//    TipBallBegin / TipBallEnd events at exactly its Start / End (B = f declared in Start.FrozenToCueBall,
 	//    Value <= FrozenEnvelope, !OtherContactBefore at both ends).

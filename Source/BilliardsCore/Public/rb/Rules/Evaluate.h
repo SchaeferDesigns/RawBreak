@@ -25,6 +25,8 @@ namespace rb::rules
 	// Visits / free shots: a Blackball foul gives the incoming player a free shot (NextFreeShot, cue ball in
 	// position or - if it is gone - in hand in baulk); FoulCueBall TwoVisits / FreeShotPlusVisit add NextVisits = 1;
 	// a shooter with State.VisitsRemaining > 0 continues after a foul-free miss with NextVisits = remaining - 1.
+	// State.FreeShot suspends 3.2 (Blackball, and 8-ball with FoulCueBall FreeShotPlusVisit). Blackball: only a
+	// potted black decides the rack; a black driven off the table is a foul and is spotted first.
 	// RerackAndBreak outcomes (14.1 third foul, 8-ball / Blackball re-rack variants) carry Rack.Kind = Rerack15.
 	// A truncated record (Facts.RecordTruncated) is evaluated as it is; the caller should replay the shot.
 	RB_API ShotOutcome EvaluateShot(const RulesConfig& Config, const RulesTable& Table, const GameState& State, const ShotDeclaration& Declaration,

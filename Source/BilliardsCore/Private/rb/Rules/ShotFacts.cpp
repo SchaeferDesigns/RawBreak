@@ -389,10 +389,14 @@ namespace rb::rules
 			}
 		}
 
-		// End snapshot: supported balls (3.4), and terminal statuses the event log does not carry (defensive).
+		// End snapshot: supported balls (3.4), and terminal statuses the event log does not carry (defensive). Only a
+		// ball that was on the table at shot start can be pocketed / leave the table on THIS shot: a ball pocketed on an
+		// earlier shot may still be reported as Pocketed at the end (it lies in the pocket, pitfall 6). The cue ball is
+		// always in play (in hand = placed on the table).
+		auto InPlayAtStart = [&Start](int Ball) { return Ball == kCueBallId || Start.Presence[Ball] == BallPresence::OnTable; };
 		for (const SupportedBall& Sup : End.Supported)
 		{
-			if (IsRulesBall(Sup.Ball) && !Out.IsPocketed(Sup.Ball))
+			if (IsRulesBall(Sup.Ball) && InPlayAtStart(Sup.Ball) && !Out.IsPocketed(Sup.Ball))
 			{
 				AddPocketed(Out, Sup.Ball, Sup.Pocket, End.StopTime);
 				MarkDriven(Sup.Ball, End.StopTime);
@@ -400,7 +404,7 @@ namespace rb::rules
 		}
 		for (int b = 0; b < kRulesBallCount; ++b)
 		{
-			if (TerminalInWindow[b] || LateTerminal[b])
+			if (TerminalInWindow[b] || LateTerminal[b] || !InPlayAtStart(b))
 			{
 				continue;
 			}
@@ -547,9 +551,15 @@ namespace rb::rules
 		const StrokeInfo Stroke = CueBallStroke(Record.Stroke);
 		Out.Miscue = Stroke.Miscue;
 		Out.Scoop = Stroke.TipClothContact && Out.CueBallAirborne;
-		Out.NonTipBallContact = !Record.Stroke.NonTipContacts.IsEmpty();
 		for (const NonTipContact& C : Record.Stroke.NonTipContacts)
 		{
+			// R 3.6 / 1.6: touching the cue ball is no foul while it is in hand, i.e. before the stroke (t < 0) of a
+			// shot that started with the cue ball in hand (placing and adjusting it by hand or cue).
+			if (C.Ball == kCueBallId && Start.InHand != CueBallInHand::No && C.Time < 0.0)
+			{
+				continue;
+			}
+			Out.NonTipBallContact = true;
 			if (C.Ball == kCueBallId)
 			{
 				Out.NonTipCueBallContact = true;
