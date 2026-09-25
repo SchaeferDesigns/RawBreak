@@ -159,6 +159,14 @@ RB_TEST(Integ_Rules_Match_ClaimClearedGroupOnOpenTable)
 	ShotDeclaration Wrong = D;
 	Wrong.ClaimedClearedGroup = BallGroup::Solids; // solids are still on the table
 	RB_CHECK(ValidateDeclaration(C, S, Wrong, nullptr) == ErrorCode::InvalidDeclaration);
+	// A claim makes the 8 the only legal first ball: it cannot go with a call of another ball ...
+	ShotDeclaration ClaimOther = Declare(ShotKind::Normal, 3, PocketId::FootLeft);
+	ClaimOther.ClaimedClearedGroup = BallGroup::Stripes;
+	RB_CHECK(ValidateDeclaration(C, S, ClaimOther, nullptr) == ErrorCode::InvalidDeclaration);
+	// ... but with a safety (playing safe on the 8) it is fine.
+	ShotDeclaration ClaimSafety = Declare(ShotKind::Safety);
+	ClaimSafety.ClaimedClearedGroup = BallGroup::Stripes;
+	RB_CHECK(ValidateDeclaration(C, S, ClaimSafety, nullptr) == ErrorCode::Ok);
 }
 
 RB_TEST(ARCH_PLACE1_PlacementOverPocketOrOverlapRejected)

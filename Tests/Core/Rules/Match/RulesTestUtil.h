@@ -156,6 +156,53 @@ namespace rb::rules::testhelp
 		return O;
 	}
 
+	// Hand-built facts: Ball comes to rest on the table at (X, Y).
+	inline void FactsRestAt(ShotFacts& F, int Ball, double X, double Y)
+	{
+		F.Balls[Ball].EndStatus = BallEndStatus::OnTable;
+		F.Balls[Ball].FinalPosition = {X, Y};
+	}
+
+	// Hand-built facts: Ball pocketed in P (F4 list, per-ball summary, CueBallPocketed / AnyObjectBallPocketed).
+	inline void FactsPocketed(ShotFacts& F, int Ball, PocketId P)
+	{
+		PocketedBall B;
+		B.Ball = static_cast<BallId>(Ball);
+		B.Pocket = P;
+		F.Pocketed.PushBack(B);
+		F.Balls[Ball].Pocketed = true;
+		F.Balls[Ball].Pocket = P;
+		F.Balls[Ball].EndStatus = BallEndStatus::Pocketed;
+		if (Ball == kCueBallId)
+		{
+			F.CueBallPocketed = true;
+		}
+		else
+		{
+			F.AnyObjectBallPocketed = true;
+		}
+	}
+
+	// Hand-built facts: object ball Ball driven off the table (F5).
+	inline void FactsOffTable(ShotFacts& F, int Ball)
+	{
+		F.ObjectBallsOffTable |= 1u << static_cast<unsigned>(Ball);
+		F.Balls[Ball].OffTable = true;
+		F.Balls[Ball].EndStatus = BallEndStatus::OffTable;
+	}
+
+	// A standard foul outcome in the shape of rules.md 10.4 / 10.5: turn to the opponent, cue ball in hand
+	// anywhere, the shooter's counter = FoulsAfter.
+	inline ShotOutcome StandardFoul(int Shooter, int FoulsAfter, Foul Kind = Foul::WrongBallFirst, CueBallNext Cue = CueBallNext::InHandAnywhere)
+	{
+		ShotOutcome O = PassOutcome(1 - Shooter, Cue);
+		O.AnyFoul = true;
+		O.Detected.Add(Kind);
+		O.Enforced = Kind;
+		O.FoulsAfter[Shooter] = FoulsAfter;
+		return O;
+	}
+
 	// Plays the current rack to its end with Winner winning it (one shot), then sets up the next rack by hand.
 	inline bool WinRack(const MatchConfig& Config, MatchState& State, int Winner)
 	{

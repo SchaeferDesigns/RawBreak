@@ -171,6 +171,32 @@ namespace rb::rules
 			}
 		}
 
+		// A racked ball overlaps a ball that stays on the table (OnTable in G and not part of Rack), per-ball
+		// radii, overlap tolerance eps_overlap.
+		bool RackOverlapsTableBall(const GameState& G, const RackAssignment& Rack, const RulesTable& Table, const RulesTolerances& Tolerances)
+		{
+			for (int j = 0; j < kRulesBallCount; ++j)
+			{
+				if (G.Balls[j].Kind != BallStatusKind::OnTable || Rack.Racked[j])
+				{
+					continue;
+				}
+				for (int b = 1; b < kRulesBallCount; ++b)
+				{
+					if (!Rack.Racked[b])
+					{
+						continue;
+					}
+					const double MinDist = Table.BallRadius[b] + Table.BallRadius[j] - Tolerances.PlacementOverlap;
+					if (LengthSquared(Rack.Position[b] - G.Balls[j].Position) < MinDist * MinDist)
+					{
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
 		// 14.1 continuation rack (9.5) after spotting: rack the balls, move the 15th ball / the cue ball.
 		ErrorCode ExecuteRackCommand(const MatchConfig& Config, MatchState& S, const RackCommand& Command)
 		{
@@ -204,23 +230,8 @@ namespace rb::rules
 				}
 			}
 
-			RackAssignment Rack;
-			const ErrorCode Generated =
-				GenerateStraightPoolRack(Table, RackSeed(Config.Seed, S.RackCounter), !Full, Mask, Config.RackGaps, Rack);
-			if (!Succeeded(Generated))
-			{
-				return Generated;
-			}
-			++S.RackCounter;
-			for (int b = 1; b < kRulesBallCount; ++b)
-			{
-				if (Rack.Racked[b])
-				{
-					G.Balls[b].Kind = BallStatusKind::OnTable;
-					G.Balls[b].Position = Rack.Position[b];
-				}
-			}
-
+			// The 15th ball and the cue ball go to their places first: they do not depend on the rack, and
+			// the rack must not overlap whatever stays on the table.
 			if (!Full && Fifteenth > 0)
 			{
 				if (Command.FifteenthBallPlacement == PlacementCommand::ToHeadSpot)
@@ -253,6 +264,31 @@ namespace rb::rules
 			case PlacementCommand::Keep:
 			case PlacementCommand::IntoRack:
 				break;
+			}
+
+			// Micro-gaps widen the rack slightly beyond the tight 15-ball outline (5.2) that decided "does not
+			// interfere", so a ball kept just outside the outline could be overlapped. The tight rack never
+			// reaches a ball outside the outline: in that case rack again without gaps (same seed, so the
+			// same balls on the same sites).
+			const std::uint64_t Seed = RackSeed(Config.Seed, S.RackCounter);
+			RackAssignment Rack;
+			ErrorCode Generated = GenerateStraightPoolRack(Table, Seed, !Full, Mask, Config.RackGaps, Rack);
+			if (Succeeded(Generated) && RackOverlapsTableBall(G, Rack, Table, Config.Rules.Tolerances))
+			{
+				Generated = GenerateStraightPoolRack(Table, Seed, !Full, Mask, kRackGapNone, Rack);
+			}
+			if (!Succeeded(Generated))
+			{
+				return Generated;
+			}
+			++S.RackCounter;
+			for (int b = 1; b < kRulesBallCount; ++b)
+			{
+				if (Rack.Racked[b])
+				{
+					G.Balls[b].Kind = BallStatusKind::OnTable;
+					G.Balls[b].Position = Rack.Position[b];
+				}
 			}
 
 			// A new rack of 15 balls: one shot-clock extension per player again (INTERPRETATION, 4.10).
@@ -515,6 +551,12 @@ namespace rb::rules
 			{
 				return ErrorCode::InvalidDeclaration;
 			}
+			// A claim means "I play the 8 on this shot" (the 8 becomes the only legal first ball): it cannot
+			// go with a call of another ball.
+			if (Declaration.Kind == ShotKind::Normal && Declaration.Called.Ball != kNoBall && Declaration.Called.Ball != kEightBall)
+			{
+				return ErrorCode::InvalidDeclaration;
+			}
 		}
 
 		// Calls (4.5): 9-ball and Blackball have none; the 8/10-ball break has none.
@@ -619,11 +661,19 @@ namespace rb::rules
 		S.Clock.ExtensionActive = false;
 		S.InningHadProgress = S.InningHadProgress || Facts.AnyObjectBallPocketed || Outcome.AnyFoul;
 
-		// 14.1 continuation rack (after spotting, pitfall 11).
-		const ErrorCode Racked = ExecuteRackCommand(Config, S, Outcome.Rack);
-		if (!Succeeded(Racked))
+		// 14.1 continuation rack (after spotting, pitfall 11), only while the rack stays in play. The
+		// Rerack15 of a RerackAndBreak outcome (three-foul penalty, rules.md 10.6) is the NEW rack that
+		// SetupRack builds for the opening break; executing it here as well would rack twice (and consume
+		// a rack seed for a rack that is thrown away).
+		const bool RackStaysInPlay =
+			Outcome.Next == NextAction::Continue || Outcome.Next == NextAction::Pass || Outcome.Next == NextAction::AwaitDecision;
+		if (RackStaysInPlay)
 		{
-			return Racked;
+			const ErrorCode Racked = ExecuteRackCommand(Config, S, Outcome.Rack);
+			if (!Succeeded(Racked))
+			{
+				return Racked;
+			}
 		}
 
 		const int Next = IsPlayer(Outcome.NextShooter) ? Outcome.NextShooter : -1;
@@ -798,9 +848,13 @@ namespace rb::rules
 
 	void Concede(MatchState& State, int Player)
 	{
-		// R 1.12: conceding loses the match.
+		// R 1.12: conceding loses the match. A finished match keeps its result.
+		if (State.Phase == MatchPhase::MatchOver || !IsPlayer(Player))
+		{
+			return;
+		}
 		State.Phase = MatchPhase::MatchOver;
-		State.Winner = IsPlayer(Player) ? 1 - Player : -1;
+		State.Winner = 1 - Player;
 		State.Decider = -1;
 		State.PendingOutcome = ShotOutcome{};
 	}

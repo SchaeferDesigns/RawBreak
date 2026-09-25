@@ -135,7 +135,8 @@ namespace rb::rules
 	RB_API void CompleteDeclaration(const MatchConfig& Config, const MatchState& State, ShotDeclaration& Declaration);
 
 	// Before the stroke: call present/legal for the discipline, push-out only in its window, no safety
-	// in 10-ball (T11) / 9-ball, claimed group really cleared, and - when the cue ball is in hand -
+	// in 10-ball (T11) / 9-ball, claimed group really cleared (and a claim only with a call of the 8, a
+	// safety or no explicit call), and - when the cue ball is in hand -
 	// the placement PlacedCueBall (non-null required then) with CueBallPlacementLegal (region, overlaps
 	// with per-ball radii, not over a pocket opening; 16.16). A cue ball in position must not be placed
 	// (PlacedCueBall == nullptr); the Blackball free shot allows both. In InputMode::Sim an illegal placement
@@ -149,8 +150,11 @@ namespace rb::rules
 	// off table (F5) -> OutOfPlay (a cue ball off the table -> Pocketed = in hand), EndStatus OnTable ->
 	// FinalPosition, no end information -> unchanged. Only the SHOOTER's foul counter is taken from
 	// Outcome.FoulsAfter (the opponent's cannot change on this shot). RackWon -> RackOver (or MatchOver),
-	// RerackAndBreak -> RackSetup. On error (e.g. a continuation rack that cannot be generated) the state
-	// is unchanged.
+	// RerackAndBreak -> RackSetup. Outcome.Rack is executed only while the rack stays in play (Continue,
+	// Pass, AwaitDecision); the Rerack15 of a RerackAndBreak outcome (14.1 three-foul penalty) is the new
+	// rack that SetupRack builds. A continuation rack whose micro-gaps (Config.RackGaps) would overlap a
+	// ball that stays on the table (15th ball / cue ball just outside the outline) is racked without gaps.
+	// On error (e.g. a continuation rack that cannot be generated) the state is unchanged.
 	RB_API ErrorCode ApplyShot(const MatchConfig& Config, MatchState& State, const ShotOutcome& Outcome, const ShotFacts& Facts);
 
 	// AwaitDecision: the deciding player picks one of State.PendingOutcome.Options (11.3 table).
@@ -163,6 +167,8 @@ namespace rb::rules
 	// 8/9/10-ball, Blackball: RackSetup with the original breaker of the rack, no score change; 14.1: Lag
 	// (scores and foul counters kept, rules.md 14 #17). Allowed in AwaitShot and AwaitDecision.
 	RB_API ErrorCode DeclareStalemate(const MatchConfig& Config, MatchState& State);
+	// R 1.12: Player (0/1) concedes -> MatchOver, the opponent wins. Ignored once the match is over or for
+	// an invalid player.
 	RB_API void Concede(MatchState& State, int Player);
 
 	// Shot clock (4.10): allowed time for the current shot, expiry test, extension request. The clock
