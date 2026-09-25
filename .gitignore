@@ -1,0 +1,41 @@
+# --- Unreal Engine generated ---
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/**/Intermediate/
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+*.VC.db
+*.opensdf
+*.opendb
+*.sdf
+*.suo
+*.xcodeproj
+*.xcworkspace
+*.sln
+.vs/
+.vsconfig.user
+.idea/
+.vscode/
+*.code-workspace
+
+# --- Standalone CMake builds of BilliardsCore ---
+build/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+
+# --- Python / tooling ---
+__pycache__/
+*.pyc
+.venv/
+
+# --- Blender autosaves ---
+*.blend1
+*.blend2
+
+# --- OS ---
+Thumbs.db
+Desktop.ini
+.DS_Store
