@@ -10,3 +10,5 @@
 | 2026-09-25 | Brands | Fictional brands only (cues, tables, beer, venues). |
 | 2026-09-25 | Rules baseline | WPA World Standardized Rules (2025-09-15) for 8-, 9-, 10-ball and 14.1; league/bar/blackball variants as config switches. |
 | 2026-09-25 | Trailer | Claude owns the launch trailer end-to-end (concept, shots, edit, sound); plan + required capture tech in [trailer-plan.md](trailer-plan.md). |
+| 2026-09-26 | Human factors | Intentional, visible-cause imperfections per [human-factors.md](specs/human-factors.md). Alcohol cosmetic only; skill numbers hidden (progression is felt, not shown); no fixed noise bags (deterministic redraw scheme); hot-seat guests at 50 in every attribute; chores Full on the first visit of a venue, Brisk afterwards; low-deflection shaft is a disclosed physical trade-off. |
+| 2026-09-26 | Money games | Hustling and side bets with in-game cash are in (no real money). Accepts a possible "simulated gambling" content descriptor. |
