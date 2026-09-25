@@ -13,11 +13,11 @@ namespace rb
 		double c[kMaxDegree + 1] = {};
 		int Degree = 0;
 
-		double Eval(double x) const;
-		Polynomial Derivative() const;
+		RB_API double Eval(double x) const;
+		RB_API Polynomial Derivative() const;
 
 		// Lowers Degree while the leading coefficient is negligible relative to the largest one.
-		void Trim(double RelativeEpsilon = 1e-14);
+		RB_API void Trim(double RelativeEpsilon = 1e-14);
 	};
 
 	// All real roots of P in [Lo, Hi], ascending, written to RootsOut (capacity >= P.Degree).

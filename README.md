@@ -12,6 +12,8 @@ First-Person, ultra-realistisches Pool-Billard – mit dem rohen „sieht aus wi
 | `Source/BilliardsCore/` | **Engine-unabhängiger Kern**: Ereignis-basierte Billard-Physik + Regel-Engine (WPA). Kein Unreal-Code – wird von Unreal *und* standalone per CMake gebaut |
 | `Tests/Core/` | Unit-Tests für den Kern |
 | `Docs/specs/` | Recherchierte & verifizierte Spezifikationen (Physik, Equipment, Regeln, Rendering) |
+| `Docs/architecture.md` | Architektur von BilliardsCore: Datenfluss, Event-Loop, Toleranzen, Traceability, Arbeitspakete |
+| `Tools/rbsim/` | CLI: simuliert einen Stoß und schreibt JSON (Event-Log, Trajektorien, Tischgeometrie) |
 | `Config/` | Unreal-Projekteinstellungen (Hardware-Raytracing, Lumen, DX12/SM6) |
 
 ## Kern bauen & testen (ohne Unreal)

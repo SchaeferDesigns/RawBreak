@@ -1,3 +1,4 @@
+#include "rb/Core/FpGuard.h"
 #include "rb/Version.h"
 
 namespace rb
