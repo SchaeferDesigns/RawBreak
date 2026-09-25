@@ -107,6 +107,9 @@ namespace rb::rules
 		bool FreeShot = false;            // Blackball free shot after a foul (3.2 suspended; CB in position or in hand in baulk)
 		int VisitsRemaining = 0;          // FoulCueBallMode TwoVisits / FreeShotPlusVisit: extra visits of the shooter after this one
 		PlayerState Players[2];           // index = player (or team in Doubles, MatchState::ActiveMember picks the member)
+		// 8-ball LastPocketRule variant (rules.md 12.6): pocket of the most recently pocketed ball of each group on an
+		// EARLIER shot, index = BallGroup (None unused). Maintained by ApplyShot (from Facts.Pocketed in time order).
+		PocketId LastGroupBallPocket[3] = {PocketId::None, PocketId::None, PocketId::None};
 	};
 
 	enum class Foul : std::uint8_t

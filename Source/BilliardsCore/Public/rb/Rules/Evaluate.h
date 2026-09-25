@@ -20,14 +20,22 @@
 namespace rb::rules
 {
 	// Dispatches on State.Game: Evaluate8Ball / 9Ball / 10Ball / StraightPool / Blackball (10.3-10.6,
-	// 12.4) with the RulesConfig variant flags. Severity order for Enforced: rules.md 4.9.
+	// 12.4) with the RulesConfig variant flags. Severity order for Enforced: rules.md 4.9 (Foul::Count = no foul).
+	// Detected lists every foul found; FoulsAfter holds both players' counters (the opponent's unchanged).
+	// Visits / free shots: a Blackball foul gives the incoming player a free shot (NextFreeShot, cue ball in
+	// position or - if it is gone - in hand in baulk); FoulCueBall TwoVisits / FreeShotPlusVisit add NextVisits = 1;
+	// a shooter with State.VisitsRemaining > 0 continues after a foul-free miss with NextVisits = remaining - 1.
+	// RerackAndBreak outcomes (14.1 third foul, 8-ball / Blackball re-rack variants) carry Rack.Kind = Rerack15.
+	// A truncated record (Facts.RecordTruncated) is evaluated as it is; the caller should replay the shot.
 	RB_API ShotOutcome EvaluateShot(const RulesConfig& Config, const RulesTable& Table, const GameState& State, const ShotDeclaration& Declaration,
 		const ShotFacts& Facts);
 
 	// Explicit call, or the ObviousAssist inference of 4.5 (first contact b pocketed in p touching no
 	// other ball and no rail contact except p's jaws before it drops, per Facts.Balls[b].RailContacts /
 	// BallContacts; the CB touched no rail before b). Needs no landmarks: pocket ids come with the jaw
-	// contacts. CallMode::EightOnly infers nothing; None makes every ball count as called.
+	// contacts. An explicit call always wins; the inference never runs for Safety / PushOut declarations.
+	// CallMode::EightOnly and None infer nothing and return the declaration: the evaluators then treat every
+	// legally pocketed ball as called (EightOnly: the 8 still needs its explicit call; None: the 8 too).
 	RB_API Call ResolveCall(const RulesConfig& Config, const GameState& State, const ShotDeclaration& Declaration, const ShotFacts& Facts);
 
 	// Helpers on the START state.
