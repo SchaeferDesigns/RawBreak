@@ -35,7 +35,19 @@ namespace rb::rules
 	// spot at (r2, k1). Lattice diameter = 2 x the largest Table.BallRadius of the racked balls (no
 	// overlap with worn / mixed balls). Micro-gaps via rb::ApplyRackGaps with the same seed stream and
 	// the anchor site (RackAnchorSiteIndex) fixed, so the foot-spot ball stays on the spot.
+	// Blackball: the colour pattern of the WPA diagram is not in the rule text (rules.md 14 #10); the
+	// fill is the 8-ball one (black at (r2, k1), one ball of each group in the back corners, rest random).
+	// 14.1 with ApexEmpty racks 14 of the 15 balls (the ball drawn last stays unracked); a continuation
+	// rack of a GIVEN ball set uses GenerateStraightPoolRack. ApexEmpty is InvalidArgument for other
+	// disciplines. On any error Out is reset (nothing racked).
 	RB_API ErrorCode GenerateRack(Discipline Game, const RulesConfig& Config, const RulesTable& Table, std::uint64_t Seed, bool ApexEmpty,
+		const RackGapParams& Gaps, RackAssignment& Out);
+
+	// 14.1 rack of exactly the object balls in BallMask (bit per ball id 1..15) at random on the Triangle15
+	// lattice (apex on the foot spot), the apex site left empty when ApexEmpty (9.5: Rerack14 racks the 14
+	// pocketed balls, Rerack15 and the opening break all 15). If the mask holds more balls than free sites,
+	// the balls drawn last stay unracked. Same seed stream, lattice and micro-gaps as GenerateRack.
+	RB_API ErrorCode GenerateStraightPoolRack(const RulesTable& Table, std::uint64_t Seed, bool ApexEmpty, std::uint32_t BallMask,
 		const RackGapParams& Gaps, RackAssignment& Out);
 
 	// SpotBall (4.3, exact, no iteration): long string, foot-spot side first, never touching the CB
@@ -50,7 +62,8 @@ namespace rb::rules
 	RB_API void SpotBalls(GameState& State, const BallId* Balls, int Count, const RulesTable& Table, const RulesTolerances& Tolerances);
 
 	// Spot request (4.4): CB in hand above HS and every legal object ball above HS -> the legal ball
-	// nearest the head string; -1 if the request is not available.
+	// nearest the head string (largest x; equally near: the lowest id, the shooter may pick another);
+	// -1 if the request is not available (no legal ball on the table, or one on / below the string).
 	RB_API int SpotRequestCandidate(const GameState& State, std::uint32_t LegalMask, const RulesTable& Table, const RulesTolerances& Tolerances);
 
 	// 14.1 rack outline (5.2): tight 15-ball triangle offset outward by R, apex on the foot spot.
@@ -66,6 +79,10 @@ namespace rb::rules
 	RB_API bool BlocksSpot(const Vec2& Spot, double SpotRadius, const Vec2& Other, double OtherRadius); // |Other - Spot| < SpotRadius + OtherRadius
 
 	// 14.1 continuation re-racks (9.5, Table 1); radii from Table.BallRadius (cue ball id 0).
+	// PlanRerack14: Rerack14 with the 15th ball and the cue ball kept / moved to the head or center
+	// spot / cue ball in hand above HS; both in the rack -> Rerack15 (15th IntoRack, CB in hand above HS).
+	// PlanRerack15AfterFifteenthPocketed: Rerack15 (FifteenthBall = kNoBall, IntoRack), CB in hand above
+	// HS if it interferes with the rack, else kept.
 	RB_API RackCommand PlanRerack14(const Vec2& CueBall, int FifteenthBall, const Vec2& FifteenthBallPosition, const RulesTable& Table,
 		const RulesTolerances& Tolerances);
 	RB_API RackCommand PlanRerack15AfterFifteenthPocketed(const Vec2& CueBall, const RulesTable& Table);
