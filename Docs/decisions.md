@@ -9,3 +9,4 @@
 | 2026-09-25 | Multiplayer | Singleplayer first: career vs AI + local hot-seat. Online later (the deterministic core keeps that possible). |
 | 2026-09-25 | Brands | Fictional brands only (cues, tables, beer, venues). |
 | 2026-09-25 | Rules baseline | WPA World Standardized Rules (2025-09-15) for 8-, 9-, 10-ball and 14.1; league/bar/blackball variants as config switches. |
+| 2026-09-25 | Trailer | Claude owns the launch trailer end-to-end (concept, shots, edit, sound); plan + required capture tech in [trailer-plan.md](trailer-plan.md). |
