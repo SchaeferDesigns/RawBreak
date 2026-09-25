@@ -3,6 +3,9 @@
 Owner: Claude (creative direction, shot list, capture, edit, sound). Produced at the end of development,
 but the capture tech below must be designed in from the start.
 
+**Gate:** trailer production starts only after the product owner has played the game, is happy with it,
+and explicitly green-lights the trailer. Real-world reference footage is undecided — the trailer must work without it.
+
 ## Creative direction (first draft)
 
 The viral hook is the same one that made *Bodycam* and *Unrecord* explode: **"Wait — is this real footage?"**
@@ -21,7 +24,7 @@ The viral hook is the same one that made *Bodycam* and *Unrecord* explode: **"Wa
    *Wishlist on Steam*.
 
 Deliverables: 60–90 s Steam trailer (16:9), 30 s cut-down, 15 s vertical (9:16) versions for
-TikTok/Reels/Shorts, and a "real vs. game" side-by-side clip (needs real reference footage filmed at a pool hall).
+TikTok/Reels/Shorts. Optional, only if real reference footage gets filmed: a "real vs. game" side-by-side clip.
 
 ## Tech requirements to build in NOW
 
