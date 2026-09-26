@@ -187,6 +187,15 @@ namespace rb
 		RB_API void Reset(double StartTime, CliMode Mode, const CliParams& Params, const BallBallParams& BallBall, const ClothParams& Cloth,
 			double Gravity, const NumericsConfig& Numerics);
 
+		// Tilted table (human-factors 4.5.1, Docs/architecture.md 8.11; v1.2 review): in-plane gravity g_t = -g s [m/s^2]
+		// acting on every body at its centre, so the full gravity in the bed frame is (g_t, -Gravity). Reset sets it to
+		// (0, 0); Step applies the term only when it is non-zero (adding +0.0 would turn a -0.0 velocity component into
+		// +0.0), so a level-table island stays bitwise the v1.1 island. The simulator (WP-6b) calls this right after Reset
+		// with rb::InPlaneGravity(Params.Tilt, g). A body at rest stays at rest while |g_t| / (1 + k) is within the static
+		// rolling resistance (as in event mode, ValidatePhysicsParams); nap is not applied inside islands (A-CLI-5).
+		RB_API void SetInPlaneGravity(const Vec2& Accel);
+		Vec2 InPlaneGravityAcceleration() const { return InPlaneGravityAccel; }
+
 		RB_API bool AddBody(const IslandBody& NewBody);          // false if full or the ball is already present
 		RB_API bool AddFeature(const IslandFeature& NewFeature); // false if full; an already present (SourceKind, SourceIndex, SourceSub) is ignored (true)
 		// A member leaves the island (reached a drop edge, left the cloth region, left the rail top, ...):
@@ -248,6 +257,7 @@ namespace rb
 		ClothParams ClothSettings;
 		NumericsConfig Tolerances;
 		double GravityAccel = kStandardGravity;
+		Vec2 InPlaneGravityAccel;    // g_t [m/s^2] of a tilted table (0 = level)
 		int Steps = 0;
 		int ZeroForceSteps = 0;
 		FixedVector<IslandBody, kMaxBalls> Bodies;

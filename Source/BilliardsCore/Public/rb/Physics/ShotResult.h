@@ -55,6 +55,8 @@ namespace rb
 		IslandEnd,          // CLI island ended; Value = island duration [s]
 		ZenoGuard,          // pair (A, B or feature) moved into a CLI island by the Zeno detector
 		Diagnostic,         // overlap / missed event / snap residual / capacity; Value = magnitude
+		TiltRefresh,        // A; node of a tilt chain (human-factors 4.5.3): From = To = state; logged only with
+		                    //   RecordOptions::LogTransitions; never record-relevant, no audio
 	};
 
 	namespace ShotEventFlags
@@ -165,6 +167,7 @@ namespace rb
 		int OverlapWarnings = 0;     // overlap > OverlapGuard detected (should be 0; ROB-11)
 		int MissedEvents = 0;        // e.g. landing over a rail (collisions 6.1 step 3)
 		int FeatureJoins = 0;        // table features added to running islands (architecture 8.8)
+		int TiltRefreshes = 0;       // TiltRefresh events processed (tilted table, human-factors 4.5.3; PERF re-measure)
 		bool IslandCapacityExceeded = false; // island body / feature / contact list full (Diagnostic event logged)
 		bool EventLogOverflow = false;
 		bool TrajectoryOverflow = false;

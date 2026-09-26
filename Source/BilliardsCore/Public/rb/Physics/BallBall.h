@@ -9,14 +9,32 @@
 // P1 = -J_n n_hat - J_t t_hat; ball 2 receives -P1.
 // Inertia: the tangential compliance uses the per-ball inertia, k_t = 1/m1 + 1/m2 + R1^2/I1 + R2^2/I2
 // (= (7/2) k_n for solid spheres, collisions 2.3), so per-ball I is honoured.
+//
+// Cling (human-factors 4.3, HF-40/41): BallBallParams::ClingFactor is the venue's ball dirt k_venue; with
+// PhysicsParams::ChalkCling the simulator replaces it per contact by ContactClingFactor from the chalk marks
+// of both balls (ResolveBallBall itself is unchanged: it reads Params.ClingFactor). Off by default, so every
+// COL test is unchanged.
 
 #include "rb/Config.h"
+#include "rb/Core/FixedVector.h"
+#include "rb/Math/Quat.h"
 #include "rb/Math/Vec3.h"
 
 #include <cstdint>
 
 namespace rb
 {
+	// Chalk mark on a ball (human-factors 4.3, HF-40): a blue spot left by a tip contact, fixed in the ball's
+	// BODY frame (it rotates with the ball). Deposited, faded and wiped by rb::human (rb/Human/BallMarks.h).
+	struct ChalkMark
+	{
+		Vec3 BodyDir;          // unit direction from the ball center to the mark, body frame [1]
+		double Strength = 0.0; // [0, 1] (0.3 + 0.7 c at deposit; 1 after a miscue)
+		double Radius = 0.0;   // [m] mark radius on the surface (2.5 mm; 4 mm after a miscue)
+	};
+
+	inline constexpr int kMaxChalkMarks = 8;
+	using BallChalkMarks = FixedVector<ChalkMark, kMaxChalkMarks>;
 	enum class BallBallFrictionModel : std::uint8_t
 	{
 		Alciatore,  // mu_b(s) = k_cling (a + b exp(-c s)), frozen at the pre-impact slip speed (default)
@@ -39,8 +57,19 @@ namespace rb
 		double MuB = 0.108;               // b_mu [1]
 		double MuC = 1.088;               // c_mu [s/m]
 		double MuConstant = 0.06;         // [1] for BallBallFrictionModel::Constant
-		double ClingFactor = 1.0;         // k_cling: 1.5 dirty balls, 2.5 cling/skid (TP A.14)
+		double ClingFactor = 1.0;         // k_cling = k_venue: 1 clean, 1.3 dive-bar balls (HF-41), 1.5 dirty (TP A.14)
+		double ChalkClingFactor = 2.5;    // k_chalk: a fully chalked contact (TP A.14 cling/skid 2.5; human-factors 4.3); used
+		                                  //   only with PhysicsParams::ChalkCling
 	};
+
+	// Weight chi of a ball's chalk marks at one contact (human-factors 4.3): chi = SUM_j Strength_j
+	// exp(-(R delta_j / Radius_j)^2), delta_j = angle between mark j (world frame: Rotate(Orientation, BodyDir))
+	// and ContactDir (unit, from the ball center to the contact point, world frame). Owner: WP-3.
+	RB_API double ChalkMarkWeight(const BallChalkMarks& Marks, const Quat& Orientation, double Radius, const Vec3& ContactDir);
+
+	// k_cling of one contact: k_venue + (max(k_chalk, k_venue) - k_venue) min(1, Chi1 + Chi2) with k_venue =
+	// Params.ClingFactor, k_chalk = Params.ChalkClingFactor (HF-S07: one full mark on the contact gives 2.5). Owner: WP-3.
+	RB_API double ContactClingFactor(double Chi1, double Chi2, const BallBallParams& Params);
 
 	// Rigid body state of one ball at the contact instant.
 	struct ImpactBody

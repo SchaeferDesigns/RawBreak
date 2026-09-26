@@ -18,6 +18,7 @@
 #include "rb/Equipment/TableSpec.h"
 #include "rb/Geometry/TableGeometry.h"
 #include "rb/Math/Quat.h"
+#include "rb/Math/Vec2.h"
 #include "rb/Physics/BallBall.h"
 #include "rb/Physics/BallState.h"
 #include "rb/Physics/Compliant.h"
@@ -58,16 +59,36 @@ namespace rb
 		PocketModel Pockets = PocketModel::GeometricLevelA; // CaptureCircle only for XREF-01
 		CliParams Cli;                       // Hertz/Tsuji island solver (3.9.3); TsujiAlpha < 0 = derived from e_b
 		NumericsConfig Numerics;             // all tolerances and guards (rb/Core/Tolerances.h)
+		TiltParams Tilt;                     // table tilt and nap (human-factors 4.5); level by default (HF-B10)
+		bool ChalkCling = false;             // per-contact cling from SimBall::ChalkMarks (human-factors 4.3, V2); off: every
+		                                     //   ball-ball contact uses BallBall.ClingFactor (= k_venue), as in collisions 2.1
+	};
+
+	// Condition of ONE physical table in a venue (persistent per venue seed, rb/Human/Venue.h): what differs between
+	// two tables built from the same TableSpec preset. The default is a level table with clean balls.
+	struct TableCondition
+	{
+		Vec2 Slope;              // TiltParams::Slope [1] (HF-50; dive bar 0.5-2.5 mm/m, pool hall <= 0.3, arena <= 0.1)
+		double BallCling = 1.0;  // k_venue -> BallBallParams::ClingFactor (HF-41: 1.3 dive bar)
+		bool ChalkCling = false; // HF-40 physics (V2) -> PhysicsParams::ChalkCling
 	};
 
 	// The ONLY constructor of table-dependent parameters (game, AI, rbsim): Origin = Table, Cloth =
 	// ClothParamsFor(Spec.Cloth), Cushion.FacingRestitutionScale = Spec.FacingRestitutionScale,
-	// PocketContacts.LinerRestitution / LinerFriction = Spec.Liner*, everything else the spec defaults.
-	// Deterministic (pure function of the preset).
+	// PocketContacts.LinerRestitution / LinerFriction = Spec.Liner*, everything else the spec defaults
+	// (level table, clean balls). Deterministic (pure function of the preset).
 	RB_API PhysicsParams MakePhysicsParams(const TableSpec& Spec);
 
+	// MakePhysicsParams(Spec) plus the venue table's condition: Tilt.Slope, BallBall.ClingFactor, ChalkCling.
+	// MakePhysicsParams(Spec, TableCondition{}) == MakePhysicsParams(Spec) for every ParamTable key.
+	RB_API PhysicsParams MakePhysicsParams(const TableSpec& Spec, const TableCondition& Condition);
+
 	// Rejects non-physical parameters (prior-art 5.11, ROB-06): mu <= 0, e outside [0, 1], alpha_sp <= 0,
-	// g <= 0, step sizes <= 0, capacities <= 0, Origin == Unset.
+	// g <= 0, step sizes <= 0, capacities <= 0, Origin == Unset; tilt (human-factors 4.5.1, 4.5.6): non-finite tilt values,
+	// (5/7) |Slope| + |NapPseudoSlope| > (1 - NapResistance) mu_r / 2 of the cloth (the k = 2/5 form of the TiltParams validity
+	// rule; |Slope| <= 0.7 mu_r without nap), |Slope| > 0.7 mu_r of the rail cap (no nap there), Tolerance <= 0,
+	// RefreshMaxInterval <= 0, NapResistance outside [0, 1), ChalkClingFactor or ClingFactor <= 0. Run additionally checks
+	// the TiltParams rule with every ball's own k (InvalidInput).
 	RB_API ErrorCode ValidatePhysicsParams(const PhysicsParams& Params);
 
 	// What is logged into ShotResult (physics log, playback). The rules record (ShotRecord = true) is
@@ -87,7 +108,8 @@ namespace rb
 		bool InPlay = false;        // simulated (on the table); false for pocketed / out-of-play / unused ids
 		BallSpec Spec;              // per-ball R, m, I (InertiaFactor in (0, 2/3])
 		BallState State;            // initial state; must be classified-consistent (at rest for a strike)
-		Quat Orientation;           // initial orientation (playback only)
+		Quat Orientation;           // initial orientation (playback; the chalk-mark cling with PhysicsParams::ChalkCling)
+		BallChalkMarks ChalkMarks;  // body-frame chalk marks (rb/Human/BallMarks.h); read only with PhysicsParams::ChalkCling
 	};
 
 	// One cue stroke at t = 0. Normal shots have exactly one (Ball = the cue ball); the lag has two

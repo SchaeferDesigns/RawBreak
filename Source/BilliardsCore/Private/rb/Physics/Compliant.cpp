@@ -46,6 +46,7 @@ namespace rb
 		ClothSettings = Cloth;
 		Tolerances = Numerics;
 		GravityAccel = Gravity;
+		InPlaneGravityAccel = Vec2{};
 		Steps = 0;
 		ZeroForceSteps = 0;
 		Bodies.Clear();
@@ -110,6 +111,12 @@ namespace rb
 		return Strike >= 0 && Strike < kMaxStrikes && TipActive[Strike];
 	}
 
+	void CompliantIsland::SetInPlaneGravity(const Vec2& Accel)
+	{
+		// Stored here; Step applies it to every body (TODO(WP-3) in Step).
+		InPlaneGravityAccel = Accel;
+	}
+
 	void CompliantIsland::SetMode(CliMode NewMode)
 	{
 		// TODO(WP-3): mode switch keeps bodies, features and contact states (frozen friction coefficients).
@@ -119,7 +126,8 @@ namespace rb
 	void CompliantIsland::Step(IslandRecordList& /*NewRecords*/)
 	{
 		// TODO(WP-3): one Hertz/Tsuji (Jacobi, geometric contact order) or rigid (Gauss-Seidel, same order) step:
-		// forces, friction frozen at first touch, cloth / plane support, tips, torques, first-touch and tip records.
+		// forces, friction frozen at first touch, cloth / plane support, tips, torques, first-touch and tip records;
+		// gravity (InPlaneGravityAccel only when non-zero, -GravityAccel z_hat) on every body (tilted table, A-CLI-5).
 		CurrentTime += CurrentMode == CliMode::Rigid ? Settings.RigidTimeStep : Settings.TimeStep;
 		++Steps;
 	}

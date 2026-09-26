@@ -1,6 +1,7 @@
 #pragma once
 
-// Unit quaternion for ball orientation (playback only; the physics never needs orientation).
+// Unit quaternion for ball orientation (playback; in the physics only for the chalk-mark cling of
+// human-factors 4.3, PhysicsParams::ChalkCling).
 // Owner: WP-7 (output & playback). Header-only.
 //
 // Convention: Hamilton product, active rotation of vectors in the CORE (right-handed) world frame,

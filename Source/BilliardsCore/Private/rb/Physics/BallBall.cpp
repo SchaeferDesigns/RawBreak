@@ -26,4 +26,16 @@ namespace rb
 		// TODO(WP-3): acos(v_cb_h_hat . n_hat_h) (2.4).
 		return 0.0;
 	}
+
+	double ChalkMarkWeight(const BallChalkMarks& /*Marks*/, const Quat& /*Orientation*/, double /*Radius*/, const Vec3& /*ContactDir*/)
+	{
+		// TODO(WP-3): human-factors 4.3 chi = SUM Strength exp(-(R delta / Radius)^2) (HF-S07).
+		return 0.0;
+	}
+
+	double ContactClingFactor(double /*Chi1*/, double /*Chi2*/, const BallBallParams& Params)
+	{
+		// TODO(WP-3): human-factors 4.3 k_venue + (max(k_chalk, k_venue) - k_venue) min(1, chi_1 + chi_2).
+		return Params.ClingFactor;
+	}
 }

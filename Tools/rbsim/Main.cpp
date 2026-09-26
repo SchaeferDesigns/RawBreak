@@ -350,6 +350,7 @@ namespace
 		case rb::ShotEventType::IslandEnd: return "IslandEnd";
 		case rb::ShotEventType::ZenoGuard: return "ZenoGuard";
 		case rb::ShotEventType::Diagnostic: return "Diagnostic";
+		case rb::ShotEventType::TiltRefresh: return "TiltRefresh";
 		}
 		return "?";
 	}

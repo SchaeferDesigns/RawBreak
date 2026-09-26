@@ -2,8 +2,8 @@
 
 // Scalar math funnel. ALL transcendental calls in the core go through these wrappers so that
 // bitwise determinism across platforms/CRTs can later be obtained by swapping the implementation in
-// one place (see Docs/architecture.md, "Determinism"). sqrt is IEEE-exact everywhere; sin, cos, exp,
-// log, atan2, asinh are CRT-dependent.
+// one place (see Docs/architecture.md, "Determinism"). sqrt and floor are IEEE-exact everywhere; sin, cos,
+// exp, expm1, log, log1p, cbrt, atan2, asinh are CRT-dependent.
 // Owner: WP-0 (architecture, frozen). Header-only.
 
 #include "rb/Config.h"
@@ -22,6 +22,14 @@ namespace rb
 	inline double Atan2(double Y, double X) { return std::atan2(Y, X); }
 	inline double Exp(double X) { return std::exp(X); }
 	inline double Log(double X) { return std::log(X); }
+	// exp(x) - 1 and log(1 + x) without cancellation near 0: the tilted-table pursuit solution uses
+	// E_n = -Expm1(-n lambda) (human-factors 4.5.2); CRT-dependent like Exp / Log.
+	inline double Expm1(double X) { return std::expm1(X); }
+	inline double Log1p(double X) { return std::log1p(X); }
+	// Real cube root (Newton start value of the tilt refresh rule, human-factors 4.5.3); CRT-dependent.
+	inline double Cbrt(double X) { return std::cbrt(X); }
+	// floor is exact (IEEE) everywhere; wrapped for a single math entry point (chalk-zone lookup, noise eighths).
+	inline double Floor(double X) { return std::floor(X); }
 	inline double Asinh(double X) { return std::asinh(X); }
 	inline double Sinh(double X) { return std::sinh(X); }
 	inline double Pow(double X, double Y) { return std::pow(X, Y); }

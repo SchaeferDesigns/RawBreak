@@ -24,10 +24,22 @@ namespace rb
 		return Params;
 	}
 
+	PhysicsParams MakePhysicsParams(const TableSpec& Spec, const TableCondition& Condition)
+	{
+		PhysicsParams Params = MakePhysicsParams(Spec);
+		Params.Tilt.Slope = Condition.Slope;
+		Params.BallBall.ClingFactor = Condition.BallCling;
+		Params.ChalkCling = Condition.ChalkCling;
+		return Params;
+	}
+
 	ErrorCode ValidatePhysicsParams(const PhysicsParams& /*Params*/)
 	{
 		// TODO(WP-6a): reject Origin == Unset, mu <= 0, e outside [0, 1], alpha_sp <= 0, g <= 0, non-positive step sizes,
-		// capacities <= 0, Tsuji alpha that is neither < 0 (derive) nor finite (ROB-06).
+		// capacities <= 0, Tsuji alpha that is neither < 0 (derive) nor finite (ROB-06); tilt (human-factors 4.5.1, 4.5.6;
+		// Simulator.h): non-finite tilt values, (5/7) |Slope| + |NapPseudoSlope| > (1 - NapResistance) mu_r / 2 (cloth),
+		// |Slope| > 0.7 mu_r (rail cap), Tolerance / RefreshMaxInterval <= 0, NapResistance outside [0, 1),
+		// ClingFactor / ChalkClingFactor <= 0.
 		return ErrorCode::NotImplemented;
 	}
 
@@ -63,9 +75,13 @@ namespace rb
 
 	SimStatus Simulator::Run(const SimInput& /*Input*/, ShotResult& Result)
 	{
-		// TODO(WP-6a): event loop (architecture.md 8): validate (params, per-ball specs, table, overlaps, strikes),
+		// TODO(WP-6a): event loop (architecture.md 8): validate (params, per-ball specs incl. the TiltParams validity rule with
+		// each ball's k, table, overlaps, strikes),
 		// resolve Tsuji alpha, strikes at t = 0, predict, pop / invalidate, dispatch (WP-6b hooks for islands,
-		// pockets, landings, rail top), observers, tip slots, recording, guards, FinishShotRecord.
+		// pockets, landings, rail top), observers, tip slots, recording, guards, FinishShotRecord; tilted table
+		// (architecture.md 8.11): MakeSegment(..., Params.Tilt), TiltRefresh, exact re-anchor of events inside chain
+		// pieces (BallStateForEvent); ChalkCling: orientation of marked balls, per-contact ContactClingFactor; islands get
+		// CompliantIsland::SetInPlaneGravity(InPlaneGravity(Params.Tilt, g)) (WP-6b).
 		ReserveShotResult(Result, Caps);
 		ResetShotResult(Result);
 		Result.Status = SimStatus::NotImplemented;
@@ -94,6 +110,13 @@ namespace rb
 			// TODO(WP-6a): EvaluateSegment / EvaluatePivot of the ball's current segment.
 			const MotionSegment& Seg = Ws.Balls[Ball].Seg;
 			return EvaluateSegment(Seg, Time - Seg.T0);
+		}
+
+		BallState BallStateForEvent(const Workspace& Ws, int Ball, double Time)
+		{
+			// TODO(WP-6a): EvaluateSegmentForEvent (exact pursuit velocity inside tilt chain pieces) / EvaluatePivot.
+			const MotionSegment& Seg = Ws.Balls[Ball].Seg;
+			return EvaluateSegmentForEvent(Seg, Time - Seg.T0);
 		}
 	}
 }

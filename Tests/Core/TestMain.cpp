@@ -2,15 +2,31 @@
 
 #include <cstring>
 
+// Filters (Docs/architecture.md 18): every argument is a substring of the test name; a leading '-' excludes. A test
+// runs when its name contains every include and no exclude, e.g. "MOT_", "Integ_", "-Integ_ -_Slow_".
+static bool Selected(const char* Name, int argc, char** argv)
+{
+	for (int i = 1; i < argc; ++i)
+	{
+		const char* Filter = argv[i];
+		const bool Exclude = Filter[0] == '-' && Filter[1] != '\0';
+		const bool Contains = std::strstr(Name, Exclude ? Filter + 1 : Filter) != nullptr;
+		if (Contains == Exclude)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 int main(int argc, char** argv)
 {
-	const char* Filter = argc > 1 ? argv[1] : nullptr;
 	int Ran = 0;
 	int FailedTests = 0;
 
 	for (const rbtest::TestCase& Test : rbtest::Registry())
 	{
-		if (Filter && !std::strstr(Test.Name, Filter))
+		if (!Selected(Test.Name, argc, argv))
 		{
 			continue;
 		}

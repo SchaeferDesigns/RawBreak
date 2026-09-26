@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Spec ID | `human-factors` (prefix **HF**) |
-| Modules | New engine-agnostic package `rb::human` inside `BilliardsCore` (new work package **WP-11**; ARCH 17 already uses WP-10 for validation and benchmarks; same coding rules as ARCH 2; no Unreal headers). Physics additions in WP-0/1/3/5/6a (listed in 3.11 and 4.5.7). Chores, animation and audio live in the UE game module. |
+| Modules | New engine-agnostic package `rb::human` inside `BilliardsCore` (work package **WP-11**, headers `rb/Human/*.h`, ARCH 7.5 and 17; ARCH 17 already uses WP-10 for validation and benchmarks; same coding rules as ARCH 2; no Unreal headers). Physics additions in WP-0/1/3/5/6a (listed in 3.11 and 4.5.7; ARCH 8.11). Chores, animation and audio live in the UE game module. |
 | Scope | Design principles; catalogue of human, equipment and venue imperfections; the deterministic stroke execution model (intended stroke -> `CueStrikeInput`); tip/chalk/cue/ball/table state models, including table tilt in the event-based physics; progression, difficulty and AI profiles; tests. |
 | Builds on | MOT = physics-motion-and-cue (B.3-B.8), COL = physics-collisions (2.1 `k_cling`, 3.9.5 rack gaps), EQP = equipment (6-9), RUL = rules (3.2, F7-F10), UE = ue5-realism-plan (4.8, 5.3-5.5), ARCH = architecture (2, 5, 8, 11). |
-| Status | Draft v1.1 (2026-09-26), after adversarial verification (section 9). Every number in section 6 was produced by a Python reference implementation of this text (hash, bags, stroke model, chalk model, tilt oracle, Monte Carlo) and re-derived by a second, independent implementation. |
+| Status | Draft v1.3 (2026-09-26): all seven product-owner questions answered (section 7: Q2 alcohol cosmetic for V1 with an intoxication hook for a later mechanic, Q3 attribute numbers hidden, Q6 money games with in-game cash) and the architecture integration review applied (exact-integer streak fallback 3.2, intoxication hook 3.4, money-game stakes; log 9.5). v1.2: Q1 streak-guarded draws replace the bags of 8; Q4, Q5, Q7 decided (log 9.4). v1.1: after adversarial verification (section 9). Every number in section 6 was produced by a Python reference implementation of this text (hash, streak guard, stroke model, chalk model, tilt oracle, Monte Carlo; `Tools/reference/human-factors/`) and re-derived by a second, independent implementation (v1.1); the draw-dependent values were recomputed for v1.2 with `streak.py` and `recompute_v12.py`. |
 
 Tags: **[SRC]** sourced (section 8), **DERIVED** derived here, **TUNING** gameplay value to calibrate, **EST** estimate. Units SI, angles in radians in code (degrees only in prose). Frames and signs follow MOT 0: `+z` up, right English `a > 0`, cue frame `(e_r, d, e_u)`.
 
@@ -18,10 +18,10 @@ Tags: **[SRC]** sourced (section 8), **DERIVED** derived here, **TUNING** gamepl
 2. **Input first.** The player's mouse stroke (UE 5.4: aim, tip offset, speed, lateral steering, rhythm) is the main source of error. The avatar adds a thin **human layer** whose size is fitted to a routine-shot budget (3.10). Skill never straightens, smooths or rescales the player's input; that is an Execution assist (5.4).
 3. **Deterministic seeded noise.** Noise is a pure function of `(MatchSeed, RackIndex, ShotIndex, ShooterId, Channel, Sub)` through a counter-based hash (3.2). No RNG state, no wall-clock. A replay stores the raw input log, the seeds and the final `CueStrikeInput`, and reproduces bit for bit (ARCH 5.3, 11).
 4. **Same model for the AI.** The AI plans a stroke, a *synthetic hand* adds that profile's input flaws (3.8), and the result goes through the same `ExecuteStroke`, the same `CueStrikeInput`, the same simulator and the same rules. The AI never builds a `CueStrikeInput` directly (test HF-B07).
-5. **Respect the player's time.** Chore duration is the sum of its physical steps (coins x 1 s, twists x 0.4 s, balls x walking). A partial job leaves partial state (the revolver rule: chalk only what is worn, rack only the balls you have, an aborted chore keeps what was done). Every chore has four speeds: **R** full interactive ritual, **A** hands do it automatically (hold to speed up 2-3x), **C** 1.5 s cut, **P** done while the opponent shoots. A skipped chore produces the character's *habitual* result (seeded, deterministic), so skipping never changes the outcome versus automatic play; only doing it interactively and well can beat the habit. **R results are capped at the habit-1 result**, so the ritual pays off while a habit is being learned but is never mandatory once it is maxed (no compulsory ritual in a long career). Target overhead per 8-ball rack in the dive bar (TUNING): Full 45-90 s, Brisk 15-25 s, Minimal < 8 s. Saving is never restricted.
+5. **Respect the player's time.** Chore duration is the sum of its physical steps (coins x 1 s, twists x 0.4 s, balls x walking). A partial job leaves partial state (the revolver rule: chalk only what is worn, rack only the balls you have, an aborted chore keeps what was done). Every chore has four speeds: **R** full interactive ritual, **A** hands do it automatically (hold to speed up 2-3x), **C** 1.5 s cut, **P** done while the opponent shoots. A skipped chore produces the character's *habitual* result (seeded, deterministic), so skipping never changes the outcome versus automatic play; only doing it interactively and well can beat the habit. **R results are capped at the habit-1 result**, so the ritual pays off while a habit is being learned but is never mandatory once it is maxed (no compulsory ritual in a long career). Target overhead per 8-ball rack in the dive bar (TUNING): Full 45-90 s, Brisk 15-25 s, Minimal < 8 s. Default (Q5): Full on the first visit of each venue, Brisk afterwards. Saving is never restricted.
 6. **Skill reduces but never removes human error.** Every noise channel follows `sigma(x) = sigma_25 * rho^((x-25)/75)` with `rho > 0` (5.1); at attribute 100 the noise is small but not zero. Equipment and table faults never scale with skill; experience shows up as habits (automatic chalking, rolling house cues) and knowledge (the notebook).
 7. **Errors carry information.** Each channel has a perceivable tell at 1 sigma: at least a 1-pixel displacement of the rendered tip or shaft at 1440p in the Eyes preset, or, for the two sub-pixel channels (tremor, lateral tip placement; 3.7), a dedicated audio/haptic or replay tell (HF-B08). Every miss gets a counterfactual diagnosis within 3 s (3.9), delivered diegetically (mentor line, replay close-up, notebook).
-8. **Fairness caps.** Per-shot draws are truncated at +-2.5 sigma and taken from stratified bags (any 8 consecutive shots contain each eighth of the distribution at most twice). No rubber-banding, no hidden streak breakers, no paid performance.
+8. **Fairness caps.** Per-shot draws are truncated at +-2.5 sigma and streak-guarded (Q1, 3.2): a draw whose eighth of the distribution already occurs twice in the shooter's last 7 draws is redrawn, so no 8 consecutive shots contain any eighth more than twice, and the next draw is never predictable. The guard is disclosed on the in-game "How it works" page. No rubber-banding, no hidden streak breakers, no paid performance.
 9. **Options and accessibility.** Sliders: Chores (Full / Brisk / Minimal), Imperfections (Sim / Scaled / Low / Off = human-layer scale 1 / 0.6 / 0.3 / 0, the values the presets of 5.4 use), Pressure (On / Subtle / Off), Diegetic-only information (On / Off), and the presets of 5.4. Accessibility options never lock career content; only ranked leaderboards group by preset.
 
 ---
@@ -48,12 +48,12 @@ Columns: **Skill** = the attribute (5.1) that shrinks it, H = habit, K = knowled
 | HF-12 | **Bridge type and bridge slip.** Closed loop constrains best; open, rail, elevated and mechanical bridges less. Above a speed V_b the bridge slips | Hand pose; fingers creep, cue rattles on power shots | per stroke | Bridge Stability | V1 | HM, UA, US | `m_br0` closed 1.0 / open 1.2 / rail 1.4 / elevated 2.0 / mechanical 1.8; `V_b0` 6 / 4 / 3.5 / 2.5 / 3 m/s. EST |
 | HF-13 | **Awkward stance** (stretch, one foot down, over a ball) | Strained body, back foot on its toe | per shot (IK) | Stance | V1 | UA -> HM | `m_st = 1 + d_s L` (x2 at x=25, x1.2 at 100). EST |
 | HF-14 | **Grip tension and flinch under pressure**: the tip drops and the stroke decelerates | Knuckles whiten; stroke dies | per shot | Nerve | V1 | HM, UA | tip bias -1.5 mm x P x L_N; flinch <= 8 % -> 1 % speed. EST; pressure and gaze [WILLIAMS02] |
-| HF-15 | **Pressure scalar** from stakes, game ball, hill, crowd, shot clock, run length (3.4) | Heartbeat, breathing, crowd ducking; no vignette by default | match state | Nerve | V1 | UG | weights 0.35 / 0.25 / 0.15 / 0.10 / 0.10 / 0.05. TUNING |
+| HF-15 | **Pressure scalar** from stakes (incl. money games: bet against cash, Q6), game ball, hill, crowd, shot clock, run length (3.4) | Heartbeat, breathing, crowd ducking; no vignette by default | match state | Nerve | V1 | UG | weights 0.35 / 0.25 / 0.15 / 0.10 / 0.10 / 0.05. TUNING |
 | HF-16 | **Fatigue** after 2 h+ of the character's night | Heavier breathing, slower get-down | in-game night | - | V2 | UG -> HM | `m_fat = 1 + 0.2 F`, `F = clamp((in-game hours of this night - 2)/2, 0, 1)`; resets with the next in-game day; off in Practice and hot-seat. Never real-world session time (it would punish long play sessions). EST |
 | HF-17 | **Sweaty or sticky bridge hand**, glove | Drag squeak in the bridge; wipe on the jeans | per night | H (glove, wipe) | V2 | UG -> HM | drift x(1 + 0.5 S), V_b x(1 - 0.3 S); glove: sweat term x0.2, V_b x1.15. EST |
 | HF-18 | **Vision centre.** The sighting eye is off the cue line, giving a constant aim bias | Found by the mentor's vision-centre drill (UE 4.2 calibration mini-game), which is offered in the first career session, before any match counts | per character | K | V2 | UA | camera eye offset 0-15 mm before calibration, removed by the player's calibrated `y_vc`; no noise channel (the bias is real parallax). [DD-VISION] |
 | HF-19 | **Off-hand stroke** | Clumsy pose | per shot | - | Later | HM | all channels x2.5. EST |
-| HF-20 | **Alcohol** | Blur, sway | session | - | Later | - | product-owner decision (section 7) |
+| HF-20 | **Alcohol** | V1: drinks are props; bounded camera blur / vignette only while standing or walking, never while down on a shot and never on the cue (UE 4.8 sliders and Reduced motion apply) | session | - | V1 cosmetic, mechanic Later | UA (V1); HM hook | decided (Q2, section 7): cosmetic only in V1; hook `StrokeSituation::Intoxication` (3.4), 0 unless `ProductConfig::Alcohol` = `Mechanic` |
 
 ### 2.2 Tip, chalk and cue (section 4.1-4.3)
 
@@ -138,11 +138,13 @@ struct StrokeSituation {
   double Pressure = 0, Fatigue = 0, Sweat = 0; bool Glove = false, OffHand = false;
   double ElevationFloor = 0; FloorSource FloorBy = FloorSource::None; int FloorBall = -1;
   bool ShortCue = false;
+  double Intoxication = 0;       // I [0, 1], Q2 hook (3.4): 0 unless ProductConfig::Alcohol = Mechanic; 0 = no effect
 };
 struct NoiseKey { uint64_t MatchSeed; uint32_t RackIndex, ShotIndex, ShooterId, ShooterShotIndex, CuePickupIndex;
-                  uint32_t Purpose = 0; };      // Purpose != 0: AI rollout keys (never the match stream), 3.2
+                  uint32_t Purpose = 0;         // Purpose != 0: AI rollout keys (never the match stream), 3.2
+                  uint32_t AddressIndex = 0; }; // earlier get-downs on this shot: new drift / tremor processes (3.2)
                   // ShooterShotIndex counts this shooter's revealed per-shot draws in the match (3.7), not only shots
-struct HumanParams { /* all defaults of 3.3 */ double NoiseScale = 1.0; uint32_t ChannelMask = 0; bool Stratify = true;
+struct HumanParams { /* all defaults of 3.3 */ double NoiseScale = 1.0; uint32_t ChannelMask = 0; bool StreakGuard = true;
                      double WarpSightLength = 0.45; };  // s_e [m], UE 4.2 tip-to-eye distance along the cue (4.4)
 struct ExecutedStroke {
   CueStrikeInput Strike;         // what the physics gets (MOT B.1, unchanged contract; TipTouchesCloth set here, 3.6)
@@ -155,10 +157,12 @@ struct ExecutedStroke {
 ExecutedStroke ExecuteStroke(const IntendedStroke&, const ShooterAttributes&, const StrokeSituation&,
                              const TipState&, const CueBodyState&, const CueSpec&, const BallSpec& CueBall,
                              const Vec3& CueBallPosition, Span<const BallObstacle> OtherBalls,
-                             const NoiseKey&, const HumanParams&);
+                             const NoiseKey&, const NoiseHistory&, const HumanParams&);  // NoiseHistory: Q1 streak guard (3.2)
 HandPose SampleHand(/* same inputs */, double t);  // pose at time t for rendering (3.7)
 }
 ```
+
+The authoritative declarations are the headers `rb/Human/*.h` (ARCH 7.5); this sketch shows the data flow.
 
 `ExecuteStroke` has no side effects and allocates nothing. Equipment and table state is updated **after** the shot by `ApplyShotToEquipment` (4.1-4.3), never inside it.
 
@@ -176,26 +180,30 @@ TruncNormal(u)= InvNorm(Phi_lo + u (1 - 2 Phi_lo)),  Phi_lo = Phi(-2.5) = 0.0062
 
 **Channels** (`ChannelId`): 1 DriftLat, 2 DriftVert, 3 TremorLat, 4 TremorVert, 5 TipA, 6 TipB, 7 Elevation, 8 Speed, 9 Flinch, 10 WarpRoll, 20-27 SyntheticHand (3.8). AI rollout calls replace the `ShooterId` key by the 64-bit value `uint64(ShooterId) | (uint64(Purpose) << 32)` in every key (widen before shifting; `ShooterId` is 32-bit), with `Purpose = 1 + s` for rollout sample `s` in `[0, K)`, so the K samples differ, never reuse match values and cannot peek at the shooter's real future noise. All candidate shots of one decision use the same K sample keys (common random numbers, which lowers the variance of the comparison). Diagnosis re-runs (3.9) use the match key itself with channels masked, so they see exactly the noise of the real shot.
 
-**Stratified bags** (channels 5-9). Per shooter and channel, shot `n = ShooterShotIndex` uses bag `b = n / 8`, slot `j = n % 8`:
+**Streak-guarded draws** (channels 5-9 and 20-22; product-owner decision Q1, v1.2, replaces the bags of 8 of v1.1, which were predictable after 7 revealed draws). Per shooter key `S` and channel `c`, draw `n = ShooterShotIndex`:
 
 ```
-perm = [0..7]; for i = 7 down to 1: r = HashKeys(MatchSeed, ShooterId, Channel, b, 100 + i);
-                                    k = ((r >> 32) * (i + 1)) >> 32;  swap(perm[i], perm[k])
-u = (perm[j] + U01(HashKeys(MatchSeed, ShooterId, Channel, b, 200 + j))) / 8
-epsilon = TruncNormal(u)      (Flinch uses u directly)
+u(n, Sub) = U01(HashKeys(MatchSeed, S, c, n, Sub))                     candidate Sub = 0, 1, ..., 31
+H(n)      = the eighths floor(8 u) of the ACCEPTED draws max(0, n-7) .. n-1 of the same (S, c)
+u         = u(n, Sub) for the smallest Sub whose eighth occurs fewer than 2 times in H(n)
+fallback  (no Sub in 0..31 accepted, probability < (3/8)^32 = 2.4e-14): A = the allowed eighths ascending
+          (m = |A| >= 5), N = the 53-bit integer of u(n, 31) (u = N 2^-53); in exact integer arithmetic
+          P = m N (< 2^56), j = P >> 53, u = (A[j] 2^50 + ((P mod 2^53) >> 3)) 2^-53          (lies in eighth A[j])
+epsilon   = TruncNormal(u)      (Flinch uses u directly)
 ```
 
-With `Stratify = false`: `u = U01(HashKeys(MatchSeed, RackIndex, ShotIndex, ShooterId, Channel, 0))`. Bags are explained on the in-game "How it works" page.
+Draw 0 has an empty history, so the draw sequence of one `(MatchSeed, S, c)` is a pure function of `n` (the recursion from draw 0 is the definition; `NoiseHistory` in `rb/Human/NoiseHash.h` is its incremental cache, and a cache that does not match the key is rebuilt from draw 0, so it can never change a draw). The fallback is integer arithmetic because the floating-point form `(A[j] + (m u31 - j)) / 8` of v1.2 rounds `m u31` and can land in the excluded eighth `A[j] + 1` (`N` = 7205759403792793, `A` = {0, 1, 3, 5, 7} gives eighth 6; `streak.py`); no test value changes, the fallback never occurs in them. Properties: no eighth occurs more than twice in any 8 consecutive draws (a third occurrence in a window of 8 would have met two in its own last 7), so no run is longer than 2; at most 3 eighths are ever excluded (3 x 2 = 6 <= 7), so every candidate is accepted with probability >= 5/8 and the next draw is never known; the marginal distribution stays uniform (the rule is symmetric in the eighths). About 21 % of the draws need a redraw (HF-S01). With `StreakGuard = false`, and always for AI rollout keys (`Purpose` != 0), `u = u(n, 0)`: plain independent draws that never read the history, so rollouts sample the unconditional distribution and learn nothing the player could not see. The guard is explained on the in-game "How it works" page. Oracle: `Tools/reference/human-factors/streak.py`.
 
 **Watchable processes** (channels 1-4) are band-limited sums of `K = 6` cosines, evaluable at any time in O(K):
 
 ```
-f_k  = f_lo + (f_hi - f_lo) (k + U01(HashKeys(MatchSeed, RackIndex, ShotIndex, ShooterId, Channel, 2k))) / K
-ph_k = 2 pi U01(HashKeys(MatchSeed, RackIndex, ShotIndex, ShooterId, Channel, 2k + 1))
+f_k  = f_lo + (f_hi - f_lo) (k + U01(HashKeys(MatchSeed, RackIndex, ShotKey, ShooterId, Channel, 2k))) / K
+ph_k = 2 pi U01(HashKeys(MatchSeed, RackIndex, ShotKey, ShooterId, Channel, 2k + 1))
+ShotKey = uint64(ShotIndex) | (uint64(AddressIndex) << 32)       (= ShotIndex for the first get-down)
 D(t) = sqrt(2/K) SUM_k cos(2 pi f_k t + ph_k),   D'(t) = -sqrt(2/K) SUM_k 2 pi f_k sin(2 pi f_k t + ph_k)
 ```
 
-Unit mean square; drift band 0.15-0.6 Hz (slow enough to watch and time), tremor band 8-12 Hz. `t` is time since "down on the shot" from the input log, so identical input timing gives identical noise.
+Unit mean square; drift band 0.15-0.6 Hz (slow enough to watch and time), tremor band 8-12 Hz. `t` is time since "down on the shot" from the input log, so identical input timing gives identical noise. `AddressIndex` counts the earlier get-downs on this shot (input log): standing up and getting down again starts new processes, as a real hand would, so a dry run cannot reveal the drift of the next address (v1.3; with the v1.2 key the same `D(t)` repeated on every address). HF-T04 and HF-S03 use `AddressIndex` 0 and are unchanged.
 
 ### 3.3 Parameters and skill scaling
 
@@ -222,8 +230,9 @@ All values TUNING; the fit criterion is the routine budget 3.10. The 1-sigma val
 ### 3.4 Situation multipliers
 
 ```
+P_x     = P (1 - c_calm min(1, I / I_c))                pressure after the intoxication calm (I = Situation.Intoxication, 0 in V1)
 L_N     = L(Nerve; 0.125)
-g       = 1 + 4 P L_N                                   pressure gain (P = pressure in [0, 1])
+g       = 1 + 4 P_x L_N                                 pressure gain (P = pressure in [0, 1])
 m_br    = 1 + (m_br0(bridge) - 1) L(BridgeStability; 0.4)
 V_b     = V_b0(bridge) (1 + 0.6 (clamp(BridgeStability,0,100) - 25)/75) (Glove ? 1.15 : 1) (1 - 0.3 Sweat)
 m_slip  = 1 + 0.5 max(0, V_i - V_b)/V_b                 bridge slip on power shots
@@ -233,12 +242,15 @@ m_stick = 1 + 0.5 Sweat (Glove ? 0.2 : 1)
 m_fat   = 1 + 0.2 Fatigue;   m_off = OffHand ? 2.5 : 1
 m_rush  = 1 + 0.3 clamp(1 - T_pause/0.2 s, 0, 1)
 m_jab   = 1 + 0.5 clamp(-a_c/(10 m/s^2), 0, 1)
+m_alc   = 1 + k_dr max(0, I - I_c)/(1 - I_c);   m_alc,t = 1 + k_tr max(0, I - I_c)/(1 - I_c)      drift, tremor (Q2 hook)
 E(t)    = 1 + exp(-t/0.8 s) + min(0.5, 0.03 max(0, t - 10 s))            settle-in and long holds
 k_set(t): tau = t - t_s; 1 if t_s < 0 or tau < 0; 1 - 0.7 SmoothStep01(tau/1.2 s) for tau < 1.2 s;
           0.3 for tau < 5.2 s; 0.3 + 0.85 SmoothStep01((tau - 5.2 s)/1.5 s) afterwards (ends at 1.15)
 ```
 
-**Pressure** (UG computes it, same formula for the AI): `P = clamp(0.35 stakes + 0.25 gameBall + 0.15 hill + 0.10 crowd + 0.10 clock + 0.05 run, 0, 1)`, with stakes 0 practice / 0.3 friendly / 0.6 money or league / 1 final; gameBall = 1 when the shot can win the rack; hill = 1 when either player needs one rack; crowd = min(1, watchers/10); clock = elapsed/limit when a shot clock runs; run = min(1, run length/8). Hot-seat can switch pressure off for both players.
+**Pressure** (UG computes it, same formula for the AI): `P = clamp(0.35 stakes + 0.25 gameBall + 0.15 hill + 0.10 crowd + 0.10 clock + 0.05 run, 0, 1)`, with stakes 0 practice / 0.3 friendly / 0.6 league / 1 final, and for a money game (side bet or hustle, Q6) `stakes = 0.6 + 0.4 clamp((bet/cash - 0.1)/0.4, 0, 1)` with the shooter's in-game cash on hand before the bet (all in: 1; the AI uses its own bankroll, so a rich hustler feels less; `MoneyGameStakes`, TUNING); gameBall = 1 when the shot can win the rack; hill = 1 when either player needs one rack; crowd = min(1, watchers/10); clock = elapsed/limit when a shot clock runs; run = min(1, run length/8). Hot-seat can switch pressure off for both players.
+
+**Intoxication hook (Q2).** V1 ships alcohol as a prop, so `I = StrokeIntoxication(ProductConfig, level)` is 0 and `P_x = P`, `m_alc = m_alc,t = 1` exactly: every value of this spec is unchanged bit for bit. If the product owner later wants real drunkenness, `AlcoholMode::Mechanic` passes the game's intoxication level `I` in [0, 1] (from drinks and in-game time, UG) into the same formulas, for the player and the AI alike: one drink (`I <= I_c`) only calms (pressure gain, flinch and grip drop scale with `P_x`), more drinks add drift and tremor, both visible in the rendered cue (principle 1). Placeholders, inactive in V1: `I_c` 0.25, `c_calm` 0.5, `k_dr` 1, `k_tr` 1 (`HumanParams::Intoxication*`). Camera (UE 4.8): cosmetic V1 effects (bounded blur, vignette) run only while standing or walking, never while down on a shot and never on the cue, so they cannot degrade aiming without a visible cause; with the mechanic, any view sway while down must come from `SampleHand`'s drift (what you see is what hits).
 
 ### 3.5 Executed stroke (in this order)
 
@@ -248,18 +260,18 @@ x_St, x_ST, x_SC = Steadiness, SpinTouch, SpeedControl;  NS = HumanParams.NoiseS
 t = t_c
 
 # watchable channels (drawn continuously, 3.7)
-sigma_dr = sigma_drift L(x_St; 0.2) E(t) k_set(t) g^(1/3) m_br m_st m_head m_stick m_slip m_fat m_off
+sigma_dr = sigma_drift L(x_St; 0.2) E(t) k_set(t) g^(1/3) m_br m_st m_head m_stick m_slip m_fat m_off m_alc
 y_g  = NS sigma_dr D_lat(t)            grip lateral offset, + = shooter's right (e_r)
 z_g  = NS 0.5 sigma_dr D_vert(t)       grip vertical offset, + = up
-sigma_t = sigma_tr g k_set(t) m_fat m_off
+sigma_t = sigma_tr g k_set(t) m_fat m_off m_alc,t
 tr_r = NS sigma_t T_lat(t);  tr_u = NS sigma_t T_vert(t)      tip tremor [m]
 
-# per-shot channels (bagged, truncated)
+# per-shot channels (streak-guarded, truncated)
 sA  = hypot(sigma_A L(x_ST;.25), kappa_off L(x_ST;.25) A_i R) m_st m_rush m_head m_fat m_off
 sB  = hypot(sigma_B L(x_ST;.2),  kappa_off L(x_ST;.25) B_i R) m_st m_rush m_fat m_off
 sTh = sigma_theta L(x_ST;.25) m_br m_st m_slip m_fat m_off
 sV  = s_V L(x_SC;.3) (1 + 0.5 max(0, 1 - V_i/1)) m_rush m_jab sqrt(g) m_fat m_off
-fl  = NS P phi_fl L_N u_Flinch;    bias = -NS b_grip P L_N
+fl  = NS P_x phi_fl L_N u_Flinch;    bias = -NS b_grip P_x L_N
 
 # warp (equipment, not scaled by NS), section 4.4
 gamma = 4 s_w s_e / L_cue^2  (= k_w 4 s_w/L_cue, k_w = s_e/L_cue);  s_e = HumanParams.WarpSightLength
@@ -308,13 +320,13 @@ A flat or small tip therefore miscues at its edge before the friction limit, and
 
 ### 3.7 Visibility and rendering
 
-`SampleHand(t)` returns the grip-hand offset `(y_g(t), z_g(t))`, tip tremor, the warp pose and the ramped per-shot offsets, evaluated with the same functions, so **what you see is what hits**. Per-shot channels (tip placement, elevation, speed, flinch, grip bias) ramp in as `SmoothStep01((t - t_fwd)/0.1 s)` from the start of the final forward stroke `t_fwd`: visible in the rendered cue and in replays, too late to correct with the mouse. **Aborted strokes:** `t_fwd` is the start of a committed forward stroke (commit held; in Pure mode, any forward stroke that comes within 0.1 s of contact at its current speed). If a stroke has shown any part of the ramp and then stops without contact, those draws are spent: `ShooterShotIndex` advances and the next attempt uses the next bag slot. Otherwise a practice stroke would reveal the draw and let the player aim around it. The abort is in the input log, so this stays deterministic. The 1-euro filter stays visual-only (UE 5.4). Tremor at 8-12 Hz is rendered as sampled; aliasing is acceptable.
+`SampleHand(t)` returns the grip-hand offset `(y_g(t), z_g(t))`, tip tremor, the warp pose and the ramped per-shot offsets, evaluated with the same functions, so **what you see is what hits**. Per-shot channels (tip placement, elevation, speed, flinch, grip bias) ramp in as `SmoothStep01((t - t_fwd)/0.1 s)` from the start of the final forward stroke `t_fwd`: visible in the rendered cue and in replays, too late to correct with the mouse. **Aborted strokes:** `t_fwd` is the start of a committed forward stroke (commit held; in Pure mode, any forward stroke that comes within 0.1 s of contact at its current speed). If a stroke has shown any part of the ramp and then stops without contact, those draws are spent: `ShooterShotIndex` advances and the next attempt uses the next draw index (new candidates, 3.2). Otherwise a practice stroke would reveal the draw and let the player aim around it. The abort is in the input log, so this stays deterministic. The 1-euro filter stays visual-only (UE 5.4). Tremor at 8-12 Hz is rendered as sampled; aliasing is acceptable.
 
 **Pixel check (DERIVED, 1440p, vertical FOV 50 deg, 1544 px/rad, eye 0.46 m from the tip, UE 4.2):** 1 px at the tip = 0.30 mm. At attribute 25 the channels give: vertical tip placement 1.5 mm, 5 px; elevation 0.4 deg (tip moves 1.4 mm about the bridge), 5 px; drift, seen on the shaft 8 cm under the eye, 5 px; speed 5 %, 6 px per frame at 2 m/s. Two channels stay below a pixel: lateral tip placement (0.20 mm, 0.7 px) and tremor (0.03 mm, 0.1 px at rest and 0.5 px at `g` = 5). Their tells are the replay close-up and stroke report (placement) and the heartbeat/breath audio plus optional haptics that scale with `g` (tremor).
 
 ### 3.8 AI: synthetic hand (input layer) + the same human layer
 
-The planner outputs `(phi_p, theta_p, A_p, B_p, V_p, bridge)`. `SyntheticHand(profile, NoiseKey)` produces the `IntendedStroke` with the profile's input flaws, drawn from channels 20-27 (bagged like 3.2):
+The planner outputs `(phi_p, theta_p, A_p, B_p, V_p, bridge)`. `SyntheticHand(profile, NoiseKey)` produces the `IntendedStroke` with the profile's input flaws, drawn from channels 20-27 (20-22 streak-guarded like 3.2, 23-26 plain):
 
 ```
 phi_i = phi_p + bias_aim + sigma_aim eps20                   bias_aim: constant per character (vision centre; sign and size seeded, |bias_aim| <= profile value)
@@ -322,9 +334,10 @@ y_s   = sigma_steer eps21;  phi_i += y_s/L_bg;  A_i = A_p - y_s L_bc/(L_bg R)   
 v_r,i = -(y_s V_p / L_stroke) L_b/L_bg,  L_stroke = 0.15 m;   B_i = B_p;  theta_i = theta_p     (v_r,i: animation only)
 V_i   = V_p (1 + sigma_spd eps22);  T_pause = pause_mean (0.7 + 0.6 U23);  a_c = U24 < p_jab ? -5 : 0
 t_c   = 1.5 + 1.5 U25 s;  t_s = (uses Settle and P > 0.4) ? t_c - 2 s : -1;  HeadMoved = U26 < p_head
+t_fwd = t_c - max(0.1 s, 2 L_stroke / V_p)                    (uniformly accelerated final stroke; rendering only, 3.7)
 ```
 
-`U_c = U01(HashKeys(MatchSeed, RackIndex, ShotIndex, ShooterId, c, 0))`. Then `ExecuteStroke` runs with the AI's own attributes and pressure. Profile values are in 5.5. Weak AIs plan with a simplified model (no throw, squirt, swerve, tilt, nominal ball masses) and assume perfect execution; strong AIs score candidates over `K` samples of their own noise using the rollout keys of 3.2 (`Purpose = 1 + s`, sample `s`), i.e. "percentage play".
+`U_c = U01(HashKeys(MatchSeed, RackIndex, ShotIndex, ShooterId, c, 0))`. `t_fwd` puts the AI's per-shot ramp into its final stroke, as for the player (without it the AI's tip would show its per-shot offsets for the whole time down). Then `ExecuteStroke` runs with the AI's own attributes and a situation built like the player's (pressure incl. money-game stakes, fatigue, intoxication). Profile values are in 5.5. Weak AIs plan with a simplified model (no throw, squirt, swerve, tilt, nominal ball masses) and assume perfect execution; strong AIs score candidates over `K` samples of their own noise using the rollout keys of 3.2 (`Purpose = 1 + s`, sample `s`), i.e. "percentage play".
 
 ### 3.9 Counterfactual diagnosis (after every shot)
 
@@ -336,16 +349,18 @@ A shot costs about 100 us (ARCH 1), so the game re-runs the missed shot up to 5 
 
 | Case | Budget | House cue, m/m_e 15 (HF-S04..S06) | Standard own cue, m/m_e 20 | LD shaft, m/m_e 40 |
 |---|---|---|---|---|
-| B1: P = 0, no Settle, attributes 25 | <= 3 % | 1.06 % (CB direction sigma 0.041 deg) | 1.07 % | 3.77 % (trade-off, see below) |
+| B1: P = 0, no Settle, attributes 25 | <= 3 % | 1.07 % (CB direction sigma 0.041 deg) | 1.15 % | 3.71 % (trade-off, see below) |
 | B1: P = 0, attributes 100 | <= 0.3 % | 0.00 % (0.0115 deg) | 0.00 % | 0.00 % |
-| B2: P = 1, Settle held at contact, 25 | <= 3 % | 1.82 % | 1.98 % | 4.79 % |
-| B3: P = 1, no Settle, 25 | <= 10 % | 6.55 % | 8.78 % | 21.6 % |
-| Info: attributes 10 (tourist AI) | - | 6.72 % | - | - |
-| Info: elevated bridge, stance 0.5, 25 | - | 16.8 % | - | - |
+| B2: P = 1, Settle held at contact, 25 | <= 3 % | 1.99 % | 2.20 % | 4.97 % |
+| B3: P = 1, no Settle, 25 | <= 10 % | 6.62 % | 9.00 % | 21.7 % |
+| Info: attributes 10 (tourist AI) | - | 6.55 % | - | - |
+| Info: elevated bridge, stance 0.5, 25 | - | 16.9 % | - | - |
 
-**The budgets must hold for every cue a player can hold at that profile.** The drift yaw is cancelled by squirt only near the natural pivot (3.5: 79 % for the house cue, 62 % standard, 34 % LD). The first fit covered only the house cue, and with the standard own cue B2/B3 came out at 3.6 % and 15.1 % (drift gain `sqrt(g)`). The drift pressure gain is therefore `g^(1/3)`; calm-play values are unchanged. The LD shaft (a reputation-tier unlock) misses the start-profile budgets. That is its disclosed trade-off (5.3, notebook: "the LD shaft forgives less of a wandering stroke"). At Steadiness 40 it drops to 0.28 % (B1).
+Values of v1.2 (streak-guarded draws, 3.2); with the v1.1 bags every entry was within 0.25 percentage points.
 
-Budget model: the net cue-ball direction error is `phi_x - phi_i + alpha_sq(a)` (HF-S04..S06 use the house cue, m/m_e = 15); the pot fails when `|error| d_CO / (2 R cos 30 deg)` exceeds 2.0 deg (bar corner pocket at 1 m, effective half-window [DD-POCKET]). The release test **HF-B02** re-checks the budget with the full core (squirt, throw, swerve, cushions) over 10^5 shots per profile and per cue class (m/m_e 15 and 20; LD reported). The same model gives the miscue rate on a maximum draw (`b` aimed at -0.45, fresh chalk, V = 2 m/s): 15.2 % at attribute 10, 7.8 % at 25, 2.7 % at 40, 0 % from 60 up (HF-S05). **Misses from the human layer shrink with skill but never reach exactly zero on hard shots** (long thin cuts, awkward bridges).
+**The budgets must hold for every cue a player can hold at that profile.** The drift yaw is cancelled by squirt only near the natural pivot (3.5: 79 % for the house cue, 62 % standard, 34 % LD). The first fit covered only the house cue, and with the standard own cue B2/B3 came out at 3.6 % and 15.1 % (drift gain `sqrt(g)`). The drift pressure gain is therefore `g^(1/3)`; calm-play values are unchanged. The LD shaft (a reputation-tier unlock) misses the start-profile budgets. That is its disclosed trade-off (5.3, notebook: "the LD shaft forgives less of a wandering stroke"; accepted without an unlock gate, Q7). At Steadiness 40 it drops to 0.27 % (B1).
+
+Budget model: the net cue-ball direction error is `phi_x - phi_i + alpha_sq(a)` (HF-S04..S06 use the house cue, m/m_e = 15); the pot fails when `|error| d_CO / (2 R cos 30 deg)` exceeds 2.0 deg (bar corner pocket at 1 m, effective half-window [DD-POCKET]). The release test **HF-B02** re-checks the budget with the full core (squirt, throw, swerve, cushions) over 10^5 shots per profile and per cue class (m/m_e 15 and 20; LD reported). The same model gives the miscue rate on a maximum draw (`b` aimed at -0.45, fresh chalk, V = 2 m/s): 15.2 % at attribute 10, 8.1 % at 25, 2.6 % at 40, 0 % from 60 up (HF-S05). **Misses from the human layer shrink with skill but never reach exactly zero on hard shots** (long thin cuts, awkward bridges).
 
 ### 3.11 Core contract changes (sign-off per ARCH 2, rule 11)
 
@@ -353,7 +368,7 @@ Budget model: the net cue-ball direction error is `phi_x - phi_i + alpha_sq(a)` 
 |---|---|---|
 | **None to MOT B.4.** The earlier proposal "MOT B.4a `TipTransverseVelocity`" (friction cone tilted by the tip's sideways velocity) is withdrawn. It contradicts the impulse-along-the-axis model of MOT B.5, in which the tip carries no transverse momentum, and it overstated the effect about 15 times (HF-11, 9.2 item 1). A physically consistent V2 option would add the transverse push of the shaft end mass, `dv_CB = v_t / (m/m_e + 1 + 1/k)` for a centre hit (DERIVED, about 0.1 deg per 5 cm/s at 1 m/s), and needs a WP-1 derivation for off-centre hits | - | - |
 | `CueSpec` fields are filled per stroke from `TipState` (`TipFriction`, `TipDomeRadius`, `TipRestitution`); `TipTouchesCloth` is set from the executed pose | WP-11 | none |
-| New package `rb/Human/{NoiseHash.h, HumanModel.h, TipState.h, CueState.h, Progression.h}` (directory layout is WP-0's); depends on Core, Math, `Physics/CueStrike.h`, `Equipment/Cue.h`; never included by the event loop or by rules | WP-11 (+ WP-0 sign-off) | - |
+| New package `rb/Human/{NoiseHash.h, Skill.h, TipState.h, CueState.h, BallMarks.h, HumanModel.h, AiProfiles.h, Chores.h, Progression.h, Venue.h}` (ARCH 7.5; directory layout is WP-0's); depends on Core, Math, Equipment, `Physics/CueStrike.h` and, for the after-shot update, the diagnosis overrides and the venue condition, `Physics/BallBall.h`, `ShotResult.h`, `Simulator.h`; never included by the event loop, the shot record or the rules (checked by the root CMake) | WP-11 (+ WP-0 sign-off) | - |
 | `SyntheticHand` + static check "AI builds strikes only via ExecuteStroke" (HF-B07) | WP-11 / AI | - |
 
 ---
@@ -426,7 +441,7 @@ cling at a ball-ball contact (V2 physics): for each ball i, delta_ij = angle bet
     identical for k_venue = 1)
 ```
 
-A random orientation puts a single 2.5 mm mark on the contact with an expected weight of 0.19 % (DERIVED, = `r^2/(4R^2)`); straight follow shots keep the mark on the travel great circle, so it comes back far more often, as players report [DD-CLING]. **Core additions (V2):** `SimBall::ChalkMarks`; the simulator integrates orientation of marked balls inside the loop (move `IntegrateSegmentOrientation` from Playback into WP-1); `BallBallParams::ClingFactor` becomes `k_venue`; switch `PhysicsParams::ChalkCling` (default off, so all COL tests are unchanged).
+A random orientation puts a single 2.5 mm mark on the contact with an expected weight of 0.19 % (DERIVED, = `r^2/(4R^2)`); straight follow shots keep the mark on the travel great circle, so it comes back far more often, as players report [DD-CLING]. **Core additions (V2):** `SimBall::ChalkMarks`; the simulator integrates orientation of marked balls inside the loop (ARCH v1.2: with the orientation law of `Playback.h`, which the loop already uses, instead of moving it into WP-1; ARCH 15 row 28); `BallBallParams::ClingFactor` becomes `k_venue`, `BallBallParams::ChalkClingFactor` is `k_chalk`; switch `PhysicsParams::ChalkCling` (default off, so all COL tests are unchanged).
 
 ### 4.4 House cues and warp
 
@@ -515,7 +530,7 @@ Rolling only: `G_eff = (5/7) g_t + zeta_n g n_nap` (a pseudo-slope; the pursuit 
 
 #### 4.5.7 Contract additions (WP-0 / WP-1 / WP-5 / WP-6a)
 
-`PhysicsParams::TableTilt { Vec2 Slope = 0; double Tolerance = 5e-5; double RefreshMaxInterval = 2.0; Vec2 NapPseudoSlope = 0; double NapResistance = 0; }`; `ValidatePhysicsParams` checks `|s| <= 0.7 mu_r`; `MotionSegment` stores the pursuit data of its chain (`x_i`, `k`, `G`, `c_s`, end kind) (WP-1); `QueuedEventKind::TiltRefresh` and the exact re-anchor of events inside tilt segments (WP-6a); `Math/Scalar.h`: `Expm1` (WP-0). Detection (WP-5) is unchanged: segments stay quadratic. With `Slope = 0` every existing MOT/COL/VAL test is untouched (HF-B10).
+`PhysicsParams::TableTilt { Vec2 Slope = 0; double Tolerance = 5e-5; double RefreshMaxInterval = 2.0; Vec2 NapPseudoSlope = 0; double NapResistance = 0; }` (ARCH v1.2: `PhysicsParams::Tilt` of type `rb::TiltParams`, `Motion.h`; the venue table's slope and ball cling arrive through `rb::TableCondition` and `MakePhysicsParams(Spec, Condition)`); `ValidatePhysicsParams` checks `|s| <= 0.7 mu_r`; `MotionSegment` stores the pursuit data of its chain (`x_i`, `k`, `G`, `c_s`, end kind) (WP-1); `QueuedEventKind::TiltRefresh` and the exact re-anchor of events inside tilt segments (WP-6a); `Math/Scalar.h`: `Expm1` (WP-0). Detection (WP-5) is unchanged: segments stay quadratic. With `Slope = 0` every existing MOT/COL/VAL test is untouched (HF-B10).
 
 ### 4.6 Racks
 
@@ -537,7 +552,7 @@ Rack quality `Q` in [0, 1] (R-mode: from the push-and-lift motion, lifting fast 
 
 ### 5.1 Attributes
 
-Six execution attributes on 0-100, one noise family each (3.3): **Steadiness** (drift), **Speed Control**, **Spin Touch** (tip placement, elevation), **Bridge Stability** (bridge factor, slip threshold), **Stance**, **Nerve** (pressure gain, flinch, grip tension). A new career starts at 25; a touring pro sits at 85-95. Skill never decays. Every 10 points multiply a channel by the same factor, so progress feels even. Attribute numbers appear only on the league card and one menu page (open question 3). **Habits** (chalk sweep, auto re-chalk after spin shots, ball wiping, warp check, sleeve tuck, rack quality) grow by doing the chore well in R mode (+0.02 per good execution, saturating at 1) and then show as automatic behaviour. **Knowledge** is not a stat for the player: the notebook records facts on first experience ("The big bar ball draws less", "Table 2 rolls toward the jukebox").
+Six execution attributes on 0-100, one noise family each (3.3): **Steadiness** (drift), **Speed Control**, **Spin Touch** (tip placement, elevation), **Bridge Stability** (bridge factor, slip threshold), **Stance**, **Nerve** (pressure gain, flinch, grip tension). A new career starts at 25; a touring pro sits at 85-95. Skill never decays. Every 10 points multiply a channel by the same factor, so progress feels even. Attribute numbers are hidden (decided, Q3): progression is fully diegetic (steadier stroke, mentor remarks, notebook); the `ProductConfig::Attributes` switch that would show them on the league card and one menu page stays only for a later change of mind. **Habits** (chalk sweep, auto re-chalk after spin shots, ball wiping, warp check, sleeve tuck, rack quality) grow by doing the chore well in R mode (+0.02 per good execution, saturating at 1) and then show as automatic behaviour. **Knowledge** is not a stat for the player: the notebook records facts on first experience ("The big bar ball draws less", "Table 2 rolls toward the jukebox").
 
 ### 5.2 XP sources (graded by core data)
 
@@ -548,7 +563,7 @@ Six execution attributes on 0-100, one noise family each (3.3): **Steadiness** (
 | Spin shots with rho >= 0.3, no miscue, intended draw/follow distance achieved within 20 % (core states) | Spin Touch | `8 rho / 0.3` |
 | Power shots and breaks (balls to the rail, cue ball controlled) | Bridge Stability | 5-15 |
 | Stretch, rail and over-ball bridge shots made | Stance | `10 d_s` |
-| Makes at P >= 0.5 in real matches | Nerve | `15 P`; never from drills |
+| Makes at P >= 0.5 in real matches (league, tournament, money games) | Nerve | `15 P`; never from drills |
 | Drills (stop-shot ladder, speed ladder, spot shot, line-up, draw gates) | targeted | tiered; first clear of a tier pays 10x |
 | Matches, won or lost | all, small | losses pay 60 % |
 
@@ -564,7 +579,7 @@ Cost of the next point: `100 x 1.08^(x - 25)` XP, i.e. 25 -> 40: 2,715 XP, 25 ->
 | Chalk grades | cash | 4.1 | cost only |
 | Tip tool (scuffer, shaper) | cheap | enables scuff and shape chores | over-shaping shortens tip life |
 | Bridge glove | cash | V_b x1.15, sweat x0.2 | - |
-| Low-deflection shaft | reputation tier + cash | `m/m_e` 20 -> 40 | aim habits change (natural pivot 0.68 m); forgives less of a wandering stroke (3.10: 3.8 % routine misses at Steadiness 25 vs 1.1 %; 0.3 % at 40), disclosed in the shop and notebook |
+| Low-deflection shaft | reputation tier + cash | `m/m_e` 20 -> 40 | aim habits change (natural pivot 0.68 m); forgives less of a wandering stroke (3.10: 3.7 % routine misses at Steadiness 25 vs 1.1 %; 0.3 % at 40), disclosed in the shop and notebook; no unlock gate (Q7) |
 | Break cue (phenolic), jump cue | cash | `e_tip` 0.85; jumps where rules allow | poor for spin; banned by some bar rules |
 | Techniques: closed bridge, rail bridge, elevated bridge, jump/masse stroke, break stance | mentor lesson + drill | selects the bridge type with lower `m_br0` / higher `V_b0` | - |
 
@@ -595,17 +610,17 @@ Ratings on a fictional logarithmic scale (+100 points = 2:1 in games), fitted wi
 | Tourist | ~250 | 15 all, Nerve 10 | 0.20 deg, 0.25 deg, 3 mm, 20 %, 0.1 s, 0.4, 0.4 | 0.2, 0.2, no | pots only, level-table model, assumes perfect execution |
 | Bar regular | ~400 | 35 all, Nerve 40 | 0.10, 0.12, 1.5 mm, 12 %, 0.25 s, 0.2, 0.2 | 0.5, 0.5, no | next-ball position; **knows this table's slope**; hits hard |
 | League player | ~500 | 50 all | 0.05, 0.05, 0.8 mm, 7 %, 0.4 s, 0.05, 0.1 | 0.8, 0.7, yes | 2-ball plans, some safeties, models throw and squirt |
-| Local hustler | ~600 | 65 all, Nerve 80 | 0.035, 0.02, 0.5 mm, 5 %, 0.5 s, 0, 0.05 | 0.95, 0.2 in money games, yes | 3-ball plans, sandbags until money is down (a visible choice) |
+| Local hustler | ~600 | 65 all, Nerve 80 | 0.035, 0.02, 0.5 mm, 5 %, 0.5 s, 0, 0.05 | 0.95, 0.2 in money games, yes | 3-ball plans, sandbags until money is down (a visible choice; money games are in, Q6; off only with `MoneyGames::LeaguePrizeOnly`) |
 | Road player | ~680 | 75 all | 0.025, 0.01, 0.35 mm, 4 %, 0.5 s, 0, 0 | 1.0, 0.9, yes | full safety and kicking game, K = 8 self-noise samples |
 | Touring pro | 750+ | 90 all | 0.015, 0, 0.2 mm, 3 %, 0.6 s, 0, 0 | 1.0, 1.0, yes | full model, K = 16, uses Settle on pressure shots |
 
-The AI reads only what the player could see (no future seeds, no bag state). Its flaws are drawn at animation scale (jab, loose bridge, skipped chalk), so opponents can be scouted. Hot-seat guests use a 50-all profile and gain no career XP (open question 4).
+The AI reads only what the player could see (no future seeds; its rollout samples draw without the streak history, 3.2). Its flaws are drawn at animation scale (jab, loose bridge, skipped chalk), so opponents can be scouted. Hot-seat guests play at 50 in every attribute and gain no career XP (decided, Q4).
 
 ---
 
 ## 6. Test cases
 
-Tolerances: "exact" = +-1 unit in the last listed digit (as MOT); integer and hash values bit-exact; process and stroke values 1e-9 relative (transcendental functions through `rb/Math/Scalar.h`). Common stroke setup **S0**: `R` = 0.028575 m; fresh standard tip (`r_dome` 0.0106, `w_tip` 0.01275, `mu` 0.6/0.35, all `c_z` = 1, no overhang); straight cue (`WarpKnown`); `IntendedStroke {phi 0, theta 3 deg, A 0, B 0, V 2 m/s, v_r = v_u = 0, t_c 2.5 s, no Settle, pause 0.4 s, a_c 0, no head move}`; situation closed bridge, `L_b` 0.20 m, `L_bg` 0.80 m, `d_s` 0, P = F = S = 0; key `{MatchSeed 0x5EED, Rack 0, Shot 0, Shooter 1, ShooterShot 0, Pickup 0}`.
+Tolerances: "exact" = +-1 unit in the last listed digit (as MOT); integer and hash values bit-exact; process and stroke values 1e-9 relative (transcendental functions through `rb/Math/Scalar.h`). Common stroke setup **S0**: `R` = 0.028575 m; fresh standard tip (`r_dome` 0.0106, `w_tip` 0.01275, `mu` 0.6/0.35, all `c_z` = 1, no overhang); straight cue (`WarpKnown`); `IntendedStroke {phi 0, theta 3 deg, A 0, B 0, V 2 m/s, v_r = v_u = 0, t_c 2.5 s, no Settle, pause 0.4 s, a_c 0, no head move}`; situation closed bridge, `L_b` 0.20 m, `L_bg` 0.80 m, `d_s` 0, P = F = S = 0; key `{MatchSeed 0x5EED, Rack 0, Shot 0, Shooter 1, ShooterShot 0, Pickup 0, Purpose 0, Address 0}`.
 
 ### 6.1 Deterministic, exact
 
@@ -613,11 +628,11 @@ Tolerances: "exact" = +-1 unit in the last listed digit (as MOT); integer and ha
 |---|---|---|
 | HF-T01 Hash | `Mix64(0)`; `HashKeys(1,2,3)`; `HashKeys(0x5EED,0,0,1,5,0)` | `0xE220A8397B1DCDAF`; `0xCD8D705991914EA1`; `0x735A7BD1020B7AA3`, `U01` = 0.45059942105039663 |
 | HF-T02 InvNorm | `InvNorm(0.975)`, `(0.02)`, `(0.5)`; `TruncNormal(0)`, `(1)` | 1.959963986; -2.053748909; 0; -2.500000003; +2.500000003 |
-| HF-T03 Bags | seed 0x5EED, shooter 1, channel 5 | bag 0 perm [7,2,1,0,3,6,5,4], bag 1 perm [6,5,2,7,4,1,3,0]; n=0: u 0.886118288553, eps 1.181626120615; n=3: eps -1.301025228812; n=15: eps -1.290035935721 |
+| HF-T03 Streak guard | seed 0x5EED, shooter 1, channel 5, draws n = 0..15 | eighths [7,5,3,0,4,5,1,4,7,6,7,0,5,5,2,2]; Sub 0 except n = 8 (Sub 2) and n = 11 (Sub 1); n=0: u 0.973406374675, eps 1.845629422572; n=3: eps -1.340126013891; n=8: u 0.962396260752, eps 1.713107401759; n=11: eps -2.169666181062; n=15: eps -0.347111524623; the history rebuilt from n = 0 equals the incremental one |
 | HF-T04 Processes | S0 key, t = 2.5 s | `D_lat` = 0.230366244591, `D_lat'` = -3.986599586190; `T_lat` = -0.601466481787, `T_lat'` = 33.890273864740 |
-| HF-T05 Full stroke, attributes 25 | S0 | `phi_x` 2.705488099e-4; `theta_x` 0.04542939137; `A_x` 0.005474734399; `B_x` 0.0236292515; `V_x` 2.135377534; `v_r` 0.001953103889; `v_u` -9.111677241e-4 (tip velocity, output only); `(a,b)` (0.003993376783, 0.01723563144); `mu` 0.6; no miscue. Channels: `y_g` 2.164390e-4, `z_g` 5.178315e-4, `eps_A` 1.181626121, `eps_B` 0.585275766, `eps_El` -1.085436397, `eps_V` 1.353775335, `E` 1.043936934 |
-| HF-T06 Pressure + Settle | S0 with P = 1, `t_s` = 0.8 s | `g` 5, `k_set` 0.3, flinch 0.039537; `phi_x` 1.387895872e-4; `theta_x` 0.04511415677; `A_x` 0.006212962469; `B_x` -0.02730065429; `V_x` 2.21167099 (drift gain `g^(1/3)`) |
-| HF-T07 Attributes 100 | S0, all 100 | `phi_x` 5.410976197e-5; `theta_x` 0.05059489154; `A_x` 0.001003295634; `B_x` 0.003192940687; `V_x` 2.04061326 |
+| HF-T05 Full stroke, attributes 25 | S0 | `phi_x` 2.705488099e-4; `theta_x` 0.05293479862; `A_x` 0.01012217658; `B_x` 0.001521750879; `V_x` 2.034073630; `v_r` 0.001953103889; `v_u` -9.111677241e-4 (tip velocity, output only); `(a,b)` (0.007383310679, 0.001109994419); `mu` 0.6; no miscue. Channels: `y_g` 2.164390e-4, `z_g` 5.178315e-4, `eps_A` 1.845629423, `eps_B` 0.164127879, `eps_El` -0.01036599996, `eps_V` 0.340736300, `E` 1.043936934 |
+| HF-T06 Pressure + Settle | S0 with P = 1, `t_s` = 0.8 s | `g` 5, `k_set` 0.3, flinch 0.072544; `phi_x` 1.387895872e-4; `theta_x` 0.05261956401; `A_x` 0.01086040465; `B_x` -0.04940815491; `V_x` 1.925576035 (drift gain `g^(1/3)`) |
+| HF-T07 Attributes 100 | S0, all 100 | `phi_x` 5.410976197e-5; `theta_x` 0.05247124335; `A_x` 0.002165156180; `B_x` -0.001228559438; `V_x` 2.010222089 |
 | HF-T08 Identity | S0, `NoiseScale` 0 | outputs equal inputs bit-exactly (`theta_x` = 3 deg, `A_x` = `B_x` = 0, `V_x` = 2), `mu` 0.6 |
 | HF-T09 Pivot / natural pivot | `y_g` = 1 mm; yaw 1e-3 rad through MOT B.7 squirt | `yaw` 1.25e-3 rad, `A` shift -0.009998906; `L_p` = 0.289895 / 0.368245 / 0.681645 m for m/m_e 15/20/40; net/yaw at `L_bc = L_p` < 2e-4; at `L_bc` 0.228575 m: 0.211535 / 0.379294 / 0.664677 |
 | HF-T10 Warp | `s_w` 3 mm, `L` 1.4478 m, `s_e` 0.45 m, S0 key, unknown roll; then `WarpKnown` | `gamma` 2.576182438e-3 rad; `chi` 5.442345308 rad, `dphi_w` -1.919780235e-3, `dth_w` 1.717894002e-3; known: `dphi_w` 0, `dth_w` 2.576182438e-3 |
@@ -633,12 +648,12 @@ Tolerances: "exact" = +-1 unit in the last listed digit (as MOT); integer and ha
 
 | ID | Setup | Expected |
 |---|---|---|
-| HF-S01 Truncated moments | 80 000 bagged draws, seed 0x5EED, shooter 3, channel 8 | mean -0.000247 (+-0.01), sd 0.955868 (theory 0.954597, +-0.005), max \|eps\| <= 2.5000001 |
-| HF-S02 Bag coverage | first 4000 draws of HF-S01 | every aligned block of 8 covers bins 0-7; no bin more than twice in any 8 consecutive shots; longest run of the worst bin 2 |
+| HF-S01 Truncated moments | 80 000 streak-guarded draws, seed 0x5EED, shooter 3, channel 8 | mean -0.001307 (+-0.01), sd 0.954631 (theory 0.954597, +-0.005), max \|eps\| <= 2.5000001; 16 671 draws (20.84 %) needed a redraw, largest `Sub` 9 |
+| HF-S02 Streak cap | first 4000 draws of HF-S01 | no eighth more than twice in any 8 consecutive draws (hence no run longer than 2); every eighth drawn 473-519 times (500 +- 30); 824 draws redrawn; every draw equals the draw of the history rebuilt from n = 0 |
 | HF-S03 Process RMS | `D_lat`, `T_lat`, S0 key, 1 kHz over 600 s | 0.99894 and 1.00011 (1 +- 0.03) |
-| HF-S04 Routine budget | budget model 3.10 (m/m_e 15), S0 except: 20 000 shots i = 0..19 999 with key {0xB00D, Rack i/20, Shot i, Shooter 1, ShooterShot i}, `t_c = 1.5 + 2.5 U01(HashKeys(99, i))`, V 1.5 m/s | attributes 25: 212 misses (1.06 %); 10: 1344; 40, 60, 85, 100: 0 |
-| HF-S05 Max-draw miscues | S0 except `B_i` = -0.61693 (`b` = -0.45), key {0xD4A3, Rack i/20, Shot i, Shooter 2, ShooterShot i}, `t_c = 1.5 + 2.5 U01(HashKeys(98, i))`, 20 000 shots | miscue = executed `rho` > `rho_max` (no swoop term): attributes 10: 3034 / 20 000; 25: 1566; 40: 538; 60, 85, 100: 0 |
-| HF-S06 Pressure | as HF-S04, attributes 25, P = 1 | no Settle: 1310 (6.55 %); Settle (`t_s = t_c - 2 s`): 364 (1.82 %); P = 0 with Settle: 80 (0.40 %). Same with m/m_e 20: 1756 (8.78 %), 395 (1.98 %); m/m_e 40: 4325, 958, and 753 at P = 0 |
+| HF-S04 Routine budget | budget model 3.10 (m/m_e 15), S0 except: 20 000 shots i = 0..19 999 with key {0xB00D, Rack i/20, Shot i, Shooter 1, ShooterShot i}, `t_c = 1.5 + 2.5 U01(HashKeys(99, i))`, V 1.5 m/s | attributes 25: 214 misses (1.07 %); 10: 1310; 40: 3; 60, 85, 100: 0 |
+| HF-S05 Max-draw miscues | S0 except `B_i` = -0.61693 (`b` = -0.45), key {0xD4A3, Rack i/20, Shot i, Shooter 2, ShooterShot i}, `t_c = 1.5 + 2.5 U01(HashKeys(98, i))`, 20 000 shots | miscue = executed `rho` > `rho_max` (no swoop term): attributes 10: 3039 / 20 000; 25: 1617; 40: 516; 60, 85, 100: 0 |
+| HF-S06 Pressure | as HF-S04, attributes 25, P = 1 | no Settle: 1324 (6.62 %); Settle (`t_s = t_c - 2 s`): 397 (1.99 %); P = 0 with Settle: 80 (0.40 %). Same with m/m_e 20: 1800 (9.00 %), 439 (2.20 %); m/m_e 40: 4337, 994, and 741 at P = 0 without Settle |
 | HF-S07 Cling weight | one mark, strength 1, radius 2.5 mm; contact at 0 / 0.05 / 0.1 rad | `k_cling` 2.5 / 2.082045 / 1.406170 (`k_venue` 1); random orientation mean weight 0.0019 +- 0.0002 |
 
 ### 6.3 Behavioural acceptance
@@ -662,15 +677,19 @@ Tolerances: "exact" = +-1 unit in the last listed digit (as MOT); integer and ha
 
 ---
 
-## 7. Open questions for the product owner
+## 7. Product-owner decisions
 
-1. **Stratified bags:** keep them (disclosed on a "How it works" page) or use plain independent draws? Bags remove bad-luck streaks, but a fixed bag of 8 is predictable: after 7 revealed draws (replays and the stroke report show them), the 8th stratum of every bagged channel is known, and a tool reading the replay header could tell the player "next shot: tip lands low". Alternative that keeps the streak cap without a predictable slot: an independent draw is redrawn (`Sub` + 1, deterministic) whenever its eighth already occurs twice in the shooter's last 7 draws. At most 3 eighths are ever excluded, so the next draw is never known, and "no eighth more than twice in any 8" still holds (HF-S02 would be restated; HF-T03 and HF-S01 recomputed).
-2. **Alcohol** as a mechanic in the dive bar (one beer calms Nerve, three hurt Steadiness), or cosmetic only for V1 because of PEGI/ESRB descriptors?
-3. **Attribute numbers:** show them on the league card and one menu page, or keep progression fully diegetic (stroke steadier, mentor remarks)?
-4. **Hot-seat:** guests at 50 in every attribute without career XP (proposal), or both players use career profiles?
-5. **Default chores:** Full for the first visit of each venue and Brisk afterwards (proposal), or Brisk from the start?
-6. **Money games** with in-game cash (hustling, side bets): acceptable given the simulated-gambling descriptors, or limited to league prize money?
-7. **Low-deflection shaft trade-off:** accept that it raises start-profile routine misses from 1.1 % to 3.8 % (3.10) as a disclosed, physically real trade-off, or gate its unlock behind Steadiness 40, where the difference disappears?
+All seven questions are answered (2026-09-26: Q1, Q4, Q5, Q7 in v1.2, log 9.4; Q2, Q3, Q6 in v1.3, log 9.5). Each answer is one value of `rb::human::ProductConfig` (`rb/Human/Progression.h`) or `HumanParams::StreakGuard`, so a later change of mind is a configuration change, not a code change.
+
+| # | Question | Status | Decision, or default while open |
+|---|---|---|---|
+| 1 | **Stratified bags** or plain independent draws? A fixed bag of 8 is predictable: after 7 revealed draws (replays and the stroke report show them) the 8th stratum of every bagged channel is known, and a tool reading the replay header could tell the player "next shot: tip lands low". | **Decided** | Neither: **streak-guarded independent draws** (the verifier's alternative). An independent draw is redrawn (`Sub` + 1, deterministic) whenever its eighth already occurs twice in the shooter's last 7 draws of that channel (3.2). At most 3 eighths are ever excluded, so the next draw is never known, and "no eighth more than twice in any 8" still holds. HF-S02 was restated, HF-T03 and HF-S01 recomputed, and every other draw-dependent value (HF-T05..T07, HF-S04..S06, 3.10, 5.3) recomputed with `Tools/reference/human-factors/streak.py` and `recompute_v12.py`. `HumanParams::StreakGuard` (default on) replaces `Stratify`; rollout keys never read the streak history. |
+| 2 | **Alcohol** as a mechanic in the dive bar (one beer calms Nerve, three hurt Steadiness), or cosmetic only for V1 because of PEGI/ESRB descriptors? | **Decided** (v1.3) | **Cosmetic only for V1** (`AlcoholMode::CosmeticOnly`, default): drinks are props, `StrokeIntoxication` returns 0, and the UE camera effects (blur, vignette) run only while standing or walking, never while down on a shot or on the cue (HF-20). The owner may want real drunkenness later, so the hook exists now: `StrokeSituation::Intoxication` (3.4) calms the pressure gain at one drink and adds drift and tremor beyond it, for the player and the AI alike; `AlcoholMode::Mechanic` switches it on with placeholder effect sizes (`HumanParams::Intoxication*`) to be specified then. Adding the mechanic is a switch plus tuning, no core redesign; with `I` = 0 every value of this spec is bitwise unchanged. |
+| 3 | **Attribute numbers:** show them on the league card and one menu page, or keep progression fully diegetic (stroke steadier, mentor remarks)? | **Decided** (v1.3) | **Hidden**: progression is fully diegetic (`AttributeVisibility::Hidden`, default; 5.1). `LeagueCardAndMenu` stays as a switch only. |
+| 4 | **Hot-seat:** guests at 50 in every attribute without career XP, or both players use career profiles? | **Decided** | Guests play at **50 in every attribute** and earn **no career XP** (`HotSeatGuestAttribute` 50, `HotSeatGuestEarnsXp` false). Fatigue stays off in hot-seat (HF-16); pressure can be switched off for both players (3.4). |
+| 5 | **Default chores:** Full for the first visit of each venue and Brisk afterwards, or Brisk from the start? | **Decided** | **Full on the first visit of each venue, Brisk afterwards** (`FirstVisitChores`, `ReturnVisitChores`); the player can change the setting at any time (principle 9). |
+| 6 | **Money games** with in-game cash (hustling, side bets): acceptable given the simulated-gambling descriptors, or limited to league prize money? | **Decided** (v1.3) | **Yes: side bets and hustling with in-game cash** (`MoneyGames::SideBetsAndHustling`, default). In-game cash is never bought with real money and never cashed out (5.3: nothing bought with real money changes cash); a possible simulated-gambling content descriptor is accepted. A money game feeds the pressure scalar through its stakes, from 0.6 for a small bet to 1 when half the shooter's cash or more is on the table (`MoneyGameStakes`, 3.4), counts as a real match for Nerve XP (5.2), and enables the hustler's sandbagging and loose racks (5.5, 4.6). `LeaguePrizeOnly` stays as a switch (e.g. for a rating region). |
+| 7 | **Low-deflection shaft trade-off:** accept that it raises start-profile routine misses (3.10) as a disclosed, physically real trade-off, or gate its unlock behind Steadiness 40, where the difference disappears? | **Decided** | **Accepted as a disclosed, physically real trade-off**, no unlock gate (`LowDeflectionMinSteadiness` 0). Shop and notebook disclose it: 3.7 % routine misses at Steadiness 25 against 1.1 % with the house cue, 0.3 % at 40 (3.10, v1.2 values). |
 
 ---
 
@@ -728,10 +747,25 @@ Adversarial verification, 2026-09-26. **Method:** a second Python implementation
 
 ### 9.3 Remaining doubts
 
-- **Bags:** a fixed bag of 8 is predictable from revealed draws. An alternative is in open question 1.
+- **Bags:** a fixed bag of 8 was predictable from revealed draws. Resolved in v1.2 by the streak guard (Q1, 3.2, 9.4).
 - **Miscue criterion:** it remains MOT's calibrated friction-cone heuristic. Worn-leather `mu` 0.35 and rim/ferrule 0.30/0.20 have no primary data (MOT open question 7).
-- **Budget model:** it ignores throw, swerve and cushions. With the standard cue, B3 is 8.78 % against 10 %, a thin margin, so HF-B02 with the full core may force a further refit. The dive-bar default oversized cue ball (R 30.16 mm, 221 g) is not in any test setup; its budget numbers are unknown.
+- **Budget model:** it ignores throw, swerve and cushions. With the standard cue, B3 is 9.00 % against 10 % (v1.2 draws; 8.78 % with the v1.1 bags), a thin margin, so HF-B02 with the full core may force a further refit. The dive-bar default oversized cue ball (R 30.16 mm, 221 g) is not in any test setup; its budget numbers are unknown.
 - **Warp `k_w`:** it depends on how players actually sight (0.14-0.83); playtest.
 - **Nap (4.5.6):** Mathavan et al. found no measurable nap effect on snooker cloth (MOT A.9). The bar-cloth pseudo-slope is unsourced; calibrate before shipping.
 - **XP:** no XP-per-hour estimate exists, so the pacing target cannot be checked yet.
 - **Tilt performance** against the 100 us typical-shot budget is unmeasured.
+
+### 9.4 Product-owner decisions (v1.2, 2026-09-26)
+
+- **Q1: streak guard instead of bags.** New oracle `Tools/reference/human-factors/streak.py` (the guard of 3.2) and `recompute_v12.py`, which feeds the new draws into the unchanged v1.1 stroke and budget oracles. Before switching, the v1.1 values were reproduced with the old bags (HF-T03, HF-T05..T07 to every printed digit). Changed: HF-T03 (restated), HF-S01 (mean -0.001307, sd 0.954631; 20.84 % of the draws redrawn, largest `Sub` 9), HF-S02 (restated: the cap and the pure-function property instead of aligned blocks, which no longer exist), HF-T05..T07 (per-shot channels; drift, tremor and warp are unchanged), HF-S04..S06 and the 3.10 table (every budget still holds; B3 with the standard cue 9.00 % against 10 %), HF-S05 (3039 / 1617 / 516 / 0), the LD figures of 3.10, 5.3 and Q7 (3.71 %, 0.27 % at 40). Unchanged: HF-T01, T02, T04, T08..T17, HF-S03, HF-S07 (no per-shot draws).
+- The draw sequence of one `(MatchSeed, shooter key, channel)` is a pure function of `ShooterShotIndex`: the recursion from draw 0 is the definition and `NoiseHistory` its incremental cache (the oracle checks both agree). The synthetic-hand channels 20-22 use the same guard. Rollout keys take the plain candidate `Sub` 0 without history, so the AI samples the unconditional distribution. With `StreakGuard = false` the plain draws are keyed by `ShooterShotIndex` (v1.1 keyed them by `ShotIndex`, so an aborted stroke would have repeated its draws).
+- **Q4, Q5, Q7 decided; Q2, Q3, Q6 open** with the defaults of section 7 behind `ProductConfig` switches (ARCH 7.5). Answered in v1.3 (9.5).
+
+### 9.5 Product-owner answers and architecture integration review (v1.3, 2026-09-26)
+
+- **Q2 alcohol:** cosmetic only for V1, with an explicit hook for a later mechanic: `StrokeSituation::Intoxication` `I` (3.1, 3.4, 3.5: `P_x`, `m_alc`, `m_alc,t`), set by `StrokeIntoxication(ProductConfig, level)`, which is 0 under `CosmeticOnly`. All factors are exactly 1 at `I` = 0, so every expected value of section 6 is unchanged (no oracle rerun needed; `stroke.py` has no intoxication term, which equals `I` = 0). Camera note in HF-20 and 3.4. The attribute-based `EffectiveAttributes` / `AlcoholParams` of v1.2 were removed: one mechanism, acting on the stroke where it is visible.
+- **Q3 attribute numbers:** hidden (5.1). **Q6 money games:** in, with in-game cash only; money-game stakes rule in 3.4 (`MoneyGameStakes`, TUNING), Nerve XP from money matches (5.2), hustler behaviour on by default (5.5).
+- **Streak fallback (3.2):** the floating-point mapping of v1.2 could land in an excluded eighth after rounding (counter-example in `streak.py`, `fallback_float_fails`); replaced by exact integer arithmetic (`streak.py` and `rb/Human/NoiseHash.h` agree; 1e5 random cases land in an allowed eighth). Probability 2.4e-14 per draw, so no expected value changes; HF-T03, HF-S01 and HF-S02 were re-run with the new oracle and are unchanged.
+- **Watchable processes (3.2):** keyed by `ShotIndex` alone, the drift and tremor repeated exactly on every get-down of the same shot, so a player (or a tool reading the replay) could address once, watch `D(t)`, stand up and shoot the second address at a known calm moment. The shot key now carries `AddressIndex` in its high word (`NoiseKey::AddressIndex`, `ProcessShotKey`); identical to v1.2 for the first get-down, so HF-T04 and HF-S03 are unchanged.
+- **Synthetic hand (3.8):** `t_fwd` defined, so the AI's per-shot ramp happens in its final stroke like the player's.
+- **Re-verification:** `recompute_v12.py` (draws, stroke, budget) reproduces every value of HF-T03, T05..T08, HF-S01, S02, S04..S06, the 3.10 table and the figures of 5.3 and section 7 to the printed digits.

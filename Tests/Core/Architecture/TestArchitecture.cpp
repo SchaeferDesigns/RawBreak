@@ -20,6 +20,16 @@
 #include "rb/Equipment/TableSpec.h"
 #include "rb/Geometry/RackLayout.h"
 #include "rb/Geometry/TableGeometry.h"
+#include "rb/Human/AiProfiles.h"
+#include "rb/Human/BallMarks.h"
+#include "rb/Human/Chores.h"
+#include "rb/Human/CueState.h"
+#include "rb/Human/HumanModel.h"
+#include "rb/Human/NoiseHash.h"
+#include "rb/Human/Progression.h"
+#include "rb/Human/Skill.h"
+#include "rb/Human/TipState.h"
+#include "rb/Human/Venue.h"
 #include "rb/Math/Aabb.h"
 #include "rb/Math/Polynomial.h"
 #include "rb/Math/Quat.h"
@@ -281,4 +291,225 @@ RB_TEST(Arch_AssertCompilesAwayWithoutSideEffects)
 #else
 	RB_CHECK(Calls == 0);
 #endif
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// Architecture v1.2: human-factors integration (rb::human, table tilt, chalk-mark cling). The numbered HF-* tests are
+// ported by their packages (architecture.md 17.12); these tests pin the contract defaults and the neutral stubs.
+// ------------------------------------------------------------------------------------------------------------------
+
+static_assert(rb::human::StreakSlot(rb::human::NoiseChannel::TipA) == 0, "streak slots of the per-shot channels");
+static_assert(rb::human::StreakSlot(rb::human::NoiseChannel::Flinch) == 4, "streak slots of the per-shot channels");
+static_assert(rb::human::StreakSlot(rb::human::NoiseChannel::HandAim) == 5, "streak slots of the synthetic hand");
+static_assert(rb::human::StreakSlot(rb::human::NoiseChannel::HandSpeed) == rb::human::kStreakChannelCount - 1, "streak slots of the synthetic hand");
+static_assert(rb::human::StreakSlot(rb::human::NoiseChannel::HandPause) == -1, "plain synthetic-hand channels are not guarded");
+static_assert(rb::human::StreakSlot(rb::human::NoiseChannel::DriftLat) == -1, "watchable processes are not guarded");
+static_assert(rb::human::StreakChannelAt(6) == rb::human::NoiseChannel::HandSteer, "slot <-> channel");
+static_assert(rb::human::kStreakWindow == 7 && rb::human::kStreakMaxPerEighth == 2, "Q1: no eighth more than twice in any 8 consecutive draws");
+static_assert(3 * rb::human::kStreakMaxPerEighth <= rb::human::kStreakWindow && 4 * rb::human::kStreakMaxPerEighth > rb::human::kStreakWindow,
+	"Q1: at most 3 eighths can be excluded, so the next draw is never known");
+static_assert(rb::human::EighthOf(0.0) == 0 && rb::human::EighthOf(0.99999999999999989) == 7, "eighths of [0, 1)");
+static_assert(rb::human::U01(~0ull) < 1.0 && rb::human::U01(0ull) == 0.0, "U01 in [0, 1)");
+static_assert(rb::kTiltRefreshFeature > rb::kTransitionFeature, "a refresh sorts after a transition of the same ball");
+static_assert(rb::human::kNoisePhiLo == 0.0062096653257761 && rb::human::kNoiseTruncation == 2.5, "truncation at +-2.5 sigma (3.2)");
+static_assert((rb::human::kWatchableChannelMask & rb::human::kPerShotChannelMask) == 0u, "channel masks are disjoint");
+static_assert(rb::human::ChannelBit(rb::human::NoiseChannel::Flinch) == (1u << 9), "channel bits");
+
+RB_TEST(Arch_TiltAndClingDefaultsAreNeutral)
+{
+	const rb::PhysicsParams P;
+	RB_CHECK(rb::IsLevel(P.Tilt)); // HF-B10: every MOT/COL/VAL test runs on a level table
+	RB_CHECK(P.Tilt.Tolerance == 5e-5 && P.Tilt.RefreshMaxInterval == 2.0 && P.Tilt.NapResistance == 0.0);
+	RB_CHECK(!P.ChalkCling);
+	RB_CHECK(P.BallBall.ClingFactor == 1.0);
+	RB_CHECK(P.BallBall.ChalkClingFactor == 2.5);
+	const rb::SimBall Ball;
+	RB_CHECK(Ball.ChalkMarks.IsEmpty());
+	const rb::MotionSegment Seg;
+	RB_CHECK(!Seg.Tilt.Active && !Seg.Tilt.EndsInRefresh);
+	rb::TiltParams Tilt;
+	Tilt.Slope = {0.0, 1e-3};
+	RB_CHECK(!rb::IsLevel(Tilt));
+	const rb::Vec2 Gt = rb::InPlaneGravity(Tilt, 9.80665);
+	RB_CHECK(Gt.x == 0.0 && Gt.y == -9.80665e-3);
+
+	// The table condition is the only extra input of the single parameter source; the default changes nothing.
+	const rb::PhysicsParams Plain = rb::MakePhysicsParams(rb::kTableSevenFootBar);
+	const rb::PhysicsParams Level = rb::MakePhysicsParams(rb::kTableSevenFootBar, rb::TableCondition{});
+	rb::TableCondition Bar;
+	Bar.Slope = {1.5e-3, -0.5e-3};
+	Bar.BallCling = 1.3;
+	Bar.ChalkCling = true;
+	const rb::PhysicsParams Tilted = rb::MakePhysicsParams(rb::kTableSevenFootBar, Bar);
+	RB_CHECK(Tilted.Origin == rb::ParamsOrigin::Table);
+	RB_CHECK(Tilted.Tilt.Slope.x == 1.5e-3 && Tilted.Tilt.Slope.y == -0.5e-3);
+	RB_CHECK(Tilted.BallBall.ClingFactor == 1.3 && Tilted.ChalkCling);
+	int Differences = 0;
+	for (int i = 0; i < rb::PhysicsParamCount(); ++i)
+	{
+		const char* Key = rb::PhysicsParamAt(i).Key;
+		double A = 0.0;
+		double B = 0.0;
+		double C = 0.0;
+		RB_CHECK(rb::GetPhysicsParam(Plain, Key, A) && rb::GetPhysicsParam(Level, Key, B) && rb::GetPhysicsParam(Tilted, Key, C));
+		RB_CHECK(A == B);
+		Differences += A != C ? 1 : 0;
+	}
+	RB_CHECK(Differences == 4); // tilt.slope_x, tilt.slope_y, ballball.k_cling, ballball.chalk_cling
+	double Value = 0.0;
+	RB_CHECK(rb::GetPhysicsParam(Tilted, "tilt.slope_x", Value) && Value == 1.5e-3);
+	RB_CHECK(rb::GetPhysicsParam(Tilted, "ballball.chalk_cling", Value) && Value == 1.0);
+}
+
+RB_TEST(Arch_ScalarFunnelExpm1Log1pCbrt)
+{
+	RB_CHECK_NEAR(rb::Expm1(1e-12), 1e-12 + 5e-25, 1e-27); // x + x^2/2: exp(x) - 1 would be off by ~1e-16 (1e-4 relative)
+	RB_CHECK_NEAR(rb::Expm1(-1.0), rb::Exp(-1.0) - 1.0, 1e-16);
+	RB_CHECK_NEAR(rb::Log1p(1e-12), 1e-12 - 5e-25, 1e-27);
+	RB_CHECK_NEAR(rb::Cbrt(27.0), 3.0, 1e-15);
+	RB_CHECK(rb::Cbrt(-8.0) == -2.0);
+	RB_CHECK(rb::Floor(-0.5) == -1.0 && rb::Floor(2.0) == 2.0);
+}
+
+RB_TEST(Arch_EventQueueTiltRefreshAfterContacts)
+{
+	// A refresh at exactly the time of a contact of the same ball pops after it (tier Transition) and after a motion
+	// transition key of the same ball; it never forms an exact-simultaneity group (architecture 8.3, 8.11).
+	rb::EventHeap<8> Heap;
+	rb::QueuedEvent Refresh;
+	Refresh.Time = 1.25;
+	Refresh.Tier = rb::EventTier::Transition;
+	Refresh.Kind = rb::QueuedEventKind::TiltRefresh;
+	Refresh.BallA = 2;
+	Refresh.FeatureKind = rb::kTiltRefreshFeature;
+	rb::QueuedEvent Transition = Refresh;
+	Transition.Kind = rb::QueuedEventKind::Transition;
+	Transition.FeatureKind = rb::kTransitionFeature;
+	rb::QueuedEvent Contact = Refresh;
+	Contact.Kind = rb::QueuedEventKind::BallBall;
+	Contact.Tier = rb::EventTier::BallBall;
+	Contact.BallB = 5;
+	Contact.FeatureKind = 0;
+	RB_REQUIRE(Heap.Push(Refresh) && Heap.Push(Transition) && Heap.Push(Contact));
+	RB_CHECK(Heap.Top().Kind == rb::QueuedEventKind::BallBall);
+	Heap.Pop();
+	RB_CHECK(Heap.Top().Kind == rb::QueuedEventKind::Transition);
+	Heap.Pop();
+	RB_CHECK(Heap.Top().Kind == rb::QueuedEventKind::TiltRefresh);
+}
+
+RB_TEST(Arch_HumanFactorsDefaultsFromSpec)
+{
+	namespace h = rb::human;
+	// 3.3 table (values at attribute 25, rho) and the Q1 switch.
+	const h::HumanParams P;
+	RB_CHECK(P.NoiseScale == 1.0 && P.ChannelMask == 0u && P.StreakGuard);
+	RB_CHECK(P.WarpSightLength == 0.45);
+	RB_CHECK(P.DriftSigma == 0.9e-3 && P.DriftRho == 0.2 && P.DriftVerticalRatio == 0.5);
+	RB_CHECK(P.TremorSigma == 0.03e-3);
+	RB_CHECK(P.TipASigma == 0.20e-3 && P.TipARho == 0.25 && P.TipBSigma == 1.5e-3 && P.TipBRho == 0.2);
+	RB_CHECK(P.OffsetKappa == 0.06 && P.OffsetKappaRho == 0.25);
+	RB_CHECK_NEAR(P.ElevationSigma * rb::kRadToDeg, 0.4, 1e-12);
+	RB_CHECK(P.SpeedSigma == 0.05 && P.SpeedRho == 0.3);
+	RB_CHECK(P.FlinchLoss == 0.08 && P.PressureGainMax == 4.0 && P.GripDrop == 1.5e-3 && P.NerveRho == 0.125);
+	RB_CHECK(P.DriftPressureExponent == 1.0 / 3.0 && P.SpeedPressureExponent == 0.5); // v1.1 refit (9.2 item 3)
+	RB_CHECK(P.OffsetClamp == 0.90 && P.OffsetClamp < rb::kCueOffsetValidLimit);
+	RB_CHECK(P.MaxSpeed == 12.0 && P.RampDuration == 0.1);
+	RB_CHECK(P.Rules.Frozen == 1.0e-4 && P.Rules.FrozenEnvelope == 5.0e-3);
+	RB_CHECK(h::BridgeSpecFor(h::BridgeType::Closed).BaseFactor == 1.0 && h::BridgeSpecFor(h::BridgeType::Closed).SlipSpeed == 6.0);
+	RB_CHECK(h::BridgeSpecFor(h::BridgeType::Elevated).BaseFactor == 2.0 && h::BridgeSpecFor(h::BridgeType::Elevated).SlipSpeed == 2.5);
+	RB_CHECK(h::BridgeSpecFor(h::BridgeType::Mechanical).BaseFactor == 1.8 && h::BridgeSpecFor(h::BridgeType::Mechanical).SlipSpeed == 3.0);
+	RB_CHECK_NEAR(h::SkillScale(25.0, 0.2), 1.0, 1e-15);
+	RB_CHECK_NEAR(h::SkillScale(100.0, 0.2), 0.2, 1e-15);
+	RB_CHECK_NEAR(h::SkillScale(150.0, 0.2), 0.2, 1e-15); // clamped
+
+	// 3.2 keys: 64-bit rollout shooter key (widened before the shift), channel masks.
+	h::NoiseKey Key;
+	Key.ShooterId = 0xFFFFFFFFu;
+	RB_CHECK(h::ShooterKey(Key) == 0xFFFFFFFFull && !h::IsRolloutKey(Key));
+	const h::NoiseKey Rollout = h::RolloutKey(Key, 2);
+	RB_CHECK(Rollout.Purpose == 3u && h::ShooterKey(Rollout) == 0x3FFFFFFFFull && h::IsRolloutKey(Rollout));
+	h::NoiseKey Address = Key;
+	Address.ShotIndex = 0xFFFFFFFFu;
+	RB_CHECK(Address.AddressIndex == 0u && h::ProcessShotKey(Address) == 0xFFFFFFFFull); // first get-down: the v1.2 key (HF-T04)
+	Address.AddressIndex = 1u;
+	RB_CHECK(h::ProcessShotKey(Address) == 0x1FFFFFFFFull); // a new get-down: new drift / tremor processes (3.2)
+
+	// 4.1 chalk grades, 4.2 tip defaults.
+	RB_CHECK(h::ChalkGradeSpecFor(h::ChalkGrade::RailRat).HitsPerGrade == 10.0 && h::ChalkGradeSpecFor(h::ChalkGrade::RailRat).Cap == 0.7);
+	RB_CHECK(h::ChalkGradeSpecFor(h::ChalkGrade::OldBlue).HitsPerGrade == 18.0);
+	RB_CHECK(h::ChalkGradeSpecFor(h::ChalkGrade::Tensile).HitsPerGrade == 30.0 && h::ChalkGradeSpecFor(h::ChalkGrade::Glasshouse).HitsPerGrade == 45.0);
+	const h::TipState Tip;
+	const h::TipParams TipModel;
+	RB_CHECK(Tip.DomeRadius == 0.0106 && Tip.Width == 0.01275 && Tip.Coverage[0] == 1.0 && Tip.Coverage[6] == 1.0);
+	RB_CHECK(TipModel.FreshFriction == 0.60 && TipModel.BareFriction == 0.35 && TipModel.RimFriction == 0.30 && TipModel.FerruleFriction == 0.20);
+	RB_CHECK(h::BarChalkCube().BarCube && h::BarChalkCube().Grade == h::ChalkGrade::RailRat);
+	const h::MarkParams Marks;
+	RB_CHECK(Marks.Radius == 2.5e-3 && Marks.MiscueRadius == 4.0e-3);
+
+	// Section 7: every product-owner decision (Q1 above; Q2 alcohol cosmetic for V1 with the intoxication hook, Q3 hidden
+	// numbers, Q4 hot-seat guests, Q5 chores, Q6 money games in, Q7 no LD unlock gate).
+	const h::ProductConfig Config;
+	RB_CHECK(Config.Alcohol == h::AlcoholMode::CosmeticOnly);
+	RB_CHECK(h::StrokeIntoxication(Config, 0.8) == 0.0); // V1: drinks never change a stroke
+	h::ProductConfig Drunk = Config;
+	Drunk.Alcohol = h::AlcoholMode::Mechanic;            // the later hook: one switch, no core change
+	RB_CHECK(h::StrokeIntoxication(Drunk, 0.8) == 0.8 && h::StrokeIntoxication(Drunk, 3.0) == 1.0 && h::StrokeIntoxication(Drunk, -1.0) == 0.0);
+	RB_CHECK(h::StrokeSituation{}.Intoxication == 0.0);
+	RB_CHECK(P.IntoxicationCalmLevel == 0.25 && P.IntoxicationCalm == 0.5 && P.IntoxicationDriftGain == 1.0 && P.IntoxicationTremorGain == 1.0);
+	RB_CHECK(Config.Attributes == h::AttributeVisibility::Hidden && !h::ShowAttributeNumbers(Config));
+	RB_CHECK(Config.Money == h::MoneyGames::SideBetsAndHustling && h::MoneyGamesAllowed(Config));
+	RB_CHECK(h::MoneyGameStakes(5.0, 100.0) == h::kStakesMoneyOrLeague && h::MoneyGameStakes(60.0, 100.0) == h::kStakesFinal);
+	RB_CHECK_NEAR(h::MoneyGameStakes(30.0, 100.0), 0.8, 1e-12);
+	RB_CHECK(h::MoneyGameStakes(1.0, 0.0) == h::kStakesFinal); // all in
+	RB_CHECK(h::HotSeatGuestAttributes(Config).Nerve == 50.0 && h::HotSeatGuestAttributes(Config).Steadiness == 50.0 && !Config.HotSeatGuestEarnsXp);
+	RB_CHECK(h::DefaultChoreSpeed(Config, true) == h::ChoreSpeed::Full && h::DefaultChoreSpeed(Config, false) == h::ChoreSpeed::Brisk);
+	RB_CHECK(h::LowDeflectionShaftUnlocked(Config, h::UniformAttributes(0.0)));
+
+	// 5.4 presets.
+	const h::AssistSettings Pure = h::GetAssistSettings(h::DifficultyPreset::Pure);
+	const h::AssistSettings Real = h::GetAssistSettings(h::DifficultyPreset::Real);
+	const h::AssistSettings Assisted = h::GetAssistSettings(h::DifficultyPreset::Assisted);
+	const h::AssistSettings Relaxed = h::GetAssistSettings(h::DifficultyPreset::Relaxed);
+	RB_CHECK(Pure.AnyTipContactIsShot && !Pure.ObviousCallAssist && Pure.NoiseScale == 1.0 && Pure.SteeringGain == 0.25);
+	RB_CHECK(!Real.AnyTipContactIsShot && Real.ObviousCallAssist && Real.NoiseScale == 1.0 && Real.Pressure == h::PressureMode::On);
+	RB_CHECK(Assisted.NoiseScale == 0.6 && Assisted.SteeringGain == 0.10 && Assisted.Pressure == h::PressureMode::Subtle && Assisted.StrokeReportAlways);
+	RB_CHECK(Relaxed.NoiseScale == 0.3 && Relaxed.SteeringGain == 0.0 && Relaxed.Pressure == h::PressureMode::Off && Relaxed.AimLine == h::AimLineAssist::Long);
+	RB_CHECK(h::NoiseScaleFor(h::ImperfectionSetting::Scaled) == Assisted.NoiseScale && h::NoiseScaleFor(h::ImperfectionSetting::Low) == Relaxed.NoiseScale);
+	RB_CHECK(h::NoiseScaleFor(h::ImperfectionSetting::Off) == 0.0);
+}
+
+RB_TEST(Arch_HumanStubsLinkAndStayNeutral)
+{
+	namespace h = rb::human;
+	// Every rb::human entry point links (stubs of WP-11) and returns a neutral value; the intended stroke passes through
+	// unchanged until WP-11 lands (the NoiseScale-0 identity is HF-T08).
+	h::IntendedStroke Intended;
+	Intended.Azimuth = 0.1;
+	Intended.Speed = 2.0;
+	const rb::CueSpec Cue = rb::kCuePlaying19oz;
+	const h::NoiseKey Key;
+	const h::NoiseHistory History = h::RebuildNoiseHistory(Key.MatchSeed, h::ShooterKey(Key), Key.ShooterShotIndex);
+	RB_CHECK(History.NextIndex == 0u);
+	const h::ExecutedStroke Stroke = h::ExecuteStroke(Intended, h::ShooterAttributes{}, h::StrokeSituation{}, h::TipState{}, h::CueBodyState{}, Cue,
+		rb::BallSpec{}, rb::Vec3{}, nullptr, 0, Key, History, h::HumanParams{});
+	RB_CHECK(Stroke.Error == rb::ErrorCode::NotImplemented || Stroke.Error == rb::ErrorCode::Ok);
+	RB_CHECK(Stroke.Strike.Cue.Mass == Cue.Mass);
+	const h::HandPose Pose = h::SampleHand(Intended, h::ShooterAttributes{}, h::StrokeSituation{}, h::CueBodyState{}, Cue, rb::BallSpec{}, Key, History,
+		h::HumanParams{}, 1.5);
+	RB_CHECK(Pose.Time == 1.5);
+	h::NoiseHistory Advanced = History;
+	h::AdvanceNoiseHistory(Advanced);
+	RB_CHECK(Advanced.NextIndex == 1u);
+	const h::AiCharacter Character{h::GetAiProfile(h::AiProfileId::LeaguePlayer), 7u};
+	RB_CHECK(Character.Profile.Id == h::AiProfileId::LeaguePlayer);
+	h::PlannedStroke Plan;
+	Plan.Speed = 1.5;
+	RB_CHECK(h::SyntheticHand(Plan, Character, h::StrokeSituation{}, 0.028575, Key, History, h::HumanParams{}).Speed == 1.5);
+	rb::PhysicsParams Physics = rb::MakePhysicsParams(rb::kTableSevenFootBar);
+	rb::SimBall Balls[rb::kMaxBalls];
+	h::ApplyDiagnosisStep(h::DiagnosisStepAt(1), Physics, Balls);
+	RB_CHECK(h::VenueBallSetSeed(1u, 0) == h::HashKeys(1u, h::kVenueBallSetPurpose, 0u));
+	const rb::TableCondition Condition = h::MakeVenueTableCondition(1u, 0, h::VenueKind::DiveBar, true, false);
+	RB_CHECK(!Condition.ChalkCling);
 }

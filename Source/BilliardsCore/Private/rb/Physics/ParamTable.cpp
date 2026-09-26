@@ -103,6 +103,16 @@ namespace rb
 			{{"numerics.leave_distance", ParamType::Real, 0, "m"}, [](const PhysicsParams& P) { return P.Numerics.LeaveDistance; }, [](PhysicsParams& P, double V) { P.Numerics.LeaveDistance = V; }},
 			{{"numerics.sample_tolerance", ParamType::Real, 0, "m"}, [](const PhysicsParams& P) { return P.Numerics.SampleTolerance; }, [](PhysicsParams& P, double V) { P.Numerics.SampleTolerance = V; }},
 			{{"numerics.sample_max_interval", ParamType::Real, 0, "s"}, [](const PhysicsParams& P) { return P.Numerics.SampleMaxInterval; }, [](PhysicsParams& P, double V) { P.Numerics.SampleMaxInterval = V; }},
+			// human-factors 4.3 / 4.5 (architecture v1.2): table tilt, nap, chalk-mark cling
+			{{"tilt.slope_x", ParamType::Real, 0, "1"}, [](const PhysicsParams& P) { return P.Tilt.Slope.x; }, [](PhysicsParams& P, double V) { P.Tilt.Slope.x = V; }},
+			{{"tilt.slope_y", ParamType::Real, 0, "1"}, [](const PhysicsParams& P) { return P.Tilt.Slope.y; }, [](PhysicsParams& P, double V) { P.Tilt.Slope.y = V; }},
+			{{"tilt.tolerance", ParamType::Real, 0, "m"}, [](const PhysicsParams& P) { return P.Tilt.Tolerance; }, [](PhysicsParams& P, double V) { P.Tilt.Tolerance = V; }},
+			{{"tilt.refresh_max_interval", ParamType::Real, 0, "s"}, [](const PhysicsParams& P) { return P.Tilt.RefreshMaxInterval; }, [](PhysicsParams& P, double V) { P.Tilt.RefreshMaxInterval = V; }},
+			{{"tilt.nap_x", ParamType::Real, 0, "1"}, [](const PhysicsParams& P) { return P.Tilt.NapPseudoSlope.x; }, [](PhysicsParams& P, double V) { P.Tilt.NapPseudoSlope.x = V; }},
+			{{"tilt.nap_y", ParamType::Real, 0, "1"}, [](const PhysicsParams& P) { return P.Tilt.NapPseudoSlope.y; }, [](PhysicsParams& P, double V) { P.Tilt.NapPseudoSlope.y = V; }},
+			{{"tilt.nap_resistance", ParamType::Real, 0, "1"}, [](const PhysicsParams& P) { return P.Tilt.NapResistance; }, [](PhysicsParams& P, double V) { P.Tilt.NapResistance = V; }},
+			{{"ballball.k_chalk", ParamType::Real, 0, "1"}, [](const PhysicsParams& P) { return P.BallBall.ChalkClingFactor; }, [](PhysicsParams& P, double V) { P.BallBall.ChalkClingFactor = V; }},
+			{{"ballball.chalk_cling", ParamType::Boolean, 0, "1"}, [](const PhysicsParams& P) { return P.ChalkCling ? 1.0 : 0.0; }, [](PhysicsParams& P, double V) { P.ChalkCling = V != 0.0; }},
 		};
 
 		constexpr int kEntryCount = static_cast<int>(sizeof(kEntries) / sizeof(kEntries[0]));

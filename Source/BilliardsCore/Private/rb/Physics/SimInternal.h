@@ -64,7 +64,8 @@ namespace rb::sim
 		std::uint32_t JumpPending = 0;      // plan overlaps entered while airborne (bit = other ball)
 		std::uint32_t ContactSinceJump = 0; // BallBall contacts during those overlaps
 		FixedVector<Observer, kMaxObserversPerBall> Observers; // pending observers of Seg, time ordered
-		Quat Orientation0;                  // orientation at Seg.T0 (orientation law, rb/Physics/Playback.h)
+		Quat Orientation0;                  // orientation at Seg.T0 (orientation law, rb/Physics/Playback.h); maintained for
+		                                    //   every ball with chalk marks when PhysicsParams::ChalkCling, whatever the RecordOptions
 		double SampleStart = 0.0;           // island / pivot: start of the open Sampled segment
 		Vec3 SamplePosition;                // ... its start position
 		Vec3 RotationAccumulator;           // ... integral of w since SampleStart (Sampled Omega0 = this / duration)
@@ -149,15 +150,24 @@ namespace rb::sim
 	// Terminal states (Pocketed / OffTable): final segment, Finals entry, removal from detection.
 	void MakeTerminal(Workspace& Ws, int Ball, MotionState Terminal, double Time, PocketId Pocket, OffTableReason Reason);
 
-	// Current state of a ball in event mode at absolute time Time.
+	// Current state of a ball in event mode at absolute time Time (segment state: detection, approach tests,
+	// observers, recording).
 	BallState BallStateAt(const Workspace& Ws, int Ball, double Time);
+
+	// State that RESOLVES an event of the ball at Time (every resolver: ball-ball, cushion, pocket, landing, rail top,
+	// tip; and the initial body state of a ball that starts or joins an island, StartIsland / AdvanceIsland):
+	// position from the segment, velocity and spin from the exact pursuit state inside a tilt chain piece
+	// (EvaluateSegmentForEvent, human-factors 4.5.3); equal to BallStateAt on a level table. A contact that approaches
+	// by the segment velocity but whose exact normal speed is <= ApproachSpeedTol is a pressing contact (island).
+	BallState BallStateForEvent(const Workspace& Ws, int Ball, double Time);
 
 	// ---------------------------------------------------------------------------------------------
 	// Hooks implemented by WP-6b
 	// ---------------------------------------------------------------------------------------------
 
 	// Island (8.8): BFS with delta_cl over balls AND table features (QueryTableFeatures), members leave
-	// event mode; tips of moving cues join as IslandTip when they can reach a member.
+	// event mode; tips of moving cues join as IslandTip when they can reach a member. Member states come from
+	// BallStateForEvent; on a tilted table the island gets SetInPlaneGravity(InPlaneGravity(Params.Tilt, g)) (8.11).
 	void StartIsland(Workspace& Ws, const IslandSeed& Seed, double Time);
 
 	// Steps the active island up to (not beyond) UntilTime: per step joining of balls and table

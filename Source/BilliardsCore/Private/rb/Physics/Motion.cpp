@@ -38,10 +38,47 @@ namespace rb
 
 	BallState SegmentEndState(const MotionSegment& Seg, const NumericsConfig& /*Numerics*/)
 	{
-		// TODO(WP-1): exact snapped end state + next classification (A.5 end, A.6, A.4; prior-art 5.8).
+		// TODO(WP-1): exact snapped end state + next classification (A.5 end, A.6, A.4; prior-art 5.8); tilt chain pieces:
+		// exact node state (EndsInRefresh) or the human-factors 4.5.3 end snaps.
 		BallState S;
 		S.Position = Seg.Pos0;
 		S.State = Seg.State;
 		return S;
+	}
+
+	double PursuitStopTime(const Vec2& /*X0*/, const Vec2& /*G*/, double /*K*/)
+	{
+		// TODO(WP-1): human-factors 4.5.2 T_stop (collinear quadratics included).
+		return 0.0;
+	}
+
+	PursuitState EvaluatePursuit(const Vec2& X0, const Vec2& /*G*/, double /*K*/, double /*Tau*/)
+	{
+		// TODO(WP-1): human-factors 4.5.2 closed form (E_n = -Expm1(-n lam)) + safeguarded Newton on t(lam) = Tau.
+		PursuitState State;
+		State.X = X0;
+		return State;
+	}
+
+	double TiltPieceDuration(double /*SpeedX*/, double /*K*/, double /*GNorm*/, double /*Cs*/, double /*SinBound*/, double /*Tolerance*/, double /*MaxInterval*/,
+		double Remaining)
+	{
+		// TODO(WP-1): human-factors 4.5.3 refresh rule (collinear / tail -> Remaining, else the cubic root, Newton).
+		return Remaining;
+	}
+
+	MotionSegment MakeSegment(const BallState& S, double T0, const BallSpec& Spec, const ClothParams& Surface, double SupportZ, double Gravity,
+		const TiltParams& Tilt)
+	{
+		// TODO(WP-1): for !IsLevel(Tilt): human-factors 4.5.3 MakeTiltSegment (chain piece with exact node, Airborne in-plane
+		// g_t / 2, nap). A level Tilt must keep returning the level segment bitwise (A-MOT-3).
+		static_cast<void>(Tilt);
+		return MakeSegment(S, T0, Spec, Surface, SupportZ, Gravity);
+	}
+
+	BallState EvaluateSegmentForEvent(const MotionSegment& Seg, double Tau)
+	{
+		// TODO(WP-1): position from the segment, velocity / spin from EvaluatePursuit for tilt chain pieces (human-factors 4.5.3).
+		return EvaluateSegment(Seg, Tau);
 	}
 }

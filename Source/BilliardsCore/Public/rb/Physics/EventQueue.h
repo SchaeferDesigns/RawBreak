@@ -8,8 +8,11 @@
 //   (Time, Tier, BallA, BallB, FeatureKind, FeatureIndex, FeatureSub)
 // Valid entries are unique under this key (one live prediction per end slot, table slot, pair slot
 // and tip slot), so pop order is independent of insertion order and of Compact(). Exactly equal times
-// that share a ball never depend on this order: the simulator merges them into one island
-// (Docs/architecture.md 8.3, collisions 3.7); equal-time events of disjoint balls commute.
+// of CONTACT entries (tiers Strike .. Boundary) that share a ball never depend on this order: the
+// simulator merges them into one island (Docs/architecture.md 8.3, collisions 3.7); equal-time events
+// of disjoint balls commute. Transition-tier entries (motion transitions, tilt refreshes) carry no
+// impulse and never join such a group: at an equal time they pop after every contact of the same
+// instant, and a contact that replaced the ball's segment has already made them stale.
 
 #include "rb/Config.h"
 
@@ -26,7 +29,7 @@ namespace rb
 		Pocket = 3,     // drop edge, liner, rim, capture, pocket exit
 		Slate = 4,      // landing / slate impact
 		Boundary = 5,   // outer boundary, lamp apex
-		Transition = 6, // sliding -> rolling -> spinning -> stationary
+		Transition = 6, // sliding -> rolling -> spinning -> stationary; tilt chain refreshes (human-factors 4.5.3)
 	};
 
 	enum class QueuedEventKind : std::uint8_t
@@ -36,9 +39,17 @@ namespace rb
 		BallBall,
 		TableFeature, // FeatureKind / FeatureIndex / FeatureSub = rb::TableFeatureKind / Index / SubIndex (rb/Physics/Detect.h)
 		Transition,   // end slot: motion transition, slate landing (Airborne) or pivot end (PocketPivot)
+		TiltRefresh,  // end slot of a tilt chain piece (MotionSegment::Tilt.EndsInRefresh, human-factors 4.5.3): tier
+		              //   Transition, FeatureKind = kTiltRefreshFeature; the exact node state starts the next piece,
+		              //   the ball's version is bumped and all its slots are re-predicted (no impulse, no island)
 	};
 
 	inline constexpr std::uint8_t kNoBallSlot = 0xFF;
+
+	// FeatureKind of end-slot entries: 0 = motion transition / landing / pivot end, 1 = TiltRefresh. A ball has
+	// one live end slot, so the value only makes the kind visible in the key (a refresh sorts after a transition).
+	inline constexpr std::uint8_t kTransitionFeature = 0;
+	inline constexpr std::uint8_t kTiltRefreshFeature = 1;
 
 	struct QueuedEvent
 	{

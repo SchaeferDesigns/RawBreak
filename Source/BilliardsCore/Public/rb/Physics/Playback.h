@@ -8,9 +8,12 @@
 // next segment AND by playback, so there is no jump at segment boundaries):
 //  * Constant rotation axis -> exact closed form q(tau) = Exp(0.5 Theta(tau)) (x) q0, Theta = integral
 //    of w over [0, tau]: Stationary, Terminal (Theta = 0), Spinning (axis z), Airborne / PocketFall
-//    (w constant), Sampled (w = Motion.Omega0 constant), Rolling with w_z = 0 on the whole segment
-//    (axis z_hat x v_hat, angle = distance / R).
-//  * Otherwise (Sliding; Rolling with w_z != 0): fixed grid tau_k = k Substep from the segment start
+//    (w constant), Sampled (w = Motion.Omega0 constant), Rolling with w_z = 0 on the whole segment and
+//    !Motion.Tilt.Active (axis z_hat x v_hat, angle = distance / R). The Rolling test is STRUCTURAL: a level
+//    Rolling segment's Accel2 is parallel to Vel0 by construction, and a floating-point parallelism test
+//    (cross product == 0) would misclassify some level segments and change level orientations bitwise.
+//  * Otherwise (Sliding; Rolling with w_z != 0; every Rolling tilt chain piece (Motion.Tilt.Active),
+//    human-factors 4.5.3, whose Accel2 is in general not parallel to Vel0): fixed grid tau_k = k Substep from the segment start
 //    (Substep <= 1 ms, UE 5.7): q_{k+1} = Exp(0.5 Theta_k) (x) q_k with Theta_k = the EXACT integral of
 //    the piecewise-linear w laws over [tau_k, tau_k+1], renormalised; q(tau) = Exp(0.5 integral of w
 //    over [tau_K, tau]) (x) q_K, K = floor(tau / Substep) (final partial step).

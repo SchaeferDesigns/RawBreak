@@ -28,6 +28,19 @@ foreach(RB_SOURCE ${RB_CORE_SOURCES})
 	endif()
 endforeach()
 
+# Layering guard (Docs/architecture.md sections 4 and 7.5): the player model rb::human sits ABOVE the physics and
+# the rules. No core file outside rb/Human/ (in particular the event loop rb/Physics, the physics -> rules contract
+# rb/Shot and the rules rb/Rules; also Core, Math, Equipment, Geometry) may include an rb/Human/ header, in any
+# spelling ("..." or <...>, spaces after #, relative paths such as "../Human/...") (human-factors 3.11).
+foreach(RB_FILE ${RB_CORE_SOURCES} ${RB_CORE_HEADERS})
+	if(NOT RB_FILE MATCHES "/rb/Human/")
+		file(STRINGS ${RB_FILE} RB_HUMAN_INCLUDES REGEX "#[ \t]*include[ \t]*[<\"]([^>\"]*/)?Human/")
+		if(RB_HUMAN_INCLUDES)
+			message(FATAL_ERROR "${RB_FILE}: rb::human (rb/Human/*) must not be included by the physics, the shot record, the rules or any other layer below it")
+		endif()
+	endif()
+endforeach()
+
 add_library(BilliardsCore STATIC ${RB_CORE_SOURCES} ${RB_CORE_HEADERS})
 target_include_directories(BilliardsCore
 	PUBLIC ${RB_CORE_DIR}/Public

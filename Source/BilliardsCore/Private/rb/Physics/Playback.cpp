@@ -15,7 +15,8 @@ namespace rb
 
 	bool HasConstantRotationAxis(const TrajectorySegment& /*Segment*/)
 	{
-		// TODO(WP-7): Stationary, Terminal, Spinning, Airborne, PocketFall, Sampled, Rolling with w_z == 0 over the segment.
+		// TODO(WP-7): Stationary, Terminal, Spinning, Airborne, PocketFall, Sampled, Rolling with w_z == 0 over the segment
+		// and !Motion.Tilt.Active (structural test, never a floating-point parallelism test; Playback.h).
 		return false;
 	}
 
