@@ -72,7 +72,15 @@ namespace rb::human
 		double Restitution = 0.73;    // e_tip of the tip itself [1] (leather 0.71-0.75, phenolic 0.85)
 		bool Loose = false;           // loose / screw-on tip or cracked ferrule: e_tip - 0.07 (HF-28)
 		std::uint32_t Hits = 0;
+		std::uint32_t BreakInHits = 0; // hits left of a new tip's break-in glaze (Retip: kTipBreakInHits); when it reaches 0 the
+		                               //   break-in glaze kNewTipGlaze is removed: G := max(0, (G - 0.3) / (1 - 0.3)), the glaze
+		                               //   the per-hit law would have built from 0 (4.2 "glaze 0.3 until 50 hits")
 	};
+
+	// A new tip (4.2 retip): leather height 6 mm, a break-in glaze of 0.3 for its first 50 hits.
+	inline constexpr double kNewTipHeight = 0.006;       // [m]
+	inline constexpr double kNewTipGlaze = 0.3;          // [1]
+	inline constexpr std::uint32_t kTipBreakInHits = 50;
 
 	struct TipParams
 	{
@@ -88,6 +96,10 @@ namespace rb::human
 		double TwistCoverageStep = 0.15; // auto-chalking: 1 twist per 15 % missing
 		double TwistSeconds = 0.4;       // [s] per twist, x(1 - 0.3 H_chalk)
 		double TwistHabitSpeedup = 0.3;
+		bool ConditionWear = false;       // per-hit tip CONDITION wear (dome flattening, glazing, mushrooming; HF-24 wear, HF-25,
+		                                  //   HF-26: all V2 in the catalogue 2.2). V1 (false): the chalk coverage wears (HF-21, V1),
+		                                  //   the condition stays as seeded / chored (house tips, scuff, shape, trim, retip). HF-T12
+		                                  //   and the grade table of 4.1 are the V1 values (the chalk oracle has no glaze coupling)
 		double DomeGrowthPerHit = 1.0e-6; // [m] x severity, cap MaxDomeRadius
 		double MaxDomeRadius = 0.025;     // [m]
 		double GlazeHitsMedium = 400.0;   // N_glaze (hard 250, soft 600)
@@ -95,6 +107,14 @@ namespace rb::human
 		double GlazeHitsSoft = 600.0;
 		double OverhangPerHit = 2.0e-7;   // [m] x severity x (soft 1.5 / medium 1 / hard 0.4)
 		double LoosePenalty = 0.07;       // e_tip reduction (HF-28)
+		double RetentionSoft = 1.15;      // h(hardness) of n_c_eff = n_c h (1 - 0.5 G): soft 1.15, medium 1, hard 0.7 [DD-HARD]
+		double RetentionHard = 0.7;
+		double GlazeRetentionLoss = 0.5;  // retention and twist efficiency x(1 - 0.5 G) (HF-25)
+		double OverhangSoft = 1.5;        // mushrooming factor soft 1.5 / medium 1 / hard 0.4 (HF-26)
+		double OverhangHard = 0.4;
+		double ScuffGlazeFactor = 0.2;    // scuff: G *= 0.2
+		double ScuffHeightLoss = 0.02e-3; // [m] scuff: height -= 0.02 mm
+		double ShapeHeightLoss = 0.1e-3;  // [m] shape: height -= 0.1 mm
 	};
 
 	enum class TipZone : std::uint8_t
@@ -129,7 +149,8 @@ namespace rb::human
 	RB_API double HitSeverity(double Speed, double Rho, bool Miscue);
 
 	// Wear after one hit (4.1, 4.2): c_z *= exp(-omega_z severity / n_c_eff), n_c_eff = n_c(grade) h(hardness) (1 - 0.5 G);
-	// r_dome += 1e-6 m severity (cap), G += (1 - G) severity / N_glaze, o += 2e-7 m severity x hardness; Hits + 1.
+	// with Params.ConditionWear (V2) also r_dome += 1e-6 m severity (cap), G += (1 - G) severity / N_glaze, o += 2e-7 m severity x
+	// hardness; Hits + 1; a new tip's break-in glaze ends after kTipBreakInHits hits (BreakInHits).
 	RB_API void ApplyTipWear(TipState& Tip, const TipContactPoint& Contact, double Severity, const TipParams& Params);
 
 	// Coverage a fresh chalking can reach: the grade's cap, 0.7 for a bar cube.
@@ -148,7 +169,10 @@ namespace rb::human
 	RB_API double TwistDuration(double ChalkHabit, const TipParams& Params);
 
 	// Tip care chores (4.2): scuff (5-8 s): G *= 0.2, height -= 0.02 mm; shape (20-40 s): r_dome = target, height -= 0.1 mm;
-	// trim: overhang 0; retip (career days): a new tip, height 6 mm, glaze 0.3 until 50 hits.
+	// trim: overhang 0; retip (career days): a new tip, height 6 mm, glaze 0.3 until 50 hits (BreakInHits; ApplyTipWear then
+	// removes the 0.3 again, keeping the glaze gained meanwhile), no overhang, bare leather (coverage 0: the next chalking,
+	// automatic before every shot in A / C / P mode, covers it), e_tip and chalk grade of the default TipState. Heights never
+	// drop below 0.
 	RB_API void ScuffTip(TipState& Tip);
 	RB_API void ShapeTip(TipState& Tip, double TargetDomeRadius);
 	RB_API void TrimTip(TipState& Tip);

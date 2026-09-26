@@ -31,7 +31,8 @@ namespace rb::human
 
 	// Table slope (4.5.5): magnitude uniform in the venue's range, direction uniform, from
 	// HashKeys(VenueSeed, kVenueSlopePurpose, TableIndex, 0 / 1). The first table of a new career is capped at 1 mm/m
-	// (fairness: 17 mm lag drift, 46 mm on a 0.5 m/s roll). Nightly drift after bumps is V2.
+	// (fairness: 17 mm lag drift, 46 mm on a 0.5 m/s roll) by narrowing the range (dive bar U[0.5, 1] mm/m), so it stays
+	// uniform. Nightly drift after bumps is V2.
 	RB_API Vec2 SeedTableSlope(std::uint64_t VenueSeed, int TableIndex, VenueKind Kind, bool FirstCareerTable);
 
 	// k_venue of the venue's balls (HF-41): 1.3 dive bar, 1.0 otherwise (EST).
@@ -61,7 +62,8 @@ namespace rb::human
 	};
 
 	// One rack slot: HashKeys(VenueSeed, kVenueHouseCuePurpose, RackSlot, Generation, field) per drawn field. The bar
-	// "replacing" the cue (career event) = the next Generation.
+	// "replacing" the cue (career event) = the next Generation. Short cues: one slot in eight (48 or 52 in, TUNING); the tip's
+	// chalk coverage is the default (dynamic state, not a defect); CueBodyState::TipRadius = w_tip / 2.
 	RB_API HouseCue SeedHouseCue(std::uint64_t VenueSeed, int RackSlot, std::uint32_t Generation);
 
 	// The bar's chalk cube (HF-23): RailRat grade, cap 0.7.

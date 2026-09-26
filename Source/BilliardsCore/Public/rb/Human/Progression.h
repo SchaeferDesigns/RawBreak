@@ -102,7 +102,9 @@ namespace rb::human
 		Match,         // all attributes, small; losses pay 60 %
 	};
 
-	// XP for one event of a source; Value = D, improvement, rho, power 0-1, d_s or P per the table of 5.2.
+	// XP for one event of a source; Value = D, improvement, rho, power 0-1, d_s or P per the table of 5.2; Drill: the tier's
+	// award from the drill table (returned as is; the caller pays 10x on a first clear and 25 % after the daily soft cap);
+	// Match: 1 = won (10 XP per attribute), 0 = lost (60 %: 6 XP). TUNING.
 	RB_API double XpAward(XpSource Source, double Value);
 
 	// Cost of the next point: 100 x 1.08^(x - 25) XP (25 -> 40: 2,715; 25 -> 85: 125,321 per attribute).
