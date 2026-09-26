@@ -440,6 +440,26 @@ namespace rb
 		// Pair contacts, one cloth contact per body, and up to 4 balls per cue tip (a 10 mm dome cannot touch more at once).
 		constexpr int kMaxTipContactsPerStrike = 4;
 		constexpr int kMaxRigidContacts = kMaxIslandContacts + kMaxBalls + kMaxStrikes * kMaxTipContactsPerStrike;
+
+		// Record slots kept free for the tip records of a step, which follow the pair records (kMaxTipContactsPerStrike per
+		// active tip): a pair record that does not fit stays armed and is emitted at the next step, a tip transition should not
+		// wait (a rigid tip contact may last a single step).
+		static_assert(kMaxStrikes * kMaxTipContactsPerStrike < kMaxIslandRecordsPerStep, "the tip reserve must leave room for pair records");
+
+		bool PushPairRecord(IslandRecordList& Records, const IslandContactRecord& Record, int Reserve)
+		{
+			return Records.Size() + Reserve < kMaxIslandRecordsPerStep && Records.PushBack(Record);
+		}
+
+		int TipRecordReserve(const bool* TipActive)
+		{
+			int Reserve = 0;
+			for (int s = 0; s < kMaxStrikes; ++s)
+			{
+				Reserve += TipActive[s] ? kMaxTipContactsPerStrike : 0;
+			}
+			return Reserve;
+		}
 	}
 
 	double HertzContactTime(double ApproachSpeed, double ReducedMass, double HertzStiffness)
@@ -730,7 +750,8 @@ namespace rb
 			{
 				for (const PairState& Old : Pairs)
 				{
-					const bool Same = P.B >= 0 ? (Old.B >= 0 && ((Old.A == P.A && Old.B == P.B) || (Old.A == P.B && Old.B == P.A)))
+					const bool Swapped = P.B >= 0 && Old.B >= 0 && Old.A == P.B && Old.B == P.A;
+					const bool Same = P.B >= 0 ? (Old.B >= 0 && ((Old.A == P.A && Old.B == P.B) || Swapped))
 					                           : (Old.B < 0 && Old.A == P.A && Old.Feature == P.Feature);
 					if (Same)
 					{
@@ -741,7 +762,9 @@ namespace rb
 						P.Mu0 = Old.Mu0;
 						P.Restitution = Old.Restitution;
 						P.WarmNormal = Old.WarmNormal;
-						P.WarmTangent = Old.WarmTangent;
+						// The warm tangential impulse is the impulse on A: it changes sign when the canonical roles swapped (the
+						// centres' lexicographic order changed since the last rebuild, e.g. a ball rolling over another).
+						P.WarmTangent = Swapped ? -Old.WarmTangent : Old.WarmTangent;
 						if (P.B < 0)
 						{
 							P.Damping = Old.Damping;
@@ -923,6 +946,7 @@ namespace rb
 	void CompliantIsland::StepCompliant(IslandRecordList& NewRecords)
 	{
 		const double Dt = Settings.TimeStep;
+		const int Reserve = TipRecordReserve(TipActive);
 		const double StepTime = CurrentTime;
 		const double TouchBand = Tolerances.ContactTol;
 		const double Leave = Tolerances.LeaveDistance;
@@ -988,7 +1012,7 @@ namespace rb
 						Record.BallB = AFirst ? B.Ball : A.Ball;
 						Record.Normal = AFirst ? N : -N;
 						Record.NormalSpeed = DeltaRate;
-						if (NewRecords.PushBack(Record))
+						if (PushPairRecord(NewRecords, Record, Reserve))
 						{
 							P.Armed = false;
 						}
@@ -1068,7 +1092,7 @@ namespace rb
 						Record.Feature = P.Feature;
 						Record.Normal = K;
 						Record.NormalSpeed = DeltaRate;
-						if (NewRecords.PushBack(Record))
+						if (PushPairRecord(NewRecords, Record, Reserve))
 						{
 							P.Armed = false;
 						}
@@ -1200,7 +1224,12 @@ namespace rb
 					Record.Strike = s;
 					Record.Normal = Items[i].Normal;
 					Record.NormalSpeed = Items[i].Rate;
-					NewRecords.PushBack(Record);
+					if (!NewRecords.PushBack(Record))
+					{
+						// No room (the caller's list was full): undo the transition, so that it is detected and recorded at the next
+						// step and TipBegin / TipEnd stay paired.
+						TipContacts[s][Record.BallA].Active = Items[i].End;
+					}
 				}
 			}
 		}
@@ -1253,6 +1282,7 @@ namespace rb
 	void CompliantIsland::StepRigid(IslandRecordList& NewRecords)
 	{
 		const double Dt = Settings.RigidTimeStep;
+		const int Reserve = TipRecordReserve(TipActive);
 		const double StepTime = CurrentTime;
 		const double RestSpeed = Tolerances.RestSpeed;
 
@@ -1751,7 +1781,7 @@ namespace rb
 						Record.Feature = P.Feature;
 						Record.Normal = C->Normal;
 					}
-					if (NewRecords.PushBack(Record))
+					if (PushPairRecord(NewRecords, Record, Reserve))
 					{
 						P.Armed = false;
 					}
@@ -1760,7 +1790,9 @@ namespace rb
 				continue;
 			}
 			P.Active = false;
-			// Geometric contact state and re-arming from the gap after the step.
+			// Geometric contact state and re-arming from the gap after the step. A contact state (friction and restitution frozen)
+			// only begins in a step whose solve included the pair, which froze the values above; a pair that is merely within the
+			// touching band after a step without it stays open (it would otherwise keep mu = 0 and e = 0 until it separated).
 			const IslandBody& A = Bodies[P.A];
 			double Gap = kInfinity;
 			if (P.B >= 0)
@@ -1773,7 +1805,7 @@ namespace rb
 				Gap = FeatureContact(Features[P.Feature], A.Position, A.Radius, Hit) ? Hit.Gap
 				                                                                      : FeatureCandidateGap(Features[P.Feature], A.Position, A.Radius, 0.0);
 			}
-			P.InContact = Gap <= Tolerances.ContactTol;
+			P.InContact = Gap <= Tolerances.ContactTol && (C != nullptr || P.InContact);
 			if (!P.Armed && Gap > Tolerances.LeaveDistance)
 			{
 				P.Armed = true;
@@ -1798,7 +1830,11 @@ namespace rb
 				Record.Strike = C.Tip;
 				Record.Normal = C.Normal;
 				Record.NormalSpeed = C.Approach;
-				NewRecords.PushBack(Record);
+				if (!NewRecords.PushBack(Record))
+				{
+					State.InContact = true;
+					continue; // no room: the transition is recorded at the next step (Begin / End stay paired)
+				}
 			}
 			State.Active = Active;
 			State.InContact = true;
@@ -1829,7 +1865,10 @@ namespace rb
 					Record.Time = StepTime;
 					Record.BallA = Bodies[i].Ball;
 					Record.Strike = s;
-					NewRecords.PushBack(Record);
+					if (!NewRecords.PushBack(Record))
+					{
+						continue; // no room: stays active, the TipEnd is recorded at the next step
+					}
 				}
 				State = TipBallState{};
 			}
@@ -1891,6 +1930,15 @@ namespace rb
 		Vec3 Accel[kMaxBalls];
 		for (int i = 0; i < Bodies.Size(); ++i)
 		{
+			// A non-finite body (corrupt state) has no candidate pairs, so the tests below would pass it silently: it must not
+			// be handed back to event mode (the island then runs into NumericsConfig::MaxIslandSteps and the shot is aborted).
+			const IslandBody& Body = Bodies[i];
+			if (!IsFinite(Body.Position.x) || !IsFinite(Body.Position.y) || !IsFinite(Body.Position.z) || !IsFinite(Body.Velocity.x) ||
+				!IsFinite(Body.Velocity.y) || !IsFinite(Body.Velocity.z) || !IsFinite(Body.Omega.x) || !IsFinite(Body.Omega.y) ||
+				!IsFinite(Body.Omega.z))
+			{
+				return false;
+			}
 			Accel[i] = FreeAcceleration(Bodies[i], Settings.ClothSupport && Bodies[i].ClothSupport, ClothSettings, GravityAccel, InPlaneGravityAccel,
 				Tolerances);
 		}

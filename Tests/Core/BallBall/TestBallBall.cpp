@@ -295,7 +295,7 @@ RB_TEST(COL_BB10_MirrorSymmetry)
 			MirrorSpin(I.Omega2) - Im.Omega2};
 		for (const rb::Vec3& Diff : D)
 		{
-			RB_CHECK(rb::Length(Diff) <= 1e-14 * rb::Max(1.0, rb::Length(A.Omega) + rb::Length(B.Omega)));
+			RB_CHECK(rb::Length(Diff) <= 1e-14); // absolute (m/s, rad/s), as the spec states (the mirror is in fact bit-exact)
 		}
 	}
 	// The COL 9 cut set-up mirrored: throw changes sign exactly.

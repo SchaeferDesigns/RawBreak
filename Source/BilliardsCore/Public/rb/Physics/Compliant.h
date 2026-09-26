@@ -238,8 +238,10 @@ namespace rb
 		CliMode Mode() const { return CurrentMode; }
 
 		// Advances all bodies (and tips) by one step of the current mode (semi-implicit Euler with Jacobi contact forces,
-		// or sequential impulses + position projection) and appends first-touch / tip records (in contact-key order; at most
-		// kMaxIslandRecordsPerStep, a record that does not fit stays armed and is emitted at the next step).
+		// or sequential impulses + position projection) and appends first-touch / tip records (in contact-key order; pair records
+		// leave 4 slots of the list per active tip free for the tip records of the step; a pair record that does not fit stays
+		// armed and is emitted at the next step, a tip transition that does not fit is recorded at the next step, so TipBegin /
+		// TipEnd always come in pairs).
 		RB_API void Step(IslandRecordList& NewRecords);
 
 		// Compliant mode: at least one active contact, and every active contact (pairs and tips) has had |v_n| < SustainedSpeed
@@ -250,7 +252,8 @@ namespace rb
 		// LeaveDistance separating (gap rate >= -ApproachSpeedTol), every geometric gap >= -ContactTol (the touching band;
 		// no overlap), and no touching pair (|gap| <= ContactTol) with |gap rate| <= ApproachSpeedTol and gap'' < 0 under the
 		// accelerations the bodies will have in event mode (sliding / rolling on the cloth incl. the tilt drive, ballistic
-		// otherwise): it would re-trigger the pressing rule at once. Tips: no overlap and not approaching.
+		// otherwise): it would re-trigger the pressing rule at once. Tips: no overlap and not approaching. Never true while a body
+		// has a non-finite state (a corrupt island runs into NumericsConfig::MaxIslandSteps instead of returning it to event mode).
 		RB_API bool CanExit() const;
 
 		// Body at rest (|v| <= EpsV, |w| R <= EpsWTimesRadius): rigid islands end on rest.
