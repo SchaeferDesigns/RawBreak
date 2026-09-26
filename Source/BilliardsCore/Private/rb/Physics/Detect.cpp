@@ -352,8 +352,10 @@ namespace rb
 
 		// Degree-8 contact of a ball with a horizontal circle (center C, radius Major, height Zc) thickened by the tube radius
 		// Minor: Q^2 - 4 Major^2 rho^2 = 0 with Q = rho^2 + Major^2 + (z - Zc)^2 - (R + Minor)^2 (collisions 5.3), = (distance to
-		// the circle^2 - (R + Minor)^2) * (distance to the antipodal circle point^2 - (R + Minor)^2), whose second factor is > 0.
-		// Valid(tau) decides which part of the tube exists.
+		// the circle^2 - (R + Minor)^2) * (distance to the antipodal circle point^2 - (R + Minor)^2). The second factor is > 0
+		// whenever Major > R + Minor (rim torus, cut rim); for a small circle (jaw edge, Major = r_j < R) it can vanish deep
+		// inside, so such callers also require Q > 0 (the root of the NEAR factor, collisions 5.3). Valid(tau) decides which
+		// part of the tube exists.
 		template <class ValidFn>
 		ContactPrediction CircleTubeContact(const MotionSegment& Seg, double Radius, const Vec2& C, double Major, double Minor, double Zc, double TimeLimit,
 			const NumericsConfig& N, const ValidFn& Valid)
@@ -379,11 +381,14 @@ namespace rb
 			{
 				F.c[i] -= FourMajor2 * Rho2.c[i];
 			}
-			// df/dgap = 2 (R + Minor) * (second factor); that factor is 4 Major rho at a contact with rho in [Major - Reach, Major].
+			// df/dgap = 2 (R + Minor) * (second factor); that factor is 4 Major rho at a contact, rho (the center's plan distance)
+			// in [Max(Major - Reach, 0), Major + Reach]. Clamped to that range (floor Major^2 near the axis): the start value sets
+			// the touching band and the graze tolerance, which must stay those of a contact also for a start far away.
 			const double Rho0 = Sqrt(Rho2.c[0]);
 			const double Second0 = Q.c[0] + 2.0 * Major * Rho0;
 			const double SecondMin = 4.0 * Major * Max(Major - Reach, 0.25 * Major);
-			const CrossingSpec Spec{2.0 * Reach * Max(Second0, SecondMin), true};
+			const double SecondMax = 4.0 * Major * (Major + Reach);
+			const CrossingSpec Spec{2.0 * Reach * Clamp(Second0, SecondMin, SecondMax), true};
 			return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, Spec, N, Valid);
 		}
 
@@ -631,18 +636,39 @@ namespace rb
 
 	ContactPrediction PredictJawArcAirborne(const MotionSegment& Seg, double Radius, const JawArc& Arc, double TimeLimit, const NumericsConfig& Numerics)
 	{
-		// Sphere approximation of the rounded point (error ~0.13 mm, 4.10), restricted to the exposed arc in plan.
+		// EXACT edge contact (4.10 "alternative", degree 8 by the same isolation): the distance from the center to the arc's
+		// edge circle (radius r_j at height h about Center) equals R, where the nearest circle point lies on the exposed arc
+		// (plan direction Center -> center within [AngleFrom, AngleFrom + AngleSweep]). At each tangent point this surface
+		// has the cross-section of the airborne nose / facing top-edge cylinder (radius R about the edge line), so the
+		// nose -> jaw -> facing chain is watertight for balls arriving from above. The quartic center-sphere approximation
+		// |p - O| = R + r_j is not: at the nose junction it bulges up to r_j beyond the nose cylinder, and a ball crossing
+		// the junction plane inside that shell (e.g. falling onto the jaw while drifting along the rail) was hit by neither
+		// predictor and flew through the jaw into the cushion.
 		const VecQuad Q = Relative(Seg, ToVec3(Arc.Center, Arc.Height));
-		Polynomial F = SquaredNorm(Q);
-		const double Reach = Radius + Arc.Radius;
-		F.c[0] -= Reach * Reach;
 		const double AngleSlack = Numerics.SegmentParamSlack / Max(Arc.Radius, 1e-6);
+		if (!(Arc.Radius > 0.0))
+		{
+			// Sharp jaw (r_j = 0): the circle is the point O itself, |p - O| = R (quartic, exact).
+			Polynomial F = SquaredNorm(Q);
+			F.c[0] -= Radius * Radius;
+			const auto ValidPoint = [&](double Tau)
+			{
+				const Vec2 Dir = XY(At(Q, Tau));
+				return LengthSquared(Dir) > 0.0 && InAngularRange(Dir, Arc.AngleFrom, Arc.AngleSweep, AngleSlack);
+			};
+			return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, {2.0 * Radius, true}, Numerics, ValidPoint);
+		}
+		const double Rj2 = Arc.Radius * Arc.Radius;
+		const double R2 = Radius * Radius;
 		const auto Valid = [&](double Tau)
 		{
-			const Vec2 Dir = XY(At(Q, Tau));
-			return LengthSquared(Dir) > 0.0 && InAngularRange(Dir, Arc.AngleFrom, Arc.AngleSweep, AngleSlack);
+			const Vec3 W = At(Q, Tau);
+			const Vec2 Dir = XY(W);
+			const double Rho2 = LengthSquared(Dir);
+			// Q > 0: the root of the near factor (distance to the nearest circle point = R), never of the antipodal one.
+			return Rho2 > 0.0 && Rho2 + Rj2 + W.z * W.z - R2 > 0.0 && InAngularRange(Dir, Arc.AngleFrom, Arc.AngleSweep, AngleSlack);
 		};
-		return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, {2.0 * Reach, true}, Numerics, Valid);
+		return CircleTubeContact(Seg, Radius, Arc.Center, Arc.Radius, 0.0, Arc.Height, TimeLimit, Numerics, Valid);
 	}
 
 	// =============================================================================================
@@ -1532,8 +1558,13 @@ namespace rb
 			}
 			else
 			{
+				// From the nearest point of the edge circle (r_j at h), as detected; the center itself for a sharp jaw or a
+				// center straight above the circle's center.
 				Out.BallOnCloth = false;
-				Out.Normal = Normalized(P - ToVec3(Arc.Center, Arc.Height)); // sphere approximation, as detected (4.10)
+				const Vec2 H = XY(P) - Arc.Center;
+				const double Rho = Length(H);
+				const Vec2 Rim = Rho > 0.0 ? Arc.Center + H * (Arc.Radius / Rho) : Arc.Center;
+				Out.Normal = Normalized(P - ToVec3(Rim, Arc.Height));
 				Out.Elevation = ElevationOf(Out.Normal);
 			}
 			break;

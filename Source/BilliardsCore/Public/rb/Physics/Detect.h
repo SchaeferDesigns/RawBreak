@@ -96,8 +96,11 @@ namespace rb
 		const NumericsConfig& Numerics);
 	RB_API ContactPrediction PredictJawArcOnCloth(const MotionSegment& Seg, double Radius, const JawArc& Arc, double ContactOffset, double TimeLimit,
 		const NumericsConfig& Numerics);
-	// Sphere approximation of the arc (|p - O| = R + r_j with O at height h, quartic; error ~0.13 mm, 4.10), valid where
-	// the plan direction from O to the center lies on the exposed arc [AngleFrom, AngleFrom + AngleSweep].
+	// Exact edge contact (4.10 "alternative", degree 8): distance from the center to the edge circle (r_j at height h about
+	// O) = R, valid where the plan direction from O to the center lies on the exposed arc [AngleFrom, AngleFrom + AngleSweep]
+	// (and the near circle point is meant: Q > 0). At the tangent points it continues the airborne nose / facing top-edge
+	// cylinders seamlessly; the quartic center-sphere approximation |p - O| = R + r_j does not (a ball crossing the nose
+	// junction inside the up-to-r_j bulge was missed by both). A sharp jaw (r_j = 0) is the point contact |p - O| = R.
 	RB_API ContactPrediction PredictJawArcAirborne(const MotionSegment& Seg, double Radius, const JawArc& Arc, double TimeLimit, const NumericsConfig& Numerics);
 
 	// ---------------------------------------------------------------------------------------------
@@ -274,7 +277,7 @@ namespace rb
 	// the center, collisions 4.1 / 4.6). Balls on a surface (Ball.State on the cloth / shelf) get the on-cloth frames:
 	// noses and jaw arcs k = cos(theta_c) n - sin(theta_c) z with theta_c from ComputeCushionContact, facing faces the
 	// undercut plane (theta = beta_v); every other state gets the actual geometric normal (airborne nose / facing top
-	// edge / rail-top edge: from the edge line; jaw arc: from the center sphere as detected; liner: toward the axis tilted
+	// edge / rail-top edge: from the edge line; jaw arc: from the nearest point of its edge circle; liner: toward the axis tilted
 	// down by beta_l; rim torus: from the core circle; rail top: the plane normal). SlateLanding gives the C.3 parity
 	// frame (k = z_hat). Region features (drop edge, capture, exit, support exit, boundary, lamp) are not contacts:
 	// Normal = z_hat, Pocket set where it applies.

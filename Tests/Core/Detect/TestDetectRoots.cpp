@@ -91,19 +91,23 @@ namespace
 		int Hits = 0;
 		int GrazeDisagreements = 0;
 		int Violations = 0;
-		double MaxTimeError = 0.0;
+		double MaxTimeError = 0.0; // [s] absolute (D-10) or relative to max(1 s, t) (ROOT-01)
 	};
 
-	// One case of D-10 / ROOT-01: PredictBallBall against the reference.
-	void CompareCase(const MotionSegment& A, double RA, const MotionSegment& B, double RB, AgreementStats& Stats)
+	// One case of D-10 / ROOT-01: PredictBallBall against the reference. Times must agree to 1e-12 s (D-10: absolute;
+	// ROOT-01: "1e-12 s or relative 1e-12"). A hit / miss disagreement (or an unchecked time) is allowed only for a graze:
+	// the reference's run minimum within eps_f of zero (0.1 % allowance for the double rounding of the solver's own f_min,
+	// ~1e-15 m^2 against eps_f = 1.1e-10 m^2) or the reference approach speed below 1e-6 m/s (D-10 wording).
+	void CompareCase(const MotionSegment& A, double RA, const MotionSegment& B, double RB, bool RelativeTime, AgreementStats& Stats)
 	{
 		const double RefTime = rb::Max(A.T0, B.T0);
 		const double TauMax = rb::Min(A.T0 + A.TauEnd, B.T0 + B.TauEnd) - RefTime;
 		const double EpsF = 2.0 * (RA + RB) * 1e-9;
+		const double GrazeBand = EpsF * 1.001;
 		const rb::ContactPrediction P = rb::PredictBallBall(A, RA, B, RB, rb::kInfinity, Numerics());
 		const ReferenceEntry E = ReferenceBallBallEntry(A, RA, B, RB, TauMax);
 		++Stats.Cases;
-		const bool NearGraze = E.Found && (rb::Abs(E.RunMinimum) <= 2.0 * EpsF || E.ApproachSpeed < 1e-6);
+		const bool NearGraze = E.Found && (rb::Abs(E.RunMinimum) <= GrazeBand || E.ApproachSpeed < 1e-6);
 		if (P.Found && E.Found)
 		{
 			++Stats.Hits;
@@ -111,8 +115,9 @@ namespace
 			const double Error = rb::Abs(P.Time - RefAbs);
 			if (!NearGraze)
 			{
-				Stats.MaxTimeError = rb::Max(Stats.MaxTimeError, Error / rb::Max(1.0, RefAbs));
-				if (Error > rb::Max(1e-12, 1e-12 * rb::Abs(RefAbs)))
+				const double Scaled = RelativeTime ? Error / rb::Max(1.0, RefAbs) : Error;
+				Stats.MaxTimeError = rb::Max(Stats.MaxTimeError, Scaled);
+				if (Scaled > 1e-12)
 				{
 					++Stats.Violations;
 				}
@@ -123,20 +128,24 @@ namespace
 		{
 			return;
 		}
-		// Hit / miss disagreement: allowed only for grazes. When the reference misses, look at its closest approach.
+		// Hit / miss disagreement: allowed only for grazes. When the reference misses, look at its closest approach: the
+		// interior minima and the window end of f.
 		bool Graze = NearGraze;
 		if (!E.Found)
 		{
-			// Minimum of f over the window from dense DD sampling around its critical points (the reference found no entry).
 			const rb::Polynomial F = rb::BallBallGapPolynomial(A, RA, B, RB, RefTime);
 			double Crit[8];
 			const int NumCrit = rb::SolveInInterval(F.Derivative(), 0.0, TauMax, Crit);
 			for (int i = 0; i < NumCrit; ++i)
 			{
-				if (rb::Abs(F.Eval(Crit[i])) <= 4.0 * EpsF)
+				if (rb::Abs(F.Eval(Crit[i])) <= GrazeBand)
 				{
 					Graze = true;
 				}
+			}
+			if (rb::Abs(F.Eval(TauMax)) <= GrazeBand)
+			{
+				Graze = true;
 			}
 		}
 		if (Graze)
@@ -164,7 +173,7 @@ namespace
 			{
 				continue; // start separated (touching starts are D-7 / D-12)
 			}
-			CompareCase(A, kR, B, kR, Stats);
+			CompareCase(A, kR, B, kR, false, Stats);
 		}
 	}
 
@@ -193,7 +202,7 @@ namespace
 			{
 				continue;
 			}
-			CompareCase(A, RA, B, RB, Stats);
+			CompareCase(A, RA, B, RB, true, Stats);
 		}
 	}
 

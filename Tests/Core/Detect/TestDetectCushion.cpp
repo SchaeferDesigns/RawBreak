@@ -113,17 +113,86 @@ RB_TEST(Detect_NoseAirborneEdgeContactAndTableSideRule)
 	RB_CHECK_NEAR(std::sqrt(rb::Square(C.y - 0.635) + rb::Square(C.z - kNoseH)), kR, 1e-12);
 }
 
-RB_TEST(Detect_JawArcAirborneUsesTheSphereApproximation)
+RB_TEST(Detect_JawArcAirborneIsTheExactEdgeCircle)
 {
-	// A ball moving horizontally at z = R meets the arc's center sphere at the plan distance
-	// sqrt((R + r_j)^2 - (h - R)^2) = 31.648 mm (4.10), not at the exact r_j + R_c = 31.514 mm.
+	// A ball moving horizontally at z = R meets the edge circle (r_j at h) at the plan distance r_j + R_c = 31.514 mm (4.10:
+	// the exact value, = the on-cloth contact distance), not at the center-sphere approximation's
+	// sqrt((R + r_j)^2 - (h - R)^2) = 31.648 mm.
 	const rb::JawArc Jaw = MakeJaw({0.3, 0.0}, 0.004, -rb::kPi, 0.5 * rb::kPi);
 	MotionSegment S = Airborne({0.0, 0.0, kR}, {1.0, 0.0, 0.0});
 	S.Accel2 = {};
 	S.TauEnd = 1.0;
 	const ContactPrediction P = rb::PredictJawArcAirborne(S, kR, Jaw, rb::kInfinity, Numerics());
 	RB_REQUIRE(P.Found);
-	RB_CHECK_NEAR(0.3 - rb::PositionAt(S, P.Time).x, 0.0316481522752514, 1e-12);
+	RB_CHECK_NEAR(0.3 - rb::PositionAt(S, P.Time).x, 0.004 + NoseContactOffset(), 1e-12);
+	RB_CHECK_NEAR(0.004 + NoseContactOffset(), 0.031514, 1e-6);
+
+	// Falling from straight above the circle point nearest the approach: contact R above it (the circle, not the sphere
+	// R + r_j above O's height offset).
+	const Vec2 Top = Jaw.Center + Vec2{-0.004 * std::cos(0.3), -0.004 * std::sin(0.3)};
+	const MotionSegment Drop = Airborne({Top.x, Top.y, kNoseH + 0.05}, {});
+	const ContactPrediction D = rb::PredictJawArcAirborne(Drop, kR, Jaw, rb::kInfinity, Numerics());
+	RB_REQUIRE(D.Found);
+	RB_CHECK_NEAR(rb::PositionAt(Drop, D.Time).z, kNoseH + kR, 1e-12);
+
+	// Sharp jaw (r_j = 0): the point contact |p - O| = R.
+	const rb::JawArc Sharp = MakeJaw({0.3, 0.0}, 0.0, -rb::kPi, 0.5 * rb::kPi);
+	const ContactPrediction P0 = rb::PredictJawArcAirborne(S, kR, Sharp, rb::kInfinity, Numerics());
+	RB_REQUIRE(P0.Found);
+	RB_CHECK_NEAR(0.3 - rb::PositionAt(S, P0.Time).x, NoseContactOffset(), 1e-12);
+
+	// A (corrupt) start deep inside the rounded point, moving out through the exposed arc: the antipodal factor of the
+	// degree-8 polynomial crosses zero there, which is not a contact (Q > 0 rule): nothing.
+	MotionSegment Out = Airborne(rb::ToVec3(Jaw.Center + Vec2{-0.001, -0.0005}, kNoseH + 0.005), {-1.0, -0.5, 0.0});
+	Out.Accel2 = {};
+	Out.TauEnd = 0.1;
+	RB_CHECK(!rb::PredictJawArcAirborne(Out, kR, Jaw, rb::kInfinity, Numerics()).Found);
+}
+
+RB_TEST(Detect_AirborneNoseToJawJunctionIsWatertight)
+{
+	// 9FT_PRO corner jaw next to the head rail's nose (C5 end at the jaw tangent point, arc center r_j behind it, exposed
+	// arc from the facing direction -38 deg to the nose normal 0 deg). A ball descending toward the rail crosses the
+	// junction plane y = -0.5528 at 15 mm in front of the nose line and 25.4 mm above it: farther than R from the nose edge
+	// (no nose contact up to its end) but already inside the center sphere |p - O| < R + r_j (entered on the nose side,
+	// where the jaw is not valid). Regression: with the sphere approximation neither predictor fired and the ball flew
+	// through the jaw into the cushion (found by an airborne leak test on the built 9FT_PRO table). The exact edge circle
+	// continues the nose cylinder: contact 1.919 ms after the junction, at distance R from the arc.
+	const rb::NoseSegment Nose = MakeNose({-1.27, 0.5528}, {-1.27, -0.5528}, {1.0, 0.0});
+	const rb::JawArc Jaw = MakeJaw({-1.274, -0.5528}, 0.004, -38.0 * rb::kDegToRad, 38.0 * rb::kDegToRad);
+	MotionSegment S = Airborne({-1.245, -0.5498, kNoseH + 0.0254}, {-1.0, -0.3, 0.0});
+	S.Accel2 = {};
+	S.TauEnd = 0.05;
+	RB_CHECK(!rb::PredictNoseAirborne(S, kR, Nose, 0.0, rb::kInfinity, Numerics()).Found);
+	const ContactPrediction J = rb::PredictJawArcAirborne(S, kR, Jaw, rb::kInfinity, Numerics());
+	RB_REQUIRE(J.Found);
+	RB_CHECK(J.Flags == 0);
+	const auto ArcGap = [&](double Tau)
+	{
+		const Vec3 C = rb::PositionAt(S, Tau);
+		const Vec2 H = rb::XY(C) - Jaw.Center;
+		const double Rho = rb::Length(H);
+		return std::sqrt(rb::Square(Rho - Jaw.Radius) + rb::Square(C.z - kNoseH)) - kR;
+	};
+	RB_CHECK_NEAR(J.Time, 0.01 + 0.0019189, 1e-6);
+	RB_CHECK_NEAR(ArcGap(J.Time), 0.0, 1e-12);
+	RB_CHECK_NEAR(J.Time, BruteForceFirstContact(ArcGap, S.TauEnd), 1e-9);
+	const Vec2 Dir = rb::XY(rb::PositionAt(S, J.Time)) - Jaw.Center;
+	RB_CHECK(std::atan2(Dir.y, Dir.x) < 0.0 && std::atan2(Dir.y, Dir.x) > -38.0 * rb::kDegToRad); // on the exposed arc
+
+	// The contact frame points from the nearest circle point to the center.
+	rb::TableGeometry T;
+	T.JawArcs.PushBack(Jaw);
+	rb::BallState B;
+	B.Position = rb::PositionAt(S, J.Time);
+	B.State = rb::MotionState::Airborne;
+	const rb::FixedContact K = rb::MakeFixedContact({rb::TableFeatureKind::JawArc, 0, 0}, T, B, rb::BallSpec{}, {});
+	const Vec2 Rim = Jaw.Center + Dir * (Jaw.Radius / rb::Length(Dir));
+	const Vec3 Expected = rb::Normalized(B.Position - rb::ToVec3(Rim, kNoseH));
+	RB_CHECK_NEAR(K.Normal.x, Expected.x, 1e-12);
+	RB_CHECK_NEAR(K.Normal.y, Expected.y, 1e-12);
+	RB_CHECK_NEAR(K.Normal.z, Expected.z, 1e-12);
+	RB_CHECK(!K.BallOnCloth);
 }
 
 RB_TEST(Detect_FacingOnShelfAndAirborneAndTopEdge)
