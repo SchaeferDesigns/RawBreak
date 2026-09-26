@@ -286,9 +286,14 @@ RB_TEST(Integ_Detect_TableEventOnClothNoseUsesTheCushionContactOffset)
 
 	const rb::FixedContact N = rb::MakeFixedContact(D.Feature, T, StateAt(rb::PositionAt(S, D.Contact.Time), rb::MotionState::Rolling), rb::BallSpec{}, {});
 	RB_CHECK(N.BallOnCloth);
-	RB_CHECK_NEAR(N.Elevation, 0.2733943, 1e-6); // theta_c = 15.664 deg
-	RB_CHECK_NEAR(N.Normal.y, -std::cos(0.2733943), 1e-6);
-	RB_CHECK_NEAR(N.Normal.z, -std::sin(0.2733943), 1e-6);
+	// theta_c = asin((h - R) / R) = asin(0.27) = 0.2733930 rad = 15.66427 deg (collisions C-G1, verification log 15.6643 deg).
+	// The tabulated "0.2733943 rad" (collisions 0.4, equipment CUSHION_CONTACT_ANGLE / T-CUSH-2) is a transcription slip
+	// (= 15.66434 deg, 1.27e-6 rad off, beyond the 1e-6 tolerance); the formula and the degree values govern.
+	const double ThetaC = std::asin(0.27);
+	RB_CHECK_NEAR(ThetaC, 15.66427 * rb::kDegToRad, 1e-6);
+	RB_CHECK_NEAR(N.Elevation, ThetaC, 1e-6);
+	RB_CHECK_NEAR(N.Normal.y, -std::cos(ThetaC), 1e-6);
+	RB_CHECK_NEAR(N.Normal.z, -std::sin(ThetaC), 1e-6);
 }
 
 RB_TEST(Integ_Detect_NineFootProCornerApproachReachesTheDropEdgeFirst)
