@@ -155,6 +155,8 @@ namespace rb::human
 		                                //   point, current dome radius), Cue = CueSpec with TipFriction = TipFrictionKinetic = mu,
 		                                //   TipDomeRadius = r_dome, TipRestitution = e_tip; TipTouchesCloth from the executed pose
 		Vec2 TipTransverseVelocity;     // (v_r, v_u) [m/s] at contact: animation / audio only, never a physics input (HF-11)
+		Vec2 AxisOffset;                // (A_x, B_x) [1] executed cue-AXIS offsets / R (3.5), before AimToContactOffset and the rho
+		                                //   clamp; equals SampleHand's AxisOffsetA / B at t_c with the full ramp (budget model 3.10)
 		double Rho = 0.0;               // executed |(a, b)| after the clamp
 		double MiscueLimit = 0.0;       // mu / sqrt(1 + mu^2) at the contact zone
 		TipContactPoint Contact;        // q, beta, zone, weights, coverage, mu (tip wear after the shot)
@@ -180,14 +182,27 @@ namespace rb::human
 	// is rebuilt (DrawPerShot), and rollout keys ignore it, so the result is a pure function of the other inputs and the key.
 	// NoiseScale 0 with a straight cue (BowSag 0) and neither the elevation floor nor the offset clamp biting returns the
 	// intended stroke bit-exactly (HF-T08).
+	// Executed pose (3.6, UE 5.5 geometry, no margin): the dome centre is CueBallPosition + (R + r_dome) Q / R (Q = CueContactPoint
+	// of the clamped (a, b)), the tip rim (cap boundary, radius w_tip / 2) sits sqrt(r_dome^2 - (w_tip / 2)^2) ahead of it on the
+	// axis, and the body runs back from the rim along -d with r(s) = r_t + (r_b - r_t) s / Cue.Length. TipTouchesCloth: the rim,
+	// the dome (when its lowest point lies on the cap) or the shaft (s <= CueBody.ShaftLength) below z = 0. Shaft contacts: the
+	// minimum over s in [0, Cue.Length] of |P(s) - P_j| - r(s) - R_j < 0, classified by that s (Ferrule / Shaft / Butt), Time 0;
+	// plus Situation.FloorBall when the elevation floor set by a ball bites. Double-hit / push risk: the first ball in the cue
+	// ball's straight swept corridor (plan view along phi_x; a ball counts when its centre lies ahead within R + R_j of the path
+	// line), its surface gap |P_j - C| - R - R_j and cut angle asin(offset / (R + R_j)) (3.6, RUL F7 / F8).
 	RB_API ExecutedStroke ExecuteStroke(const IntendedStroke& Intended, const ShooterAttributes& Attributes, const StrokeSituation& Situation,
 		const TipState& Tip, const CueBodyState& CueBody, const CueSpec& Cue, const BallSpec& CueBall, const Vec3& CueBallPosition,
 		const BallObstacle* OtherBalls, int OtherBallCount, const NoiseKey& Key, const NoiseHistory& History, const HumanParams& Params,
 		const TipParams& TipModel = TipParams{});
 
-	// The multipliers and sigmas of 3.4 / 3.5 at time Time (E and k_set at Time; no draws, Flinch = 0).
+	// The multipliers and sigmas of 3.4 / 3.5 at time Time (E and k_set at Time; no draws, Flinch = 0; GripBias = -b_grip P_x L_N
+	// at full noise scale). The offset-proportional terms of sA / sB use BallRadius (the first overload: kDefaultBallRadius).
+	// ExecuteStroke's breakdown holds the same factors at t_c for the cue ball's radius, with Flinch and GripBias as applied
+	// (drawn, NoiseScale and ChannelMask included).
 	RB_API SituationFactors ComputeSituationFactors(const IntendedStroke& Intended, const ShooterAttributes& Attributes, const StrokeSituation& Situation,
 		const HumanParams& Params, double Time);
+	RB_API SituationFactors ComputeSituationFactors(const IntendedStroke& Intended, const ShooterAttributes& Attributes, const StrokeSituation& Situation,
+		const HumanParams& Params, double Time, double BallRadius);
 
 	// E(t) = 1 + exp(-t / 0.8 s) + min(0.5, 0.03 max(0, t - 10 s)) (HF-07).
 	RB_API double SettleInEnvelope(double Time, const HumanParams& Params);
@@ -282,7 +297,11 @@ namespace rb::human
 	// Tip: HitSeverity(V_x, rho, the core's StrikeResult::Miscue) -> ApplyTipWear at Stroke.Contact. Marks: deposit on the
 	// struck ball at the executed contact point (CueContactPoint of MOT B.3, ball orientation SimBall::Orientation at t = 0),
 	// then FadeChalkMarks of every ball in play by its ComputeTravelDistances (needs RecordOptions::Trajectories).
-	// Marks = the per-ball mark lists (kMaxBalls entries, index = ball id) carried into the next SimInput.
+	// Marks = the per-ball mark lists (kMaxBalls entries, index = ball id) carried into the next SimInput (nullptr: tip only).
+	// One call per strike of the shot (the lag has two cues), in strike order; the fading runs once per shot, in the call for
+	// the LAST strike (StrikeIndex == Result.Strikes.Size() - 1, or a shot without strikes), after every deposit. A StrikeIndex
+	// outside Result.Strikes changes no tip and deposits nothing. The miscue severity comes from the CORE (HF-B03), never
+	// from ExecutedStroke::PredictedMiscue.
 	RB_API void ApplyShotToEquipment(const ExecutedStroke& Stroke, const ShotResult& Result, int StrikeIndex, const Quat& StruckBallOrientation,
 		TipState& Tip, BallChalkMarks* Marks, const TipParams& TipModel = TipParams{}, const MarkParams& MarkModel = MarkParams{});
 }

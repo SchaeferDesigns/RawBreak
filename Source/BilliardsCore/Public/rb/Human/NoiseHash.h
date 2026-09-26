@@ -206,6 +206,12 @@ namespace rb::human
 	// Eighth of a uniform in [0, 1): floor(8 U) (8 U is exact).
 	constexpr int EighthOf(double U) { return static_cast<int>(U * 8.0); }
 
+	// Exact-integer fallback of the streak guard (3.2, v1.3): maps the last candidate u = Candidate53 2^-53 (Candidate53 =
+	// HashKeys(...) >> 11 < 2^53) into the allowed eighths A (bit e of AllowedEighths set = eighth e allowed; ascending,
+	// m = |A|): P = m N (< 2^56), j = P >> 53, u = (A[j] 2^50 + ((P mod 2^53) >> 3)) 2^-53, which lies in eighth A[j]
+	// exactly. AllowedEighths == 0 (never produced by the guard, which excludes at most 3 eighths) returns N 2^-53.
+	RB_API double StreakFallback(std::uint64_t Candidate53, std::uint32_t AllowedEighths);
+
 	// Accepted draw Index given the history of draws Index-7 .. Index-1 of the same (MatchSeed, Shooter, Channel).
 	RB_API GuardedDraw DrawGuarded(std::uint64_t MatchSeed, std::uint64_t Shooter, NoiseChannel Channel, std::uint32_t Index, const StreakHistory& History);
 
