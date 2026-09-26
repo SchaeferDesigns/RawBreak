@@ -10,6 +10,8 @@
 #include "rb/Geometry/TableGeometry.h"
 #include "rb/Math/Scalar.h"
 
+#include <cmath>
+
 using namespace rb;
 
 RB_TEST(EQP_TCUSH2_ContactElevationAngle)
@@ -67,6 +69,30 @@ RB_TEST(COL_CG1_CushionContactGeometry)
 	RB_CHECK_NEAR(G.Theta * kRadToDeg, 15.664, 5e-4); // printed to 3 decimals
 	RB_CHECK_NEAR(G.CosTheta, 0.96286, 5e-6);
 	RB_CHECK_NEAR(G.HorizontalOffset, 0.02751373, 1e-8);
+}
+
+RB_TEST(Geometry_CushionContactConstantsMatchTheComputation)
+{
+	// Review fix: kCushionContactOffsetXY was typed as 0.027513733700867 (5e-12 m off R_c); both constants are now the
+	// exact doubles ComputeCushionContact returns for the standard ball (equipment 11.1: DERIVED, one source).
+	const CushionContactGeometry G = ComputeCushionContact(kBallRadius, kCushionNoseHeight, 0.0, false);
+	RB_CHECK(G.HorizontalOffset == kCushionContactOffsetXY);
+	RB_CHECK(G.Theta == kCushionContactAngle);
+	RB_CHECK_NEAR(kCushionContactOffsetXY, kBallRadius * Cos(kCushionContactAngle), 1e-17);
+}
+
+RB_TEST(Geometry_CushionContactNonFiniteInput)
+{
+	// Adversarial: non-finite radius or nose height gives the neutral default (no NaN leaks into a contact frame).
+	for (const double Bad : {std::nan(""), kInfinity, -kInfinity})
+	{
+		for (const CushionContactGeometry& G :
+			{ComputeCushionContact(Bad, kCushionNoseHeight, 0.0, false), ComputeCushionContact(kBallRadius, Bad, 0.0, false),
+				ComputeCushionContact(kBallRadius, kCushionNoseHeight, Bad, false)})
+		{
+			RB_CHECK(G.SinTheta == 0.0 && G.CosTheta == 1.0 && G.Theta == 0.0 && G.HorizontalOffset == 0.0);
+		}
+	}
 }
 
 RB_TEST(Geometry_CushionContactWithNoseRadius)

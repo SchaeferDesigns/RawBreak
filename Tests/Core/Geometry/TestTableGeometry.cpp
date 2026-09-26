@@ -241,6 +241,52 @@ namespace
 		return false;
 	}
 
+	// Front arc = the capture circle inside the opening (collisions 5.3), sampled at 3600 angles per pocket: every point of
+	// the front half of the r_p circle inside the opening is on the arc, and so is every point of the front half of the
+	// drop-edge circle a_d inside the opening (for any ball size); no angle at which both circles lie outside the opening
+	// is. Returns the number of violating samples (-1 if a pocket has no front sample).
+	int FrontArcViolations(const TableGeometry& G)
+	{
+		int Violations = 0;
+		for (int k = 0; k < G.Pockets.Size(); ++k)
+		{
+			const PocketGeometry& P = G.Pockets[k];
+			Vec2 Opening[5];
+			const int N = PocketOpening(G, k, Opening);
+			int Front = 0;
+			for (int s = 0; s < 3600; ++s)
+			{
+				const double Angle = (static_cast<double>(s) + 0.5) * kTwoPi / 3600.0 - kPi;
+				const Vec2 Dir{Cos(Angle), Sin(Angle)};
+				const bool OnArc = ArcContainsAngle(P.FrontArcFrom, P.FrontArcSweep, Angle);
+				const Vec2 Wall = P.CaptureCenter + Dir * P.CaptureRadius;
+				const Vec2 Edge = P.CaptureCenter + Dir * P.DropEdgeRadius;
+				// Front half only: behind the capture center a bar corner's shallow hole ends ~4 mm in front of the
+				// cushion-back corner, where the vertical rail faces stand just behind the wall (back wall, not front).
+				if (Dot(Dir, P.Axis) < 0.0 && InConvex(Opening, N, Wall, 1e-9))
+				{
+					Violations += OnArc ? 0 : 1;
+					++Front;
+				}
+				// Every drop-edge point a ball can roll onto (in the opening, in front of the capture center) is on the arc.
+				if (Dot(Dir, P.Axis) < 0.0 && InConvex(Opening, N, Edge, 1e-9))
+				{
+					Violations += OnArc ? 0 : 1;
+				}
+				// Where both circles are under the rail there is no front arc (back wall up to WallTopZ).
+				if (!InConvex(Opening, N, Wall, -1e-9) && !InConvex(Opening, N, Edge, -1e-9))
+				{
+					Violations += OnArc ? 1 : 0;
+				}
+			}
+			if (Front == 0)
+			{
+				return -1;
+			}
+		}
+		return Violations;
+	}
+
 	// Signed area of a closed polyline.
 	double SignedArea(const Vec2* P, int N)
 	{
@@ -638,13 +684,17 @@ RB_TEST(Geometry_PocketDropEdgeAndFrontArc)
 			RB_CHECK(Near(P.CaptureCenter - P.Axis * (Ps.Shelf + Ps.CaptureRadius), P.MouthMid, 1e-15));
 			RB_CHECK(Near(P.MouthMid, (P.JawPoint[0] + P.JawPoint[1]) * 0.5, 1e-15));
 			RB_CHECK_NEAR(Length(P.JawPoint[1] - P.JawPoint[0]), Ps.Mouth, 1e-15);
-			// Front arc: ends on the two facing lines at a_d, the table-side point of the circle inside it.
+			// Front arc: ends where the capture circle r_p meets the two facing lines (on the facings, not behind them)
+			// or, for TABLE_7FT_78's side pockets (the r_p circle would meet the facing lines 0.3 mm behind the facing
+			// ends), the cushion-back line; the table-side point of the circle inside it.
 			RB_CHECK(P.FrontArcSweep > 0.0 && P.FrontArcSweep < kTwoPi);
+			RB_CHECK(P.FrontArcFrom > -kPi && P.FrontArcFrom <= kPi);
 			const double Ends[2] = {P.FrontArcFrom, P.FrontArcFrom + P.FrontArcSweep};
 			bool OnFacing[2] = {false, false};
+			int OnCushionBack = 0;
 			for (const double Angle : Ends)
 			{
-				const Vec2 X = P.CaptureCenter + Vec2{Cos(Angle), Sin(Angle)} * P.DropEdgeRadius;
+				const Vec2 X = P.CaptureCenter + Vec2{Cos(Angle), Sin(Angle)} * P.CaptureRadius;
 				for (int s = 0; s < 2; ++s)
 				{
 					const Facing& F = G.Facings[2 * k + s];
@@ -654,11 +704,62 @@ RB_TEST(Geometry_PocketDropEdgeAndFrontArc)
 						RB_CHECK(Dot(X - P.JawPoint[s], F.Direction) <= F.LengthFromVirtualPoint); // on the facing, not behind it
 					}
 				}
+				const bool Back = P.Kind == PocketKind::Side ? Near(Abs(X.y), G.HalfWidth + Spec.CushionWidth, 1e-12)
+															 : (Near(Abs(X.x), G.HalfLength + Spec.CushionWidth, 1e-12) ||
+																   Near(Abs(X.y), G.HalfWidth + Spec.CushionWidth, 1e-12));
+				OnCushionBack += Back ? 1 : 0;
 			}
-			RB_CHECK(OnFacing[0] && OnFacing[1]);
+			if (Preset == TablePreset::SevenFoot78 && P.Kind == PocketKind::Side)
+			{
+				RB_CHECK(OnCushionBack == 2 && !OnFacing[0] && !OnFacing[1]);
+			}
+			else
+			{
+				RB_CHECK(OnFacing[0] && OnFacing[1] && OnCushionBack == 0);
+			}
 			RB_CHECK(ArcContainsAngle(P.FrontArcFrom, P.FrontArcSweep, Atan2(-P.Axis.y, -P.Axis.x)));
 			RB_CHECK(!ArcContainsAngle(P.FrontArcFrom, P.FrontArcSweep, Atan2(P.Axis.y, P.Axis.x)));
 			RB_CHECK(P.FrontArcSweep < kPi); // the front arc is the table side only
+		}
+	}
+}
+
+RB_TEST(Geometry_FrontArcIsTheCaptureCircleInsideTheOpening)
+{
+	// Review fix (collisions 5.3: "drop edge (rim): the capture circle's front arc between the facings"; the hole
+	// wall exists on the front arc only below the rim, elsewhere up to WallTopZ). The angular range must be where the
+	// r_p circle (slate cut / liner) lies inside the pocket opening: a range taken from the larger a_d circle is ~4 deg
+	// (9-ft) to ~9 deg (bar) narrower per end and leaves a phantom back wall standing in the open pocket mouth next to
+	// each facing. Every point of the front half of the r_p circle inside the opening is on the front arc, every point
+	// under the rail (behind a facing line or the cushion back) is not; and every a_d point a ball center on the shelf
+	// can reach (at least s_f from both facing lines) is on the front arc too (PredictDropEdge).
+	for (const TablePreset Preset : kAllPresets)
+	{
+		const TableGeometry G = Build(GetTableSpec(Preset));
+		RB_CHECK(FrontArcViolations(G) == 0);
+		// Presets: exactly the capture circle's arc (never widened): no r_p point under the rail is on it.
+		for (int k = 0; k < kPocketCount; ++k)
+		{
+			const PocketGeometry& P = G.Pockets[k];
+			Vec2 Opening[5];
+			const int N = PocketOpening(G, k, Opening);
+			for (int s = 0; s < 3600; ++s)
+			{
+				const double Angle = (static_cast<double>(s) + 0.5) * kTwoPi / 3600.0 - kPi;
+				const Vec2 Wall = P.CaptureCenter + Vec2{Cos(Angle), Sin(Angle)} * P.CaptureRadius;
+				if (!InConvex(Opening, N, Wall, -1e-9))
+				{
+					RB_CHECK(!ArcContainsAngle(P.FrontArcFrom, P.FrontArcSweep, Angle));
+				}
+			}
+		}
+		// The a_d circle meets the facing plan lines 4-9 deg inside the front arc on every preset (the extra a_d points
+		// lie behind the facings); TABLE_9FT_PRO corner: r_p crossings at 172.61 / 277.39 deg (P3).
+		if (Preset == TablePreset::NineFootPro)
+		{
+			const PocketGeometry& P = PocketOf(G, PocketId::FootLeft);
+			RB_CHECK_NEAR(P.FrontArcFrom * kRadToDeg, 172.61, 0.01);
+			RB_CHECK_NEAR(P.FrontArcSweep * kRadToDeg, 2.0 * (225.0 - 172.61), 0.02);
 		}
 	}
 }
@@ -718,6 +819,24 @@ RB_TEST(Geometry_NoseOutline)
 	RB_CHECK(BuildNoseOutline(TableGeometry{}, 16, Points.data(), 1000) == 0);
 }
 
+RB_TEST(Geometry_NoseOutlineHugeSampleCount)
+{
+	// Review fix: the required point count was summed in int. SamplesPerArc near INT_MAX (or ~2e8: 12 arcs x 2e8 >
+	// INT_MAX) overflowed it to a negative number, the capacity check passed and the sampler wrote hundreds of millions
+	// of points into the caller's small buffer. The count is now 64-bit: a too-large request returns -1 and writes nothing.
+	const TableGeometry G = Build(kTableNineFootPro);
+	std::vector<Vec2> Points(64, Vec2{7.0, 7.0});
+	for (const int Samples : {2147483647, 2147483646, 200000000, 178956971})
+	{
+		RB_CHECK(BuildNoseOutline(G, Samples, Points.data(), static_cast<int>(Points.size())) == -1);
+		RB_CHECK(BuildNoseOutline(G, Samples, Points.data(), 2147483647) == -1);
+	}
+	for (const Vec2& P : Points)
+	{
+		RB_CHECK(P == (Vec2{7.0, 7.0}));
+	}
+}
+
 RB_TEST(Geometry_InvalidSpecsAreRejected)
 {
 	TableGeometry G;
@@ -747,8 +866,79 @@ RB_TEST(Geometry_InvalidSpecsAreRejected)
 	S.Corner.Shelf = 0.0;
 	S.Corner.CaptureRadius = 0.4; // the hole reaches the jaw points
 	RB_CHECK(BuildTableGeometry(S, G) == ErrorCode::InvalidTable);
+	// Review fix: a hole lying entirely inside the pocket opening never reaches under the rail. It built before with a
+	// "front arc" of 2 pi: no back wall anywhere, so a ball flying across the pocket passed through the (unmodelled)
+	// rail faces behind the opening.
+	S = kTableNineFootPro;
+	S.Corner.Shelf = 0.01;
+	S.Corner.CaptureRadius = 0.02;
+	RB_CHECK(BuildTableGeometry(S, G) == ErrorCode::InvalidTable);
+	S = kTableNineFootPro;
+	S.Side.CaptureRadius = 0.02;
+	RB_CHECK(BuildTableGeometry(S, G) == ErrorCode::InvalidTable);
 	// A valid build after a failed one.
 	RB_CHECK(BuildTableGeometry(kTableNineFootPro, G) == ErrorCode::Ok && G.Pockets.Size() == kPocketCount);
+}
+
+RB_TEST(Geometry_FacingAndLinerAnglesAreValidated)
+{
+	// Review fix: a back draft or liner undercut of +-90 deg (or beyond) built a table whose facing / liner face is
+	// horizontal or flipped: FacingContactOffset divided by cos(beta_v) = 6e-17 (s_f = 5e14 m) or went negative, and the
+	// tilted contact normals were meaningless. |beta_v|, |beta_l| < pi/2 is now required; every built table has a finite
+	// s_f.
+	TableGeometry G;
+	for (const double Bad : {0.5 * kPi, -0.5 * kPi, 2.0, -2.0, kPi})
+	{
+		TableSpec S = kTableNineFootPro;
+		S.Backdraft = Bad;
+		RB_CHECK(BuildTableGeometry(S, G) == ErrorCode::InvalidTable);
+		S = kTableNineFootPro;
+		S.LinerUndercut = Bad;
+		RB_CHECK(BuildTableGeometry(S, G) == ErrorCode::InvalidTable);
+	}
+	// Vertical faces, the WPA range and a slight overcut still build.
+	for (const double Good : {0.0, 12.0 * kDegToRad, 15.0 * kDegToRad, -5.0 * kDegToRad, 1.5})
+	{
+		TableSpec S = kTableNineFootPro;
+		S.Backdraft = Good;
+		S.LinerUndercut = Good;
+		RB_REQUIRE(BuildTableGeometry(S, G) == ErrorCode::Ok);
+		const double Sf = FacingContactOffset(kBallRadius, S.CushionNoseHeight, G.Pockets[0].Backdraft);
+		RB_CHECK(IsFinite(Sf) && Sf > 0.0);
+	}
+}
+
+RB_TEST(Geometry_PlanAnglesStayInTheDocumentedRange)
+{
+	// Review fix: parallel side facings (C = 90 deg exactly) gave a facing direction with a -0 component, and atan2 of the
+	// resulting pocket normal (-1, -0) returned -pi: JawArc::AngleFrom = -pi, outside the documented (-pi, pi]. Every
+	// plan angle (jaw arcs, front arcs) is now in (-pi, pi], for mirror-exact cut angles too.
+	for (const double SideCut : {0.5 * kPi, 100.0 * kDegToRad, 104.0 * kDegToRad})
+	{
+		for (const double CornerCut : {0.75 * kPi, 142.0 * kDegToRad})
+		{
+			TableSpec S = kTableNineFootPro;
+			S.Preset = TablePreset::Custom;
+			S.Side.CutAngle = SideCut;
+			S.Corner.CutAngle = CornerCut;
+			const TableGeometry G = Build(S);
+			RB_REQUIRE(G.JawArcs.Size() == kMaxJaws);
+			for (const JawArc& A : G.JawArcs)
+			{
+				RB_CHECK(A.AngleFrom > -kPi && A.AngleFrom <= kPi);
+				// The documented arc still runs between the two tangent points.
+				const Vec2 E0 = A.Center + Vec2{Cos(A.AngleFrom), Sin(A.AngleFrom)} * A.Radius;
+				const Vec2 E1 = A.Center + Vec2{Cos(A.AngleFrom + A.AngleSweep), Sin(A.AngleFrom + A.AngleSweep)} * A.Radius;
+				RB_CHECK((Near(E0, A.TangentOnNose, 1e-15) && Near(E1, A.TangentOnFacing, 1e-15)) ||
+					(Near(E0, A.TangentOnFacing, 1e-15) && Near(E1, A.TangentOnNose, 1e-15)));
+			}
+			for (const PocketGeometry& P : G.Pockets)
+			{
+				RB_CHECK(P.FrontArcFrom > -kPi && P.FrontArcFrom <= kPi);
+			}
+			RB_CHECK(FrontArcViolations(G) == 0);
+		}
+	}
 }
 
 RB_TEST(Geometry_BuildIsDeterministic)
@@ -1000,17 +1190,22 @@ RB_TEST(Geometry_RandomSpecsBuildExactlyOrAreRejected)
 		{
 			const PocketGeometry& P = G.Pockets[k];
 			RB_CHECK(P.FrontArcSweep > 0.0 && P.FrontArcSweep < kPi && ArcContainsAngle(P.FrontArcFrom, P.FrontArcSweep, Atan2(-P.Axis.y, -P.Axis.x)));
-			// Each end lies on a facing line or on a cushion-back line (a hole narrower than the throat).
+			RB_CHECK(FrontArcViolations(G) == 0);
+			// Each end of the front arc lies on a facing line or on a cushion-back line, on the capture circle or (a
+			// widened end) on the drop-edge circle.
 			for (const double Angle : {P.FrontArcFrom, P.FrontArcFrom + P.FrontArcSweep})
 			{
-				const Vec2 X = P.CaptureCenter + Vec2{Cos(Angle), Sin(Angle)} * P.DropEdgeRadius;
 				bool OnBoundary = false;
-				for (int s = 0; s < 2; ++s)
+				for (const double Radius : {P.CaptureRadius, P.DropEdgeRadius})
 				{
-					const Facing& F = G.Facings[2 * k + s];
-					OnBoundary = OnBoundary || Abs(Cross(F.Direction, X - P.JawPoint[s])) < 1e-12;
-					const bool Long = Abs(F.End.y) > G.HalfWidth + 0.5 * S.CushionWidth;
-					OnBoundary = OnBoundary || (Long ? Abs(Abs(X.y) - Abs(F.End.y)) < 1e-12 : Abs(Abs(X.x) - Abs(F.End.x)) < 1e-12);
+					const Vec2 X = P.CaptureCenter + Vec2{Cos(Angle), Sin(Angle)} * Radius;
+					for (int s = 0; s < 2; ++s)
+					{
+						const Facing& F = G.Facings[2 * k + s];
+						OnBoundary = OnBoundary || Abs(Cross(F.Direction, X - P.JawPoint[s])) < 1e-12;
+						const bool Long = Abs(F.End.y) > G.HalfWidth + 0.5 * S.CushionWidth;
+						OnBoundary = OnBoundary || (Long ? Abs(Abs(X.y) - Abs(F.End.y)) < 1e-12 : Abs(Abs(X.x) - Abs(F.End.x)) < 1e-12);
+					}
 				}
 				RB_CHECK(OnBoundary);
 			}
@@ -1018,6 +1213,80 @@ RB_TEST(Geometry_RandomSpecsBuildExactlyOrAreRejected)
 	}
 	RB_CHECK(Built >= 36);
 	std::printf("  [random specs] %d of 40 built, the rest rejected as InvalidTable\n", Built);
+}
+
+RB_TEST(Geometry_ExtremeSpecsBuildExactlyOrAreRejected)
+{
+	// Adversarial: far outside the presets (0.3-2 m wide, L/W 0.8-3, corner facings diverging by up to 40 deg or
+	// converging by up to 40 deg, side facings from -30 to +35 deg, tiny and huge holes, sharp and very round jaws).
+	// Every table either is rejected or builds an exact rail-top partition, positive nose / facing lengths, convex CCW
+	// polygons and a front arc that is the capture circle inside the opening. (The review ran 3000 of these: 1488
+	// built, none violated an invariant. Side facings converging by 37-51 deg into a hole wider than the pocket can
+	// make the circle meet the opening in two separate arcs, which one front arc cannot describe: out of range.)
+	Rng Stream(777);
+	int Built = 0;
+	int Bad = 0;
+	constexpr int Tables = 250;
+	for (int n = 0; n < Tables; ++n)
+	{
+		TableSpec S = kTableNineFootPro;
+		S.Preset = TablePreset::Custom;
+		S.Width = Stream.NextUniform(0.3, 2.0);
+		S.Length = S.Width * Stream.NextUniform(0.8, 3.0);
+		S.CushionNoseHeight = Stream.NextUniform(0.02, 0.05);
+		S.CushionWidth = Stream.NextUniform(0.02, 0.08);
+		S.RailWidthTotal = S.CushionWidth + Stream.NextUniform(0.001, 0.25);
+		S.RailTopZ = Stream.NextUniform(0.03, 0.07);
+		S.Corner = {Stream.NextUniform(0.05, 0.25), Stream.NextUniform(95.0, 175.0) * kDegToRad, Stream.NextUniform(0.0, 0.1),
+			Stream.NextUniform(0.0, 0.03), Stream.NextUniform(0.02, 0.15)};
+		S.Side = {Stream.NextUniform(0.05, 0.25), Stream.NextUniform(60.0, 125.0) * kDegToRad, Stream.NextUniform(0.0, 0.05),
+			Stream.NextUniform(0.0, 0.03), Stream.NextUniform(0.02, 0.15)};
+		S.DropPointRadius = Stream.NextUniform(0.0, 0.02);
+		TableGeometry G;
+		if (BuildTableGeometry(S, G) != ErrorCode::Ok)
+		{
+			continue;
+		}
+		++Built;
+		const double Xo = G.OuterBoundary.Hi.x;
+		const double Yo = G.OuterBoundary.Hi.y;
+		int V = CoverageViolations(G, -Xo + 0.0001234567, Xo, -Yo + 0.0002345678, Yo, 0.0097);
+		V += CoverageViolations(G, G.HalfLength - 0.3 + 0.00001357, Xo, G.HalfWidth - 0.3 + 0.00002468, Yo, 0.0031);
+		V += CoverageViolations(G, -0.3 + 0.00003579, 0.3, G.HalfWidth - 0.05 + 0.00001357, Yo, 0.0031);
+		bool Ok = V == 0 && G.RailTops.Size() == 28 && FrontArcViolations(G) == 0;
+		for (int k = 0; k < kPocketCount; ++k)
+		{
+			const PocketGeometry& P = G.Pockets[k];
+			Ok = Ok && P.FrontArcSweep > 0.0 && P.FrontArcSweep < kTwoPi && P.FrontArcFrom > -kPi && P.FrontArcFrom <= kPi;
+			Ok = Ok && ArcContainsAngle(P.FrontArcFrom, P.FrontArcSweep, Atan2(-P.Axis.y, -P.Axis.x));
+			for (int s = 0; s < 2; ++s)
+			{
+				Ok = Ok && G.Facings[2 * k + s].Length > 0.0;
+			}
+		}
+		for (const NoseSegment& Nose : G.Noses)
+		{
+			Ok = Ok && Nose.Length > 0.0;
+		}
+		for (const RailTopPolygon& Poly : G.RailTops)
+		{
+			for (int i = 0; i < Poly.VertexCount; ++i)
+			{
+				const Vec2 A = Poly.Vertices[i];
+				const Vec2 B = Poly.Vertices[(i + 1) % Poly.VertexCount];
+				const Vec2 C = Poly.Vertices[(i + 2) % Poly.VertexCount];
+				Ok = Ok && Cross(B - A, C - B) >= -1e-15;
+			}
+		}
+		if (!Ok)
+		{
+			++Bad;
+			std::printf("  [extreme] table %d violates an invariant (%d coverage violations)\n", n, V);
+		}
+	}
+	std::printf("  [extreme specs] %d of %d built, the rest rejected as InvalidTable\n", Built, Tables);
+	RB_CHECK(Bad == 0);
+	RB_CHECK(Built >= Tables / 5);
 }
 
 RB_TEST(ARCH_GEO2_PocketlessTable)
