@@ -82,7 +82,8 @@ namespace rb
 		Vec2 NapPseudoSlope;             // zeta_n n_nap [1] (HF-51, Later; default 0): rolling balls drift TOWARD +NapPseudoSlope with
 		                                 //   the extra drive g NapPseudoSlope (napped bar cloth 2e-4 along +x, EST; worsted 0)
 		double NapResistance = 0.0;      // eta_n [1] in [0, 1) (Later; default 0): rolling resistance mu_r g (1 - eta_n v_hat . n_nap),
-		                                 //   n_nap = NapPseudoSlope / |NapPseudoSlope| (ignored while NapPseudoSlope = 0), frozen per piece.
+		                                 //   n_nap = NapPseudoSlope / |NapPseudoSlope| (ignored while NapPseudoSlope = 0), frozen per piece;
+		                                 //   while it acts, a rolling piece turns by at most 0.05 rad (refresh rule of 4.5.6).
 		                                 //   Nap acts only on the cloth (SupportZ == 0), never on the rail cap or inside CLI islands.
 		// Validity (ValidatePhysicsParams; Simulator::Run per ball with its k): the rolling drive stays within half the
 		// static rolling resistance, |Slope| / (1 + k) + |NapPseudoSlope| <= (1 - NapResistance) mu_r / 2 (|Slope| <= 0.7 mu_r
@@ -169,9 +170,16 @@ namespace rb
 	constexpr Vec3 PositionAt(const MotionSegment& Seg, double Tau) { return Seg.Pos0 + Seg.Vel0 * Tau + Seg.Accel2 * (Tau * Tau); }
 	constexpr Vec3 VelocityAt(const MotionSegment& Seg, double Tau) { return Seg.Vel0 + Seg.Accel2 * (2.0 * Tau); }
 
+	// w_z with the A.7 clamp: exactly 0 from OmegaZStopTau on (a finite stop time always ends at w_z = 0), and a
+	// rounding sign flip just before the stop is returned as 0 as well. OmegaZStopTau = +inf: w_z0 + rate tau.
 	constexpr double OmegaZAt(const MotionSegment& Seg, double Tau)
 	{
-		return Seg.Omega0.z + Seg.OmegaZRate * (Tau < Seg.OmegaZStopTau ? Tau : Seg.OmegaZStopTau);
+		if (Tau < Seg.OmegaZStopTau)
+		{
+			const double W = Seg.Omega0.z + Seg.OmegaZRate * Tau;
+			return (W < 0.0) == (Seg.Omega0.z < 0.0) ? W : 0.0;
+		}
+		return Seg.OmegaZStopTau < kInfinity ? 0.0 : Seg.Omega0.z;
 	}
 
 	// Closed-form durations (A.8 table). Slide: k |u| / ((1 + k) mu_s g) = 2|u| / (7 mu_s g) for k = 2/5.
@@ -200,17 +208,21 @@ namespace rb
 	// rb/Physics/Cushion.h); SupportZ as in ClassifyState. Uses k = InertiaFactor(Spec).
 	// Sets Accel2, OmegaDotH, OmegaZRate/StopTau and TauEnd:
 	//   Sliding SlideDuration(|u0|); Rolling |v0|/(mu_r g); Spinning |w_z0|/alpha_sp;
-	//   Airborne (v_z0 + sqrt(v_z0^2 + 2 g (z0 - R)))/g (landing at z = R, C.2); PocketFall, Stationary,
-	//   Pocketed, OffTable: +inf. PocketPivot segments are built by rb/Physics/PocketDrop.h instead.
+	//   Airborne (v_z0 + sqrt(v_z0^2 + 2 g (z0 - R)))/g (landing at z = SupportZ + R, C.2; LandingTau in rb/Physics/Slate.h,
+	//   0 for a ball at or below that plane that does not rise to it); PocketFall, Stationary, Pocketed, OffTable: +inf.
+	//   PocketPivot segments are built by rb/Physics/PocketDrop.h instead (given here, it is treated like PocketFall).
+	//   Pocketed / OffTable segments are frozen (Vel0 = Omega0 = 0). Degenerate input (Sliding without slip, Rolling
+	//   without speed) gives TauEnd = 0, and SegmentEndState then re-classifies; frictionless supports give +inf.
 	RB_API MotionSegment MakeSegment(const BallState& S, double T0, const BallSpec& Spec, const ClothParams& Surface, double SupportZ, double Gravity);
 
 	// State at local time Tau in [0, TauEnd] (clamped). The motion state of the result is Seg.State.
 	RB_API BallState EvaluateSegment(const MotionSegment& Seg, double Tau);
 
 	// Exact state at the segment end, snapped and re-classified (Sliding -> Rolling/Spinning/
-	// Stationary, Rolling -> Spinning/Stationary, Spinning -> Stationary). For Airborne/PocketFall the
-	// state just before the landing is returned unchanged (State stays Airborne): landings are routed
-	// by the simulator (collisions 6.1) and resolved with ResolveSlateImpact.
+	// Stationary, Rolling -> Spinning/Stationary, Spinning -> Stationary). For Airborne the state just
+	// before the landing is returned (State stays Airborne; z := SupportZ + R and the exact impact speed
+	// v_z = -sqrt(v_z0^2 + 2 g (z0 - SupportZ - R))): landings are routed by the simulator (collisions 6.1) and
+	// resolved with ResolveSlateImpact. Segments without an end (TauEnd = +inf) return their start state.
 	// Tilt chain piece: EndsInRefresh -> the exact node state (position PositionAt(TauEnd), velocity / spin from
 	// Tilt.XEnd; State unchanged, no snap); otherwise the end of the phase with the snaps of human-factors 4.5.3
 	// (sliding end: u := 0, v := v_node exact, w_h := z_hat x v / R; rolling end: v := 0, w_h := 0), then classified.
@@ -229,17 +241,22 @@ namespace rb
 	};
 
 	// T_stop = |x0| (A/(K - |G|) + B/(K + |G|)), A = (1 + c0)/2, B = (1 - c0)/2, c0 = x_hat0 . G_hat [s];
-	// the collinear cases are the exact quadratics |x0|/(K -+ |G|). |x0| = 0 -> 0.
+	// the collinear cases are the exact quadratics |x0|/(K -+ |G|). |x0| = 0 -> 0. A drive |G| <= 2^-60 K (below double
+	// precision over the whole phase, incl. G = 0) is the level law |x0| / K. Lengths and angles are formed without
+	// underflow, so tiny (even subnormal) x0 or G never give NaN.
 	RB_API double PursuitStopTime(const Vec2& X0, const Vec2& G, double K);
 
 	// State at Tau >= 0 through one monotone 1-D solve of t(lam) = Tau (safeguarded Newton with bisection,
-	// |dlam| <= 1e-15 max(1, lam)); Tau >= T_stop gives x = 0 and X = X(inf). G = 0 reduces to the level law.
+	// |dlam| <= 1e-15 max(1, lam)); Tau >= T_stop gives x = 0 and X = X(inf). G = 0 (or |G| <= 2^-60 K) reduces to the
+	// level law.
 	RB_API PursuitState EvaluatePursuit(const Vec2& X0, const Vec2& G, double K, double Tau);
 
 	// Length Delta of the next chain piece from |x_i| (4.5.3 refresh rule): Remaining (= PursuitStopTime(x_i)) if the motion is
 	// collinear (SinBound <= 1e-12) or in the tail (|x_i| <= sqrt(Tolerance (K - |G|) / (4 Cs))); otherwise
 	// min(MaxInterval, Remaining, the unique positive root D of (2/81) Cs K |G| SinBound D^3 + Tolerance (K + |G|) D
-	// - Tolerance |x_i| = 0). SinBound = sin(beta_i) if cos(beta_i) >= 0, else 1 (beta = angle between x and G).
+	// - Tolerance |x_i| = 0). SinBound = sin(beta_i) if cos(beta_i) >= 0, else 1 (beta = angle between x and G);
+	// MakeSegment passes 0 for exactly collinear motion in either direction (it never turns: one exact quadratic).
+	// Tolerance <= 0 or MaxInterval <= 0 (invalid settings) give Remaining, so a chain always terminates.
 	RB_API double TiltPieceDuration(double SpeedX, double K, double GNorm, double Cs, double SinBound, double Tolerance, double MaxInterval, double Remaining);
 
 	// MakeSegment on a (possibly) tilted table. IsLevel(Tilt) -> exactly MakeSegment(S, T0, Spec, Surface, SupportZ,
@@ -247,6 +264,11 @@ namespace rb
 	// TiltPieceDuration, EndsInRefresh if Delta < T_stop, node exact from EvaluatePursuit); Airborne / PocketFall ->
 	// the ballistic quadratic with the in-plane part g_t / 2 in Accel2; Stationary / Spinning unchanged (static rolling
 	// resistance holds the ball, |s| <= 0.7 mu_r); PocketPivot is built by rb/Physics/PocketDrop.h (tilt neglected).
+	// With nap resistance (NapResistance != 0, rolling on the cloth) a refresh piece also turns by at most 0.05 rad
+	// (human-factors 4.5.6: K is frozen with v_hat_i); tail and collinear pieces still run to the exact stop.
+	// A Sliding / Rolling state whose pursuit has G = 0 (sliding with a nap-only TiltParams; rolling on the rail cap, where
+	// nap does not act, with Slope = 0), a negligible drive |G| <= 2^-60 K, or violates K > |G| (rejected by
+	// ValidatePhysicsParams) keeps the level segment.
 	RB_API MotionSegment MakeSegment(const BallState& S, double T0, const BallSpec& Spec, const ClothParams& Surface, double SupportZ, double Gravity,
 		const TiltParams& Tilt);
 
