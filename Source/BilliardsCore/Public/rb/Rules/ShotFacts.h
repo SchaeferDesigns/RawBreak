@@ -156,8 +156,22 @@ namespace rb::rules
 		bool RecordTruncated = false; // simulation aborted / record overflow -> replay the shot
 	};
 
-	// One pass over the record. ShotClockLimit [s]: allowed time for this shot (kInfinity = no clock);
-	// F12 ShotClockExpired = Start.ShotClockElapsed > ShotClockLimit.
+	// One pass over the record (Record.Events sorted by (Time, Sequence)). ShotClockLimit [s]: allowed time for this
+	// shot (kInfinity = no clock); F12 ShotClockExpired = Start.ShotClockElapsed > ShotClockLimit.
+	//  - 3.4 settle window: events later than End.StopTime + Tolerances.SettleWindow are post-shot settling and are
+	//    ignored; a ball that dropped then is OnTable at its last in-window position (R 1.8). StopTime <= 0: no window.
+	//  - "Driven to a rail" (F2/F3): BallCushion / BallJaw without ContinuesInitialFreeze, BallRailTop, BallLiner,
+	//    being pocketed (BallPocketed, SupportedOverPocket, a cue ball's BallTouchesPocketedBall) or off the table.
+	//  - F5 wins over F4: a ball that left the table (BallOffTable, or BallExternalContact other than Template) is
+	//    not in Pocketed even if it dropped afterwards. End-snapshot statuses fill in balls the log does not cover,
+	//    but only for balls on the table at shot start (a ball pocketed earlier may still be reported Pocketed).
+	//  - F10: contacts with the cue ball while it is in hand (Start.InHand != No, Time < 0: placing / adjusting it)
+	//    are not touched-ball fouls (R 3.6 / 1.6); every other NonTipContact is.
+	//  - F7/F8 judge the cue ball's TipContacts; the frozen-ball envelope of an interval is read from the
+	//    TipBallBegin / TipBallEnd events at exactly its Start / End (B = f declared in Start.FrozenToCueBall,
+	//    Value <= FrozenEnvelope, !OtherContactBefore at both ends).
+	//  - Line crossings are direction-aware: the cue ball crosses the head string toward the foot (+1), object balls
+	//    toward the head (-1); center / long string crossings count in either direction.
 	RB_API void DeriveShotFacts(const ShotRecord& Record, const RulesTable& Table, const RulesTolerances& Tolerances, double ShotClockLimit, ShotFacts& Out);
 
 	// F1 tie rule: if any ball of the tie set is legal (bit in LegalMask), the first contact is that

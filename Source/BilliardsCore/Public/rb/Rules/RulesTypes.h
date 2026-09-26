@@ -104,9 +104,13 @@ namespace rb::rules
 		bool IsBreakShot = true;          // 8/9/10: first shot of the rack; 14.1: opening break
 		bool PushOutAvailable = false;    // 9/10-ball: exactly the shot after a legal break
 		bool TableOpen = true;            // 8-ball / Blackball
-		bool FreeShot = false;            // Blackball free shot after a foul (3.2 suspended; CB in position or in hand in baulk)
+		bool FreeShot = false;            // free shot after a foul (3.2 suspended; CB in position or in hand in baulk): Blackball,
+		                                  // and 8-ball with FoulCueBall FreeShotPlusVisit
 		int VisitsRemaining = 0;          // FoulCueBallMode TwoVisits / FreeShotPlusVisit: extra visits of the shooter after this one
 		PlayerState Players[2];           // index = player (or team in Doubles, MatchState::ActiveMember picks the member)
+		// 8-ball LastPocketRule variant (rules.md 12.6): pocket of the most recently pocketed ball of each group on an
+		// EARLIER shot, index = BallGroup (None unused). Maintained by ApplyShot (from Facts.Pocketed in time order).
+		PocketId LastGroupBallPocket[3] = {PocketId::None, PocketId::None, PocketId::None};
 	};
 
 	enum class Foul : std::uint8_t
