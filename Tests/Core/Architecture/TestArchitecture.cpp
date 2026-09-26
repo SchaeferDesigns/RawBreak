@@ -479,11 +479,11 @@ RB_TEST(Arch_HumanFactorsDefaultsFromSpec)
 	RB_CHECK(h::NoiseScaleFor(h::ImperfectionSetting::Off) == 0.0);
 }
 
-RB_TEST(Arch_HumanStubsLinkAndStayNeutral)
+RB_TEST(Arch_HumanEntryPointsLinkAndStayPlausible)
 {
 	namespace h = rb::human;
-	// Every rb::human entry point links (stubs of WP-11) and returns a neutral value; the intended stroke passes through
-	// unchanged until WP-11 lands (the NoiseScale-0 identity is HF-T08).
+	// Every rb::human entry point links and returns a plausible value (exact behaviour is covered by WP-11's HF tests;
+	// the NoiseScale-0 identity is HF-T08).
 	h::IntendedStroke Intended;
 	Intended.Azimuth = 0.1;
 	Intended.Speed = 2.0;
@@ -505,7 +505,9 @@ RB_TEST(Arch_HumanStubsLinkAndStayNeutral)
 	RB_CHECK(Character.Profile.Id == h::AiProfileId::LeaguePlayer);
 	h::PlannedStroke Plan;
 	Plan.Speed = 1.5;
-	RB_CHECK(h::SyntheticHand(Plan, Character, h::StrokeSituation{}, 0.028575, Key, History, h::HumanParams{}).Speed == 1.5);
+	// The synthetic hand adds the profile's stroke flaws, so the executed speed scatters around the planned one.
+	const double HandSpeed = h::SyntheticHand(Plan, Character, h::StrokeSituation{}, 0.028575, Key, History, h::HumanParams{}).Speed;
+	RB_CHECK(HandSpeed > 0.0 && std::fabs(HandSpeed - 1.5) < 0.5);
 	rb::PhysicsParams Physics = rb::MakePhysicsParams(rb::kTableSevenFootBar);
 	rb::SimBall Balls[rb::kMaxBalls];
 	h::ApplyDiagnosisStep(h::DiagnosisStepAt(1), Physics, Balls);
