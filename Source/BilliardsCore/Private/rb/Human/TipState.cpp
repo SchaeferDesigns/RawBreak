@@ -4,6 +4,7 @@
 #include "rb/Human/TipState.h"
 
 #include "rb/Core/Constants.h"
+#include "rb/Human/Skill.h"
 #include "rb/Math/Scalar.h"
 #include "rb/Math/Vec3.h"
 
@@ -93,7 +94,7 @@ namespace rb::human
 	void ApplyTipWear(TipState& Tip, const TipContactPoint& Contact, double Severity, const TipParams& Params)
 	{
 		const double Sev = Max(0.0, Severity);
-		const double Glaze = Clamp(Tip.Glaze, 0.0, 1.0);
+		const double Glaze = UnitOrZero(Tip.Glaze);
 		const double HitsPerGrade = ChalkGradeSpecFor(Tip.Chalk).HitsPerGrade * HardnessRetention(Tip.Hardness, Params) *
 			(1.0 - Params.GlazeRetentionLoss * Glaze);
 		if (HitsPerGrade > 0.0)
@@ -132,9 +133,11 @@ namespace rb::human
 
 	void ApplyChalkTwist(TipState& Tip, const ChalkCube& Cube, double Sweep, const TipParams& Params)
 	{
-		const double H = Clamp(Sweep, 0.0, 1.0); // a ritual never beats the habit-1 result (principle 5)
-		const double Glaze = Clamp(Tip.Glaze, 0.0, 1.0);
-		const double Hollow = Clamp(Cube.Hollow, 0.0, 1.0);
+		// Unit values; a NaN (failed R-mode measurement, corrupted save) counts as 0, never NaN coverage. The sweep is capped at 1: a
+		// ritual never beats the habit-1 result (principle 5).
+		const double H = UnitOrZero(Sweep);
+		const double Glaze = UnitOrZero(Tip.Glaze);
+		const double Hollow = UnitOrZero(Cube.Hollow);
 		const double Cap = ChalkCap(Cube, Params);
 		const double EtaCenter = Params.CenterTwistGain * (1.0 - Params.GlazeRetentionLoss * Glaze);
 		const double EtaRing = (Params.RingTwistDrill + Params.RingTwistSweep * H) * (1.0 - Params.GlazeRetentionLoss * Glaze) * (1.0 - Params.HollowLoss * Hollow);
@@ -165,7 +168,7 @@ namespace rb::human
 
 	double TwistDuration(double ChalkHabit, const TipParams& Params)
 	{
-		return Params.TwistSeconds * (1.0 - Params.TwistHabitSpeedup * Clamp(ChalkHabit, 0.0, 1.0));
+		return Params.TwistSeconds * (1.0 - Params.TwistHabitSpeedup * UnitOrZero(ChalkHabit));
 	}
 
 	void ScuffTip(TipState& Tip)

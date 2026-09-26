@@ -51,8 +51,13 @@ namespace rb::human
 
 	inline constexpr double kHabitGainPerGoodExecution = 0.02;
 
-	// +0.02 per good ritual execution, saturating at 1.
-	constexpr double GrowHabit(double Habit) { return Min(1.0, Habit + kHabitGainPerGoodExecution); }
+	// A unit value from a measurement or a saved state (habits, the R-mode sweep and rack quality, glaze, cube hollow): clamped
+	// to [0, 1], and a NaN counts as 0 (rb::Clamp passes NaN through, so one failed UE measurement or a corrupted save would
+	// otherwise spread NaN into persistent state: tip coverage, rack gaps). Exactly X for X in (0, 1]; +inf -> 1, -inf -> 0.
+	constexpr double UnitOrZero(double X) { return X > 0.0 ? (X < 1.0 ? X : 1.0) : 0.0; }
+
+	// +0.02 per good ritual execution, saturating at 1 (a non-finite habit restarts from 0).
+	constexpr double GrowHabit(double Habit) { return Min(1.0, UnitOrZero(Habit) + kHabitGainPerGoodExecution); }
 
 	// L(x; rho) = rho^((clamp(x, 0, 100) - 25) / 75).
 	inline double SkillScale(double Attribute, double Rho) { return Pow(Rho, (Clamp(Attribute, 0.0, 100.0) - 25.0) / 75.0); }

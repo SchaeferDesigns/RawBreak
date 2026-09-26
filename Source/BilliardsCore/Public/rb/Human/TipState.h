@@ -158,7 +158,8 @@ namespace rb::human
 
 	// One twist (the revolver rule, 4.1): c_0 += max(0, cap - c_0) eta_0, ring zones c_z += max(0, cap - c_z) eta_r, with
 	// Sweep = H_chalk (A/C/P modes) or the sweep coverage measured from the input (R mode, clamped to [0, 1], so a ritual
-	// never beats the habit-1 result, principle 5). Sets Tip.Chalk = Cube.Grade.
+	// never beats the habit-1 result, principle 5). Sweep, Tip.Glaze and Cube.Hollow enter as UnitOrZero (rb/Human/Skill.h): a
+	// NaN measurement or a corrupted save counts as 0 and never makes the coverage NaN. Sets Tip.Chalk = Cube.Grade.
 	RB_API void ApplyChalkTwist(TipState& Tip, const ChalkCube& Cube, double Sweep, const TipParams& Params);
 
 	// Automatic chalking before every shot (A/C/P): n_tw = ceil((cap - min_z c_z) / 0.15), 0 when nothing is missing
