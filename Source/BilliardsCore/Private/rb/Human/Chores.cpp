@@ -35,9 +35,26 @@ namespace rb::human
 			Twists = TwistsBeforeAbort;
 		}
 		const double Sweep = Ritual ? Clamp(RitualSweep, 0.0, 1.0) : Clamp(ChalkHabit, 0.0, 1.0);
+		// The habit-1 result (principle 5): the automatic chalking of a maxed habit from the same start. A ritual is capped at it
+		// zone by zone, so extra twists (or drilling the centre) never beat the habit once it is maxed.
+		TipState Habit1 = Tip;
+		if (Ritual)
+		{
+			for (int i = 0; i < Planned; ++i)
+			{
+				ApplyChalkTwist(Habit1, Cube, 1.0, Params);
+			}
+		}
 		for (int i = 0; i < Twists; ++i)
 		{
 			ApplyChalkTwist(Tip, Cube, Sweep, Params);
+		}
+		if (Ritual)
+		{
+			for (int z = 0; z < kTipZoneCount; ++z)
+			{
+				Tip.Coverage[z] = Min(Tip.Coverage[z], Habit1.Coverage[z]);
+			}
 		}
 		switch (Mode)
 		{

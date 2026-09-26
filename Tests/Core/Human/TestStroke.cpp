@@ -346,6 +346,53 @@ RB_TEST(HF_S05_MaxDrawMiscues)
 	}
 }
 
+// HF-S04 / HF-S05 through the core (architecture 17: the budget model uses WP-1): the squirt of SquirtAngle at the executed
+// contact offset Strike.OffsetA (AimToContactOffset with the current dome), and the miscue as ExecuteStroke's own prediction
+// (rho after the 0.9 clamp against MiscueLimit of the chalk-map mu). Same counts as the self-contained model above.
+RB_TEST(Integ_HF_S04_S05_BudgetsThroughTheCore)
+{
+	const double Attributes[3] = {25.0, 10.0, 40.0};
+	const int ExpectedMisses[3] = {214, 1310, 3};
+	for (int a = 0; a < 3; ++a)
+	{
+		Setup S = MakeS0();
+		S.Attributes = UniformAttributes(Attributes[a]);
+		S.Intended.Speed = 1.5;
+		NoiseHistory History = RebuildNoiseHistory(0xB00Du, 1u, 0u);
+		int Misses = 0;
+		for (std::uint32_t i = 0; i < 20000u; ++i)
+		{
+			S.Key = MakeKey(0xB00Du, i / 20u, i, 1u, i);
+			S.History = History;
+			S.Intended.TimeDown = 1.5 + 2.5 * U01(HashKeys(99u, i));
+			const ExecutedStroke X = Execute(S);
+			const double Error = X.Strike.Azimuth - S.Intended.Azimuth + SquirtAngle(X.Strike.OffsetA, 15.0);
+			Misses += BudgetPotMissed(Error, kR) ? 1 : 0;
+			AdvanceNoiseHistory(History);
+		}
+		RB_CHECK(std::abs(Misses - ExpectedMisses[a]) <= 2);
+	}
+	const double DrawAttributes[4] = {10.0, 25.0, 40.0, 60.0};
+	const int ExpectedMiscues[4] = {3039, 1617, 516, 0};
+	for (int a = 0; a < 4; ++a)
+	{
+		Setup S = MakeS0();
+		S.Attributes = UniformAttributes(DrawAttributes[a]);
+		S.Intended.AxisOffsetB = -0.61693;
+		NoiseHistory History = RebuildNoiseHistory(0xD4A3u, 2u, 0u);
+		int Miscues = 0;
+		for (std::uint32_t i = 0; i < 20000u; ++i)
+		{
+			S.Key = MakeKey(0xD4A3u, i / 20u, i, 2u, i);
+			S.History = History;
+			S.Intended.TimeDown = 1.5 + 2.5 * U01(HashKeys(98u, i));
+			Miscues += Execute(S).PredictedMiscue ? 1 : 0;
+			AdvanceNoiseHistory(History);
+		}
+		RB_CHECK(std::abs(Miscues - ExpectedMiscues[a]) <= 2);
+	}
+}
+
 RB_TEST(HF_S06_PressureBudget)
 {
 	// As HF-S04, attributes 25. Rows: (P, Settle) -> misses for m / m_e 15, 20, 40 (-1 = not in the spec).
@@ -567,6 +614,13 @@ RB_TEST(HF_B08_OneSigmaVisibleInThePose)
 	const HandPose Full = Sample(S, S.Intended.TimeDown);
 	RB_CHECK_NEAR(Full.PerShot.Elevation, X.Channels.Elevation.Eps * F.ElevationSigma, 1e-15);
 	RB_CHECK_NEAR(Full.PerShot.AxisA * kR, X.Channels.TipA.Eps * F.TipASigma, 1e-15);
+	RB_CHECK_NEAR(Full.PerShot.AxisB * kR, X.Channels.TipB.Eps * F.TipBSigma + F.GripBias, 1e-15); // tip placement + grip tension
+	const double Flinch = S.Params.FlinchLoss * F.NerveScale * X.Channels.Flinch.U;
+	RB_CHECK_NEAR(Full.PerShot.Speed, S.Intended.Speed * ((1.0 + X.Channels.Speed.Eps * F.SpeedSigma) * (1.0 - Flinch) - 1.0), 1e-14);
+	RB_CHECK_NEAR(Full.GripLateral, F.DriftSigma * X.Channels.DriftLat, 1e-15);        // the watchable drift, also before the ramp
+	RB_CHECK_NEAR(Sample(S, 1.0).GripLateral,
+		ComputeSituationFactors(S.Intended, S.Attributes, S.Situation, S.Params, 1.0, kR).DriftSigma *
+			ProcessValue(MakeWatchableProcess(S.Key, NoiseChannel::DriftLat, kDriftBandLo, kDriftBandHi), 1.0), 1e-15);
 
 	// Vertical tip placement: 1.5 mm, 5 px.
 	const double TipBPx = F0.TipBSigma / kTipMmPerPx;

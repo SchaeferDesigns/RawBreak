@@ -150,7 +150,8 @@ namespace rb::human
 
 	struct ExecutedStroke
 	{
-		ErrorCode Error = ErrorCode::NotImplemented; // Ok, or InvalidArgument for non-finite inputs (Strike then all zero)
+		ErrorCode Error = ErrorCode::NotImplemented; // Ok, or InvalidArgument for non-finite inputs or a non-finite result
+		                                //   (non-finite equipment state or parameters): Strike then all zero, Strike.Cue = the CueSpec
 		CueStrikeInput Strike;          // what the physics gets (MOT B.1 contract): Speed, Elevation, Azimuth, OffsetA/B (contact
 		                                //   point, current dome radius), Cue = CueSpec with TipFriction = TipFrictionKinetic = mu,
 		                                //   TipDomeRadius = r_dome, TipRestitution = e_tip; TipTouchesCloth from the executed pose
@@ -182,6 +183,9 @@ namespace rb::human
 	// is rebuilt (DrawPerShot), and rollout keys ignore it, so the result is a pure function of the other inputs and the key.
 	// NoiseScale 0 with a straight cue (BowSag 0) and neither the elevation floor nor the offset clamp biting returns the
 	// intended stroke bit-exactly (HF-T08).
+	// The strike always satisfies MOT B.1 where the human layer could break it: theta_x = max(floor, raw) is kept inside
+	// [0, pi/2) (a negative floor counts as 0; a masse near vertical plus the elevation noise is capped at the largest double
+	// below pi/2, no flag, like the speed clamp), rho <= OffsetClamp, V_x in [0, MaxSpeed].
 	// Executed pose (3.6, UE 5.5 geometry, no margin): the dome centre is CueBallPosition + (R + r_dome) Q / R (Q = CueContactPoint
 	// of the clamped (a, b)), the tip rim (cap boundary, radius w_tip / 2) sits sqrt(r_dome^2 - (w_tip / 2)^2) ahead of it on the
 	// axis, and the body runs back from the rim along -d with r(s) = r_t + (r_b - r_t) s / Cue.Length. TipTouchesCloth: the rim,
@@ -233,7 +237,8 @@ namespace rb::human
 	};
 
 	// Pure like ExecuteStroke (same History contract: a cache, rebuilt if it does not match the key). At Time = t_c with the
-	// full ramp (t_c - t_fwd >= RampDuration) the pose equals the executed stroke (A-HUM-2).
+	// full ramp (t_c - t_fwd >= RampDuration) the pose equals the executed stroke (A-HUM-2). Non-finite inputs or a non-finite
+	// pose (equipment state, parameters) give the neutral pose: every field 0 except Time.
 	RB_API HandPose SampleHand(const IntendedStroke& Intended, const ShooterAttributes& Attributes, const StrokeSituation& Situation,
 		const CueBodyState& CueBody, const CueSpec& Cue, const BallSpec& CueBall, const NoiseKey& Key, const NoiseHistory& History,
 		const HumanParams& Params, double Time);

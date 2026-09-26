@@ -46,7 +46,8 @@ namespace rb::human
 	// A / C / P give the same coverage bit for bit (sweep = ChalkHabit; TwistsBeforeAbort >= 0 aborts after that many twists,
 	// < 0 = no abort); Duration: A twists x TwistDuration, C 1.5 s (ChoreTiming::CutSeconds, 0 if nothing to do), P 0 (done while
 	// the opponent shoots). R: the player's TwistsBeforeAbort twists (< 0 = the automatic count) with the measured RitualSweep,
-	// clamped to [0, 1] (never beyond the habit-1 result); Duration twists x TwistDuration(ChalkHabit) as an estimate.
+	// clamped to [0, 1], and every zone capped at the habit-1 result (the automatic count with sweep 1 from the same start), so
+	// extra twists never beat a maxed habit (principle 5); Duration twists x TwistDuration(ChalkHabit) as an estimate.
 	RB_API int PerformChalking(TipState& Tip, const ChalkCube& Cube, ChoreMode Mode, double ChalkHabit, double RitualSweep, int TwistsBeforeAbort,
 		double& Duration, const TipParams& Params = TipParams{});
 

@@ -14,6 +14,10 @@ namespace rb::human
 {
 	namespace
 	{
+		// Steepest executed elevation: the largest double below pi / 2 (MOT B.1 requires 0 <= theta < pi / 2; a masse near
+		// vertical plus the elevation noise must still be a valid strike, like the rho clamp below kCueOffsetValidLimit).
+		constexpr double kMaxExecutedElevation = 0.5 * kPi - 0x1p-52;
+
 		double ChannelScale(const HumanParams& Params, NoiseChannel Channel)
 		{
 			return (Params.ChannelMask & ChannelBit(Channel)) != 0u ? 0.0 : Params.NoiseScale;
@@ -143,8 +147,10 @@ namespace rb::human
 			Out.Pitch = Out.GripVertical / Lbg;
 			Out.Azimuth = Intended.Azimuth + Out.Yaw + Out.Warp.AzimuthError;
 			Out.ElevationRaw = Intended.Elevation + Out.Pitch + Out.ElevationNoise + Out.Warp.ElevationError;
-			Out.ElevationClamped = Out.ElevationRaw < Situation.ElevationFloor;
-			Out.Elevation = Out.ElevationClamped ? Situation.ElevationFloor : Out.ElevationRaw;
+			// theta_x = max(floor, raw), kept inside [0, pi / 2) of MOT B.1 (a negative floor is the cloth, 0).
+			const double Floor = Clamp(Situation.ElevationFloor, 0.0, kMaxExecutedElevation);
+			Out.ElevationClamped = Out.ElevationRaw < Floor;
+			Out.Elevation = Out.ElevationClamped ? Floor : Min(Out.ElevationRaw, kMaxExecutedElevation);
 			Out.AxisA = Intended.AxisOffsetA + (-Out.Yaw * Lbc + Out.TremorRight + Out.TipAOffset) / R;
 			Out.AxisB = Intended.AxisOffsetB + (-Out.Pitch * Lbc + Out.TremorUp + Out.TipBOffset + Out.Bias) / R;
 			Out.SpeedRaw = Out.IntendedSpeed * (1.0 + Out.SpeedGain) * (1.0 - Out.FlinchLoss);
@@ -214,6 +220,26 @@ namespace rb::human
 		NonTipSource SourceAt(double SStar, const CueBodyState& Body)
 		{
 			return SStar <= Body.FerruleLength ? NonTipSource::Ferrule : (SStar <= Body.ShaftLength ? NonTipSource::Shaft : NonTipSource::Butt);
+		}
+
+		// Every number the physics or the renderer reads is finite. Catches non-finite equipment state (a corrupted save or replay
+		// header: coverage, e_tip, bow) and parameters, which the input check does not enumerate.
+		bool StrokeOutputFinite(const ExecutedStroke& Result)
+		{
+			const CueStrikeInput& S = Result.Strike;
+			return Finite(S.Speed) && Finite(S.Elevation) && Finite(S.Azimuth) && Finite(S.OffsetA) && Finite(S.OffsetB) && Finite(S.Cue.TipFriction) &&
+				Finite(S.Cue.TipFrictionKinetic) && Finite(S.Cue.TipRestitution) && Finite(S.Cue.TipDomeRadius) && Finite(S.Cue.TipDiameter) &&
+				Finite(Result.TipTransverseVelocity.x) && Finite(Result.TipTransverseVelocity.y) && Finite(Result.AxisOffset.x) &&
+				Finite(Result.AxisOffset.y) && Finite(Result.Rho) && Finite(Result.MiscueLimit);
+		}
+
+		bool PoseFinite(const HandPose& Pose)
+		{
+			const StrokeDelta& D = Pose.PerShot;
+			return Finite(Pose.GripLateral) && Finite(Pose.GripVertical) && Finite(Pose.TremorRight) && Finite(Pose.TremorUp) && Finite(Pose.Ramp) &&
+				Finite(D.Azimuth) && Finite(D.Elevation) && Finite(D.AxisA) && Finite(D.AxisB) && Finite(D.Speed) && Finite(Pose.Warp.Gamma) &&
+				Finite(Pose.Warp.Roll) && Finite(Pose.Warp.AzimuthError) && Finite(Pose.Warp.ElevationError) && Finite(Pose.Azimuth) &&
+				Finite(Pose.Elevation) && Finite(Pose.AxisOffsetA) && Finite(Pose.AxisOffsetB);
 		}
 
 		bool HasCandidate(const FixedVector<NonTipContact, kMaxShaftContactCandidates>& List, BallId Ball)
@@ -474,6 +500,14 @@ namespace rb::human
 		const bool MarginNegative = SeparationMargin(Rho, Strike.Cue.TipRestitution, CueBall.Mass, Cue.Mass, InertiaFactor(CueBall)) < 0.0;
 		Result.DoubleHitRisk = MarginNegative || (Gap > Rules.Frozen && Gap < Cue.FollowThroughDistance && CutAngle < Rules.GrazeAngle);
 		Result.PushRisk = Gap > Rules.Frozen && Gap <= Rules.FrozenEnvelope;
+		if (!StrokeOutputFinite(Result))
+		{
+			// Non-finite equipment state or parameters: the same contract as a non-finite input (zero strike, the cue spec kept).
+			Result = ExecutedStroke{};
+			Result.Strike.Cue = Cue;
+			Result.Error = ErrorCode::InvalidArgument;
+			return Result;
+		}
 		Result.Error = ErrorCode::Ok;
 		return Result;
 	}
@@ -507,6 +541,11 @@ namespace rb::human
 		Pose.Elevation = E.Elevation;
 		Pose.AxisOffsetA = E.AxisA;
 		Pose.AxisOffsetB = E.AxisB;
+		if (!PoseFinite(Pose))
+		{
+			Pose = HandPose{}; // non-finite equipment state or parameters: the neutral pose, as for a non-finite input
+			Pose.Time = Time;
+		}
 		return Pose;
 	}
 
