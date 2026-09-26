@@ -5,9 +5,9 @@
 // MPFR brute force (ROOT-01); neither exists in the dependency-free harness. Both tests use a 106-bit double-double
 // reference built from the EXACT segment data (expansion to the common origin, coefficients and every evaluation in
 // double-double), with critical-point isolation and pure bisection to adjacent doubles (DetectTestUtil.h). Grazes are
-// allowed to disagree as hit / miss when the reference's run minimum is within 2 eps_f of zero or the reference approach
-// speed is below 1e-6 m/s (D-10 wording). Counts: 1e4 cases in Debug and 1e5 in Release by default (architecture 18:
-// heavy property tests run a reduced count), the full 1e6 in the _Slow_ variants (nightly).
+// allowed to disagree as hit / miss when the reference's run minimum is within eps_f of zero or the reference approach
+// speed is below 1e-6 m/s (D-10 wording). Counts: 1e4 cases in Debug, the spec's full 1e6 in Release (architecture 18:
+// heavy property tests run a reduced count in Debug and the full count in Release; about 3 s each).
 
 #include "rbtest.h"
 
@@ -24,7 +24,7 @@ using rb::MotionSegment;
 namespace
 {
 #ifdef NDEBUG
-	constexpr int kDefaultCases = 100000;
+	constexpr int kDefaultCases = 1000000;
 #else
 	constexpr int kDefaultCases = 10000;
 #endif
@@ -284,15 +284,6 @@ RB_TEST(COL_D10_SolverAgreesWithHighPrecisionReference)
 	RB_CHECK(Stats.MaxTimeError <= 1e-12);
 }
 
-RB_TEST(COL_D10_Slow_MillionCases)
-{
-	AgreementStats Stats;
-	RunD10(1000000, Stats);
-	std::printf("  D-10: %d cases, %d hits, %d graze disagreements, %d violations, max error %.3g s\n", Stats.Cases, Stats.Hits,
-		Stats.GrazeDisagreements, Stats.Violations, Stats.MaxTimeError);
-	RB_CHECK(Stats.Violations == 0);
-}
-
 RB_TEST(VAL_ROOT01_FirstEntryMatchesHighPrecisionReference)
 {
 	AgreementStats Stats;
@@ -302,13 +293,71 @@ RB_TEST(VAL_ROOT01_FirstEntryMatchesHighPrecisionReference)
 	RB_CHECK(Stats.MaxTimeError <= 1e-12);
 }
 
-RB_TEST(VAL_ROOT01_Slow_MillionCases)
+RB_TEST(Detect_Review_ExtremeBallBallStatesMatchTheReference)
 {
+	// Adversarial extension of ROOT-01 (WP-5 review): speeds 1e-9 ... 100 m/s, spins up to 1000 rad/s, 3D pocket falls with
+	// short and long windows, tilt accelerations 1e-6 ... 0.1 m/s^2 across the path, and late time bases (T0 up to 590 s).
+	rb::Rng Rng(0xE7E7ull);
 	AgreementStats Stats;
-	RunRoot01(1000000, Stats);
-	std::printf("  ROOT-01: %d cases, %d hits, %d graze disagreements, %d violations, max error %.3g\n", Stats.Cases, Stats.Hits,
-		Stats.GrazeDisagreements, Stats.Violations, Stats.MaxTimeError);
+	const auto Segment = [&Rng](double T0) -> MotionSegment
+	{
+		const Vec3 P{Rng.NextUniform(-1.2, 1.2), Rng.NextUniform(-0.6, 0.6), kR};
+		const Vec3 D = RandomUnitPlan(Rng);
+		const double Speed = rb::Pow(10.0, Rng.NextUniform(-9.0, 2.0));
+		switch (Rng.NextBelow(6))
+		{
+		case 0:
+			return Rolling(P, D * Speed, kMuR, kG, T0);
+		case 1:
+		{
+			const Vec3 W{Rng.NextUniform(-1000.0, 1000.0), Rng.NextUniform(-1000.0, 1000.0), 0.0};
+			if (rb::Length(rb::Planar(rb::SlipVelocity(D * Speed, W, kR))) < 1e-9)
+			{
+				return Stationary(P, T0);
+			}
+			return Sliding(P, D * Speed, W, kMuS, kG, T0);
+		}
+		case 2:
+			return Airborne({P.x, P.y, kR + Rng.NextUniform(0.0, 0.2)}, D * Speed + Vec3{0.0, 0.0, Rng.NextUniform(0.0, 20.0)}, kG, T0);
+		case 3:
+		{
+			MotionSegment S = PocketFall({P.x, P.y, Rng.NextUniform(-0.05, 0.05)}, Vec3{D.x, D.y, Rng.NextUniform(-1.0, 1.0)} * Speed, kG, T0);
+			S.TauEnd = rb::Pow(10.0, Rng.NextUniform(-3.0, 1.0));
+			return S;
+		}
+		case 4:
+		{
+			MotionSegment S = Rolling(P, D * Speed, kMuR, kG, T0);
+			S.Accel2 = S.Accel2 + RandomUnitPlan(Rng) * rb::Pow(10.0, Rng.NextUniform(-6.0, -1.0));
+			S.Tilt.Active = true;
+			return S;
+		}
+		default:
+			return Stationary(P, T0);
+		}
+	};
+	const int Cases = kDefaultCases / 20;
+	while (Stats.Cases < Cases)
+	{
+		const double Base = Rng.NextBelow(3) == 0 ? Rng.NextUniform(100.0, 590.0) : 0.0;
+		const MotionSegment A = Segment(Base + Rng.NextUniform(0.0, 1.0));
+		MotionSegment B = Segment(Base + Rng.NextUniform(0.0, 1.0));
+		if (A.State == rb::MotionState::Stationary && B.State == rb::MotionState::Stationary)
+		{
+			continue;
+		}
+		AimAt(Rng, A, B, Rng.NextBelow(3) == 0 ? 2.0 * kR + Rng.NextUniform(-1e-6, 1e-6) : 3.0 * kR);
+		const double RefTime = rb::Max(A.T0, B.T0);
+		const Vec3 Gap = rb::PositionAt(B, RefTime - B.T0) - rb::PositionAt(A, RefTime - A.T0);
+		if (!(rb::Min(A.T0 + A.TauEnd, B.T0 + B.TauEnd) > RefTime) || rb::Length(Gap) < 2.0 * kR + 1e-6)
+		{
+			continue;
+		}
+		CompareCase(A, kR, B, kR, true, Stats);
+	}
 	RB_CHECK(Stats.Violations == 0);
+	RB_CHECK(Stats.Hits > Stats.Cases / 10);
+	RB_CHECK(Stats.MaxTimeError <= 1e-12);
 }
 
 RB_TEST(VAL_ROOT02_ClusteredDoubleAndWideRangeRootsKeepTheBracketInvariant)

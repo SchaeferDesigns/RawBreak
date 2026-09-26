@@ -257,7 +257,9 @@ namespace rb
 	//    landing (end slot);
 	//  * PocketPivot (Seg = PivotDetectionProxy): facing faces and top edges and jaw arcs of Context.Pocket
 	//    (airborne predictors); other balls are pair slots;
-	//  * PocketFall: facings, arcs, liner, rim torus, capture depth, pocket exit of Context.Pocket;
+	//  * PocketFall: facings, arcs, liner, rim torus, capture depth, pocket exit of Context.Pocket, and the rail-top planes,
+	//    edges and cut rims within that pocket's a_d cylinder (a ball bouncing up inside the hole above WallTopZ meets the
+	//    rim of the rail cut / the cap, not the back wall; routed like any rail-top event);
 	//  * Stationary / Spinning (no translation), Pocketed, OffTable: nothing.
 	// Contact distances on the cloth come from WP-2's ComputeCushionContact (R_c) and FacingContactOffset (s_f), so the
 	// single geometry source also fixes the contact offsets. TimeLimit prunes: after a candidate is found, later features

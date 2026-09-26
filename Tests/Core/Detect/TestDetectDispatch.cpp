@@ -154,7 +154,7 @@ RB_TEST(Detect_TableEventPocketPivotAndPocketFallUseTheirPocket)
 	rb::BallTableContext InPocket;
 	InPocket.Pocket = rb::PocketId::FootLeft;
 
-	// Pivot proxy heading into jaw 6 (sphere approximation of the rounded point).
+	// Pivot proxy heading into jaw 6 at the jaw height h: the exact edge circle is met at plan distance r_j + R.
 	MotionSegment Proxy = Stationary({1.19 - 0.1, 0.64, kNoseH});
 	Proxy.State = rb::MotionState::PocketPivot;
 	Proxy.Vel0 = {1.0, 0.0, 0.0};

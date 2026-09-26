@@ -199,9 +199,9 @@ namespace rb
 			const ValidFn& IsValid, const PolishFn& Polish)
 		{
 			ContactPrediction Out;
-			if (!(TauMax >= 0.0))
+			if (!(TauMax >= 0.0) || !IsFinite(StartTime))
 			{
-				return Out; // empty window (or NaN)
+				return Out; // empty window (or NaN); a corrupt time base never yields a non-finite event time (heap order)
 			}
 
 			// ---- start rules (3.6) ----
@@ -814,7 +814,7 @@ namespace rb
 	// =============================================================================================
 	ContactPrediction PredictSlateLanding(const MotionSegment& Seg, double Radius, double TimeLimit)
 	{
-		if (Seg.State != MotionState::Airborne)
+		if (Seg.State != MotionState::Airborne || !IsFinite(Seg.T0))
 		{
 			return {};
 		}
@@ -841,7 +841,7 @@ namespace rb
 				Tau = Max(R0, R1);
 			}
 		}
-		if (!(Tau >= 0.0))
+		if (!(Tau >= 0.0) || !IsFinite(Tau))
 		{
 			return {};
 		}
@@ -978,7 +978,7 @@ namespace rb
 	{
 		const NumericsConfig& N = kDefaultNumerics;
 		const double TauMax = LocalWindow(Seg, TimeLimit);
-		if (!(TauMax >= 0.0))
+		if (!(TauMax >= 0.0) || !IsFinite(Seg.T0))
 		{
 			return {};
 		}
@@ -1010,12 +1010,12 @@ namespace rb
 
 	ContactPrediction PredictLampApex(const MotionSegment& Seg, double Radius, const EnvironmentSpec& Environment, double Gravity, double TimeLimit)
 	{
-		if (Seg.State != MotionState::Airborne || !(Gravity > 0.0) || !(Seg.Vel0.z > 0.0))
+		if (Seg.State != MotionState::Airborne || !(Gravity > 0.0) || !(Seg.Vel0.z > 0.0) || !IsFinite(Seg.T0))
 		{
 			return {};
 		}
 		const double TauApex = Seg.Vel0.z / Gravity;
-		if (!(TauApex <= LocalWindow(Seg, TimeLimit)))
+		if (!(TauApex <= LocalWindow(Seg, TimeLimit)) || !IsFinite(TauApex))
 		{
 			return {};
 		}
@@ -1042,7 +1042,7 @@ namespace rb
 		}
 		struct Candidate
 		{
-			double Tau;
+			double Time; // absolute: the order and the window are judged on what the caller receives
 			TableLine Line;
 			std::int8_t Direction;
 		};
@@ -1095,7 +1095,7 @@ namespace rb
 				const double Beyond = Slope != 0.0 ? Slope : (Tau == 0.0 ? A : 0.0);
 				if ((Direction > 0 && Beyond > 0.0) || (Direction < 0 && Beyond < 0.0))
 				{
-					Found[NumFound++] = {Tau, Line, Direction};
+					Found[NumFound++] = {Time, Line, Direction};
 				}
 			}
 		};
@@ -1118,12 +1118,13 @@ namespace rb
 			AddRoots(P, V, A, Def.Value - Eps, Def.Line, -1);
 		}
 
-		// Sort by (Time, Line) (insertion sort, stable and deterministic).
+		// Sort by the ABSOLUTE (Time, Line) (insertion sort, stable and deterministic): two crossings whose local times differ
+		// by less than half an ulp of T0 + tau report the same Time and are then ordered by Line.
 		for (int i = 1; i < NumFound; ++i)
 		{
 			const Candidate Key = Found[i];
 			int j = i - 1;
-			while (j >= 0 && (Found[j].Tau > Key.Tau || (Found[j].Tau == Key.Tau && Found[j].Line > Key.Line)))
+			while (j >= 0 && (Found[j].Time > Key.Time || (Found[j].Time == Key.Time && Found[j].Line > Key.Line)))
 			{
 				Found[j + 1] = Found[j];
 				--j;
@@ -1133,7 +1134,7 @@ namespace rb
 		const int Count = Out != nullptr ? (NumFound < Capacity ? NumFound : Capacity) : 0;
 		for (int i = 0; i < Count; ++i)
 		{
-			Out[i].Time = Seg.T0 + Found[i].Tau;
+			Out[i].Time = Found[i].Time;
 			Out[i].Line = Found[i].Line;
 			Out[i].Direction = Found[i].Direction;
 		}
@@ -1226,6 +1227,31 @@ namespace rb
 				if (Index < Table.JawArcs.Size() && Reach.Overlaps(JawBox(Table.JawArcs[Index], 0.0)))
 				{
 					Consider(PredictJawArcAirborne(Seg, R, Table.JawArcs[Index], Limit, Numerics), TableFeatureKind::JawArc, Index, 0);
+				}
+			}
+		};
+		// Rail-top planes, their physical edges and pocket-cut rims whose bounds overlap Reach and Within (6.2).
+		const auto RailTopsIn = [&](const Aabb3& Within)
+		{
+			for (int i = 0; i < Table.RailTops.Size(); ++i)
+			{
+				const RailTopPolygon& Poly = Table.RailTops[i];
+				const Aabb3 Box = PolygonBox(Poly, 0.0);
+				if (!Reach.Overlaps(Box) || !Within.Overlaps(Box))
+				{
+					continue;
+				}
+				Consider(PredictRailTop(Seg, R, Poly, Limit, Numerics), TableFeatureKind::RailTop, i, 0);
+				for (int e = 0; e < Poly.VertexCount; ++e)
+				{
+					if (IsPhysicalRailTopEdge(Poly.Edges[e]) && Reach.Overlaps(RailTopEdgeBox(Poly, e, 0.0)))
+					{
+						Consider(PredictRailTopEdge(Seg, R, Poly, e, Limit, Numerics), TableFeatureKind::RailTopEdge, i, e);
+					}
+				}
+				if (Poly.HasCut && Reach.Overlaps(RailTopEdgeBox(Poly, kCutRimEdge, 0.0)))
+				{
+					Consider(PredictRailTopEdge(Seg, R, Poly, kCutRimEdge, Limit, Numerics), TableFeatureKind::RailTopEdge, i, kCutRimEdge);
 				}
 			}
 		};
@@ -1348,26 +1374,7 @@ namespace rb
 					}
 				}
 			}
-			for (int i = 0; i < Table.RailTops.Size(); ++i)
-			{
-				const RailTopPolygon& Poly = Table.RailTops[i];
-				if (!Reach.Overlaps(PolygonBox(Poly, 0.0)))
-				{
-					continue;
-				}
-				Consider(PredictRailTop(Seg, R, Poly, Limit, Numerics), TableFeatureKind::RailTop, i, 0);
-				for (int e = 0; e < Poly.VertexCount; ++e)
-				{
-					if (IsPhysicalRailTopEdge(Poly.Edges[e]) && Reach.Overlaps(RailTopEdgeBox(Poly, e, 0.0)))
-					{
-						Consider(PredictRailTopEdge(Seg, R, Poly, e, Limit, Numerics), TableFeatureKind::RailTopEdge, i, e);
-					}
-				}
-				if (Poly.HasCut && Reach.Overlaps(RailTopEdgeBox(Poly, kCutRimEdge, 0.0)))
-				{
-					Consider(PredictRailTopEdge(Seg, R, Poly, kCutRimEdge, Limit, Numerics), TableFeatureKind::RailTopEdge, i, kCutRimEdge);
-				}
-			}
+			RailTopsIn(Reach);
 			Consider(PredictOuterBoundary(Seg, Table.OuterBoundary, Limit), TableFeatureKind::OuterBoundary, 0, 0);
 			Consider(PredictLampApex(Seg, R, Environment, Gravity, Limit), TableFeatureKind::LampApex, 0, 0);
 			return Best;
@@ -1394,6 +1401,10 @@ namespace rb
 			Consider(PredictRimTorus(Seg, R, P, Limit, Numerics), TableFeatureKind::RimTorus, Pocket, 0);
 			Consider(PredictCaptureDepth(Seg, R, Limit, Numerics), TableFeatureKind::CaptureDepth, Pocket, 0);
 			Consider(PredictPocketExit(Seg, R, P, Limit, Numerics), TableFeatureKind::PocketExit, Pocket, 0);
+			// A ball bouncing up inside the hole (rim torus, jaw) above WallTopZ is no longer stopped by the back wall: it meets
+			// the rim of the rail cut and the cap around it. Until PocketExit (center beyond a_d, z > R) hands it to the airborne
+			// dispatcher, only rail-top features within the a_d cylinder (plus the ball's reach) can be touched.
+			RailTopsIn(PocketBox(P, Pad));
 		}
 		return Best;
 	}
