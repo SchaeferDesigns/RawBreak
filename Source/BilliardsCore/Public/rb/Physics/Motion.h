@@ -82,7 +82,8 @@ namespace rb
 		Vec2 NapPseudoSlope;             // zeta_n n_nap [1] (HF-51, Later; default 0): rolling balls drift TOWARD +NapPseudoSlope with
 		                                 //   the extra drive g NapPseudoSlope (napped bar cloth 2e-4 along +x, EST; worsted 0)
 		double NapResistance = 0.0;      // eta_n [1] in [0, 1) (Later; default 0): rolling resistance mu_r g (1 - eta_n v_hat . n_nap),
-		                                 //   n_nap = NapPseudoSlope / |NapPseudoSlope| (ignored while NapPseudoSlope = 0), frozen per piece.
+		                                 //   n_nap = NapPseudoSlope / |NapPseudoSlope| (ignored while NapPseudoSlope = 0), frozen per piece;
+		                                 //   while it acts, a rolling piece turns by at most 0.05 rad (refresh rule of 4.5.6).
 		                                 //   Nap acts only on the cloth (SupportZ == 0), never on the rail cap or inside CLI islands.
 		// Validity (ValidatePhysicsParams; Simulator::Run per ball with its k): the rolling drive stays within half the
 		// static rolling resistance, |Slope| / (1 + k) + |NapPseudoSlope| <= (1 - NapResistance) mu_r / 2 (|Slope| <= 0.7 mu_r
@@ -240,11 +241,14 @@ namespace rb
 	};
 
 	// T_stop = |x0| (A/(K - |G|) + B/(K + |G|)), A = (1 + c0)/2, B = (1 - c0)/2, c0 = x_hat0 . G_hat [s];
-	// the collinear cases are the exact quadratics |x0|/(K -+ |G|). |x0| = 0 -> 0.
+	// the collinear cases are the exact quadratics |x0|/(K -+ |G|). |x0| = 0 -> 0. A drive |G| <= 2^-60 K (below double
+	// precision over the whole phase, incl. G = 0) is the level law |x0| / K. Lengths and angles are formed without
+	// underflow, so tiny (even subnormal) x0 or G never give NaN.
 	RB_API double PursuitStopTime(const Vec2& X0, const Vec2& G, double K);
 
 	// State at Tau >= 0 through one monotone 1-D solve of t(lam) = Tau (safeguarded Newton with bisection,
-	// |dlam| <= 1e-15 max(1, lam)); Tau >= T_stop gives x = 0 and X = X(inf). G = 0 reduces to the level law.
+	// |dlam| <= 1e-15 max(1, lam)); Tau >= T_stop gives x = 0 and X = X(inf). G = 0 (or |G| <= 2^-60 K) reduces to the
+	// level law.
 	RB_API PursuitState EvaluatePursuit(const Vec2& X0, const Vec2& G, double K, double Tau);
 
 	// Length Delta of the next chain piece from |x_i| (4.5.3 refresh rule): Remaining (= PursuitStopTime(x_i)) if the motion is
@@ -260,8 +264,11 @@ namespace rb
 	// TiltPieceDuration, EndsInRefresh if Delta < T_stop, node exact from EvaluatePursuit); Airborne / PocketFall ->
 	// the ballistic quadratic with the in-plane part g_t / 2 in Accel2; Stationary / Spinning unchanged (static rolling
 	// resistance holds the ball, |s| <= 0.7 mu_r); PocketPivot is built by rb/Physics/PocketDrop.h (tilt neglected).
+	// With nap resistance (NapResistance != 0, rolling on the cloth) a refresh piece also turns by at most 0.05 rad
+	// (human-factors 4.5.6: K is frozen with v_hat_i); tail and collinear pieces still run to the exact stop.
 	// A Sliding / Rolling state whose pursuit has G = 0 (sliding with a nap-only TiltParams; rolling on the rail cap, where
-	// nap does not act, with Slope = 0) or violates K > |G| (rejected by ValidatePhysicsParams) keeps the level segment.
+	// nap does not act, with Slope = 0), a negligible drive |G| <= 2^-60 K, or violates K > |G| (rejected by
+	// ValidatePhysicsParams) keeps the level segment.
 	RB_API MotionSegment MakeSegment(const BallState& S, double T0, const BallSpec& Spec, const ClothParams& Surface, double SupportZ, double Gravity,
 		const TiltParams& Tilt);
 

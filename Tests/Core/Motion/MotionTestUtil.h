@@ -51,9 +51,21 @@ namespace mottest
 		return S;
 	}
 
-	// "pub" in the motion spec: the model value, rounded to the Decimals of the published value, lies within one unit of
-	// that last digit (a model value of 31.0320 matches a published 31.031: TP B.10 rounds its own intermediate values).
+	// "pub" in the motion spec: |model - published| <= 1 unit in the last published digit (Decimals after the point).
 	inline bool PubNear(double Model, double Published, int Decimals)
+	{
+		double Unit = 1.0;
+		for (int i = 0; i < Decimals; ++i)
+		{
+			Unit *= 0.1;
+		}
+		return std::fabs(Model - Published) <= Unit * (1.0 + 1e-9);
+	}
+
+	// Looser variant for a single documented published value: the model value ROUNDED to the published digits lies within
+	// one unit (TP B.10's bounce-3 spin 31.031 rps against the model's 31.03203 rps, 1.03 units: TP B.10 rounds its own
+	// intermediate values). Never use it where PubNear holds.
+	inline bool PubNearRounded(double Model, double Published, int Decimals)
 	{
 		double Unit = 1.0;
 		for (int i = 0; i < Decimals; ++i)

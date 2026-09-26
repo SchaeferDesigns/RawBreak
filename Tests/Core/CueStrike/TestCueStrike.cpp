@@ -160,7 +160,7 @@ RB_TEST(MOT_TB10_MiscueBoundary)
 	RB_CHECK_NEAR(Deep.State.Velocity.y, 0.1815, 1e-4);
 	RB_CHECK_NEAR(Deep.State.Velocity.z, 0.0, 1e-12);
 	RB_CHECK_NEAR(Degrees(std::atan2(Deep.State.Velocity.y, Deep.State.Velocity.x)), 5.906, 1e-3);
-	RB_CHECK_NEAR(Deep.State.Omega.z, 79.385, 1e-3);
+	RB_CHECK_NEAR(Deep.State.Omega.z, 79.385, 1e-4); // the table tolerance (model 79.384906)
 	RB_CHECK(Deep.SquirtAngle == 0.0);
 }
 

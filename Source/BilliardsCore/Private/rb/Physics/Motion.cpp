@@ -54,6 +54,7 @@ namespace rb
 		{
 			double Speed = 0.0; // |x0| [m/s]
 			double GNorm = 0.0; // |G| [m/s^2]
+			Vec2 XHat;          // x0 / |x0|
 			Vec2 GHat;
 			Vec2 EPerp;         // unit vector perpendicular to G_hat on the side of x0
 			double S0 = 0.0;    // sin(beta0) >= 0
@@ -61,16 +62,48 @@ namespace rb
 			double B = 0.0;
 		};
 
+		// Length and direction of a 2-D vector without underflow / overflow of the squares: an exact power-of-two rescaling
+		// (2^-500 .. 2^500) is applied first when needed, so for ordinary magnitudes this is exactly Length(V) and
+		// V / Length(V). Returns 0 (and Unit = 0) for a zero or non-finite vector.
+		double RobustLength(const Vec2& V, Vec2& Unit)
+		{
+			constexpr double kUp = 0x1p+500;
+			constexpr double kDown = 0x1p-500;
+			Unit = Vec2{};
+			double MaxAbs = Max(Abs(V.x), Abs(V.y));
+			if (!(MaxAbs > 0.0) || !(MaxAbs < kInfinity))
+			{
+				return 0.0;
+			}
+			Vec2 S = V;
+			double Back = 1.0; // exact power of two: |V| = |S| * Back
+			while (MaxAbs < kDown)
+			{
+				S = S * kUp;
+				MaxAbs *= kUp;
+				Back *= kDown;
+			}
+			while (MaxAbs > kUp)
+			{
+				S = S * kDown;
+				MaxAbs *= kDown;
+				Back *= kUp;
+			}
+			const double Len = Length(S);
+			Unit = S / Len;
+			return Len * Back;
+		}
+
 		PursuitSetup MakePursuitSetup(const Vec2& X0, const Vec2& G)
 		{
 			PursuitSetup P;
-			P.Speed = Length(X0);
-			P.GNorm = Length(G);
+			P.Speed = RobustLength(X0, P.XHat);
+			P.GNorm = RobustLength(G, P.GHat);
 			if (P.Speed > 0.0 && P.GNorm > 0.0)
 			{
-				P.GHat = G / P.GNorm;
-				const double DotXG = Dot(X0, G);
-				const double CrossXG = Cross(X0, G);
+				// Angle between x0 and G from the unit vectors (no underflow of |x0| |G| for tiny drives, review fix).
+				const double DotXG = Dot(P.XHat, P.GHat);
+				const double CrossXG = Cross(P.XHat, P.GHat);
 				const double Norm = Sqrt(DotXG * DotXG + CrossXG * CrossXG);
 				const double C0 = DotXG / Norm;
 				P.S0 = Abs(CrossXG) / Norm;
@@ -90,13 +123,17 @@ namespace rb
 			return P;
 		}
 
-		// Level (G = 0) or exactly collinear (S0 = 0) problems move with a constant acceleration until the stop.
-		bool IsQuadraticPursuit(const PursuitSetup& P) { return !(P.GNorm > 0.0) || P.S0 == 0.0; }
+		// A drive below 2^-60 K changes no result by more than 1e-18 relative (|dx| <= |G| T_stop, T_stop ~ |x0| / K), but its
+		// p = K / |G| overflows the exponents of 4.5.2 for subnormal |G|: such a drive (and G = 0, or NaN) is the level law.
+		bool IsNegligibleDrive(const PursuitSetup& P, double K) { return !(P.GNorm > K * 0x1p-60); }
+
+		// Level (G = 0 or negligible) or exactly collinear (S0 = 0) problems move with a constant acceleration until the stop.
+		bool IsQuadraticPursuit(const PursuitSetup& P, double K) { return IsNegligibleDrive(P, K) || P.S0 == 0.0; }
 
 		// Deceleration along x_hat0 of a quadratic pursuit: K (level), K - |G| (downhill), K + |G| (uphill).
 		double QuadraticDeceleration(const PursuitSetup& P, double K)
 		{
-			if (!(P.GNorm > 0.0))
+			if (IsNegligibleDrive(P, K))
 			{
 				return K;
 			}
@@ -111,7 +148,7 @@ namespace rb
 			{
 				return 0.0;
 			}
-			if (IsQuadraticPursuit(P))
+			if (IsQuadraticPursuit(P, K))
 			{
 				const double Decel = QuadraticDeceleration(P, K);
 				return Decel > 0.0 ? P.Speed / Decel : kInfinity;
@@ -224,9 +261,45 @@ namespace rb
 			return D;
 		}
 
+		// Largest turn of the rolling direction per chain piece while nap resistance is frozen per piece (human-factors 4.5.6:
+		// freezing error <= eta_n K |dbeta| Delta^2 / 2) [rad].
+		constexpr double kNapMaxTurn = 0.05;
+
+		// Time until the direction of x has turned by Turn [rad] toward G (4.5.2: tan(beta / 2) = tan(beta0 / 2) e^{-lam},
+		// then t(lam)); +inf if x never turns that far (beta0 <= Turn, collinear or level motion).
+		double TurnDuration(const PursuitSetup& P, double K, double Turn)
+		{
+			if (IsQuadraticPursuit(P, K) || !(K > P.GNorm) || !(P.A > 0.0))
+			{
+				return kInfinity;
+			}
+			const double W0 = Sqrt(P.B / P.A); // tan(beta0 / 2): A = cos^2(beta0 / 2), B = sin^2(beta0 / 2)
+			const double Beta0 = 2.0 * Atan(W0);
+			if (!(Beta0 > Turn))
+			{
+				return kInfinity;
+			}
+			const double Lam = Log(W0 / Tan(0.5 * (Beta0 - Turn)));
+			const double Km = K - P.GNorm;
+			const double Kp = K + P.GNorm;
+			return P.Speed * P.A * -Expm1(-(Km / P.GNorm) * Lam) / Km + P.Speed * P.B * -Expm1(-(Kp / P.GNorm) * Lam) / Kp;
+		}
+
+		// True when the 4.5.3 refresh rule runs this piece to the exact stop by construction (collinear or tail piece, or
+		// invalid settings): TiltPieceDuration then returns Remaining without the cubic root.
+		bool PieceRunsToStop(double SpeedX, double K, double GNorm, double Cs, double SinBound, double Tolerance, double MaxInterval)
+		{
+			if (!(Tolerance > 0.0) || !(MaxInterval > 0.0))
+			{
+				return true;
+			}
+			return SinBound <= 1e-12 || SpeedX <= Sqrt(Tolerance * (K - GNorm) / (4.0 * Cs));
+		}
+
 		// One chain piece of a Sliding / Rolling phase on a tilted table (4.5.3 MakeTiltSegment). Returns false (and
 		// leaves Seg untouched) when the level closed form applies: G = 0 for this state (e.g. sliding on a nap-only
-		// table), the ball has no pursuit speed, or the tilt violates K > |G| (rejected by ValidatePhysicsParams).
+		// table), the ball has no pursuit speed, the drive is negligible (|G| <= 2^-60 K) or the tilt violates K > |G|
+		// (rejected by ValidatePhysicsParams).
 		bool MakeTiltPiece(MotionSegment& Seg, const BallState& S, double InertiaK, const ClothParams& Surface, double SupportZ, double Gravity,
 			const TiltParams& Tilt)
 		{
@@ -236,7 +309,7 @@ namespace rb
 				return false;
 			}
 			const PursuitSetup P = MakePursuitSetup(D.X0, D.G);
-			if (!(P.Speed > 0.0) || !(D.K > P.GNorm))
+			if (!(P.Speed > 0.0) || !(D.K > P.GNorm) || IsNegligibleDrive(P, D.K))
 			{
 				return false;
 			}
@@ -246,7 +319,16 @@ namespace rb
 			// cos(beta0) >= 0 <=> A >= B. Exactly collinear motion (S0 = 0, downhill or uphill) never turns: its phase is
 			// one exact quadratic (4.5.3 "collinear: one exact segment"), so the uphill case does not take the bound 1.
 			const double SinBound = (P.A >= P.B || P.S0 == 0.0) ? P.S0 : 1.0;
-			const double Delta = TiltPieceDuration(P.Speed, D.K, P.GNorm, D.Cs, SinBound, Tilt.Tolerance, Tilt.RefreshMaxInterval, Remaining);
+			double Delta = TiltPieceDuration(P.Speed, D.K, P.GNorm, D.Cs, SinBound, Tilt.Tolerance, Tilt.RefreshMaxInterval, Remaining);
+			// Nap resistance (4.5.6, rolling on the cloth only): K is frozen with v_hat_i, so the refresh rule also keeps the turn
+			// of the direction per piece within kNapMaxTurn (the tail and collinear pieces run to the stop as before).
+			const bool NapTurnRule = S.State == MotionState::Rolling && SupportZ == 0.0 && Tilt.NapResistance != 0.0 &&
+				(Tilt.NapPseudoSlope.x != 0.0 || Tilt.NapPseudoSlope.y != 0.0);
+			if (NapTurnRule &&
+				!PieceRunsToStop(P.Speed, D.K, P.GNorm, D.Cs, SinBound, Tilt.Tolerance, Tilt.RefreshMaxInterval))
+			{
+				Delta = Min(Delta, TurnDuration(P, D.K, kNapMaxTurn));
+			}
 			const bool Refresh = Delta < Remaining;
 			const PursuitState Node = EvaluatePursuit(D.X0, D.G, D.K, Delta);
 
@@ -568,10 +650,11 @@ namespace rb
 			return Out;
 		}
 
-		if (IsQuadraticPursuit(P))
+		if (IsQuadraticPursuit(P, K))
 		{
-			// Level (G = 0) or collinear (downhill c0 = 1: K - |G|, uphill c0 = -1: K + |G|): exact quadratic until the stop.
-			const Vec2 XHat = X0 / P.Speed;
+			// Level (G = 0 or negligible) or collinear (downhill c0 = 1: K - |G|, uphill c0 = -1: K + |G|): exact quadratic
+			// until the stop.
+			const Vec2 XHat = P.XHat;
 			const double Decel = QuadraticDeceleration(P, K);
 			const double TStop = StopTimeOf(P, K);
 			const double T = Tau < TStop ? Tau : TStop;
@@ -580,7 +663,7 @@ namespace rb
 			if (Tau < TStop)
 			{
 				Out.X = X0 + Acc * T;
-				const double Rate = P.GNorm > 0.0 ? Decel / P.GNorm : 0.0; // p -+ 1
+				const double Rate = IsNegligibleDrive(P, K) ? 0.0 : Decel / P.GNorm; // p -+ 1
 				Out.Lambda = Rate > 0.0 ? -Log1p(-T / TStop) / Rate : 0.0;
 			}
 			else
@@ -646,14 +729,9 @@ namespace rb
 
 	double TiltPieceDuration(double SpeedX, double K, double GNorm, double Cs, double SinBound, double Tolerance, double MaxInterval, double Remaining)
 	{
-		if (!(Tolerance > 0.0) || !(MaxInterval > 0.0))
+		if (PieceRunsToStop(SpeedX, K, GNorm, Cs, SinBound, Tolerance, MaxInterval))
 		{
-			return Remaining; // invalid settings: one piece to the exact stop (the chain always terminates)
-		}
-		const double XTail = Sqrt(Tolerance * (K - GNorm) / (4.0 * Cs));
-		if (SinBound <= 1e-12 || SpeedX <= XTail)
-		{
-			return Remaining; // collinear (exact quadratic) or tail piece to the exact stop
+			return Remaining; // collinear (exact quadratic), tail piece to the exact stop, or invalid settings (the chain terminates)
 		}
 
 		// Unique positive root of a3 D^3 + a1 D - a0 = 0 (convex, increasing): Newton from the right of the root

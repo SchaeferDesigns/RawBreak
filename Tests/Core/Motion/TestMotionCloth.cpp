@@ -319,7 +319,7 @@ RB_TEST(MOT_TA12_EnergyNonIncreasingProperty)
 	rb::Rng Rng(0xA12u);
 	const rb::BallSpec Spec = MotSpec();
 	int Counts[4] = {0, 0, 0, 0};
-	for (int Case = 0; Case < 3000; ++Case)
+	for (int Case = 0; Case < 10000; ++Case) // property test: >= 1e4 cases (architecture 18)
 	{
 		const int Kind = Case % 3; // Sliding, Rolling, Spinning
 		Vec3 V{Rng.NextUniform(-6.0, 6.0), Rng.NextUniform(-6.0, 6.0), 0.0};
@@ -347,9 +347,9 @@ RB_TEST(MOT_TA12_EnergyNonIncreasingProperty)
 		const double EndEnergy = rb::MechanicalEnergy(rb::SegmentEndState(M, kNumerics), Spec, kG);
 		RB_CHECK(EndEnergy <= Previous * (1.0 + 1e-12) + 1e-300);
 	}
-	RB_CHECK(Counts[static_cast<int>(MotionState::Sliding)] > 900);
-	RB_CHECK(Counts[static_cast<int>(MotionState::Rolling)] > 900);
-	RB_CHECK(Counts[static_cast<int>(MotionState::Spinning)] > 900);
+	RB_CHECK(Counts[static_cast<int>(MotionState::Sliding)] > 3000);
+	RB_CHECK(Counts[static_cast<int>(MotionState::Rolling)] > 3000);
+	RB_CHECK(Counts[static_cast<int>(MotionState::Spinning)] > 3000);
 }
 
 RB_TEST(UE_T24_RollingSignCheck)
