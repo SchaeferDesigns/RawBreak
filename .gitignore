@@ -42,3 +42,6 @@ Desktop.ini
 
 # Architecture / CI build trees
 build-*/
+
+# Claude Code agent worktrees / local state
+.claude/
