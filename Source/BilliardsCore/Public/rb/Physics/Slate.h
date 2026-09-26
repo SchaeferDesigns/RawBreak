@@ -23,10 +23,25 @@ namespace rb
 	// v_z_min = sqrt(2 g h_min) [m/s] (0.1980571 m/s for the defaults).
 	inline double MinBounceSpeed(const SlateParams& Slate, double Gravity) { return Sqrt(2.0 * Gravity * Slate.MinBounceHeight); }
 
-	// Later root of z(tau) = R for a ballistic flight (C.2): (v_z0 + sqrt(v_z0^2 + 2 g (z0 - R))) / g.
+	// Later root of z(tau) = R for a ballistic flight (C.2): (v_z0 + sqrt(v_z0^2 + 2 g (z0 - R))) / g, evaluated
+	// without cancellation for a falling ball (v_z0 < 0: 2 (z0 - R) / (sqrt(.) - v_z0)). A ball at or below the
+	// plane that does not rise back to it (inconsistent input) lands at once (0). Z0 is relative to the landing
+	// support (MakeSegment passes z0 - SupportZ).
 	inline double LandingTau(double Z0, double Vz0, double Radius, double Gravity)
 	{
-		return (Vz0 + Sqrt(Vz0 * Vz0 + 2.0 * Gravity * (Z0 - Radius))) / Gravity;
+		const double Height = Z0 - Radius;
+		const double Disc = Vz0 * Vz0 + 2.0 * Gravity * Height;
+		if (!(Disc >= 0.0))
+		{
+			return 0.0;
+		}
+		const double Root = Sqrt(Disc);
+		if (Vz0 > 0.0)
+		{
+			return (Vz0 + Root) / Gravity;
+		}
+		const double Den = Root - Vz0;
+		return (Height > 0.0 && Den > 0.0) ? 2.0 * Height / Den : 0.0;
 	}
 
 	struct SlateImpactResult
@@ -44,7 +59,8 @@ namespace rb
 	//   ((2/7) and 5/(2R) for k = 2/5); then v_z' := 0 if v_z' < v_z_min or BounceIndex >= N_max
 	//   (BounceIndex is 1-based within the current airborne sequence). Restitution/friction are passed
 	//   explicitly so that GRI parity tests (collisions G-3) and the cue-strike pinch (B.8.3, e_eff) can
-	//   reuse it.
+	//   reuse it. Stick branch: v_h' = L_c exactly and w_h' := z_hat x v_h' / R (u' = 0, implementation note 2).
+	//   v_z >= 0 (not moving into the support): returned unchanged, no guard applied.
 	RB_API SlateImpactResult ResolveSlateImpact(const Vec3& Velocity, const Vec3& Omega, const BallSpec& Spec, double Restitution, double SlidingFriction,
 		const SlateParams& Slate, int BounceIndex, double Gravity, const NumericsConfig& Numerics);
 
