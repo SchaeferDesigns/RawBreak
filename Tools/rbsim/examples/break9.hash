@@ -1,0 +1,11 @@
+# ROB-10 reference (Docs/ue-architecture.md A5, review R-13): hashes of the break9 scenario simulated by the standalone
+# BilliardsCore build (identical in Release and Debug). The UE test RawBreak.Unit.Simulation.ROB10_Break9Hash rebuilds the
+# scenario through the same core calls (FRbTableContext, RbShot::InitSimInput, GenerateRack, ClassifyState) and must
+# print the same values. Record options = everything on (the game's RbShot::InitSimInput), hence --record.
+# Regenerate (only when the core's results, the ParamTable keys or the InputHash definition change on purpose):
+#   rbsim --table 9ft-pro --rack 9ball --rack-gap wooden --seed 11 --cue break --ball 0:-0.735,0.12 --speed 9 --aim -5.006 \
+#         --offset 0,-0.1 --record --hash
+# then replace the three lines below with its output. Format: "key value" per line, '#' starts a comment.
+coreVersion 0.1.0
+inputHash a98d1eea7f3e2d25
+resultHash 392f104b812d96bb

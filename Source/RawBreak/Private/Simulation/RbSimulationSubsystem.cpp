@@ -3,23 +3,71 @@
 #include "RawBreak.h"
 
 #include "HAL/PlatformTime.h"
+#include "Misc/Timespan.h"
 
-// Owner: UE-6a. TODO(UE-6a): worker launch, collect, compact copy, timing, error logging, tests
-// (RawBreak.Unit.Simulation.*: same-frame hand-off, determinism vs RunShotBlocking, ROB-10 hash).
+// Owner: UE-6a. Tests: Private/Tests/RbSimulationTests.cpp (RawBreak.Unit.Simulation.*).
+
+namespace RbSimulationSubsystemPrivate
+{
+	const TCHAR* StatusName(rb::SimStatus Status)
+	{
+		switch (Status)
+		{
+		case rb::SimStatus::Ok: return TEXT("Ok");
+		case rb::SimStatus::InvalidInput: return TEXT("InvalidInput");
+		case rb::SimStatus::Aborted: return TEXT("Aborted");
+		case rb::SimStatus::HorizonReached: return TEXT("HorizonReached");
+		case rb::SimStatus::NotImplemented: return TEXT("NotImplemented");
+		}
+		return TEXT("?");
+	}
+}
 
 URbSimulationSubsystem::URbSimulationSubsystem() = default;
 
 uint32 URbSimulationSubsystem::SubmitShot(FRbShotRequest&& Request)
 {
-	if (bInFlight || !Request.Table.IsValid())
+	check(IsInGameThread());
+	if (bInFlight)
 	{
+		++Stats.Refused;
+		UE_LOG(LogRawBreak, Warning, TEXT("SubmitShot refused: shot %u is still in flight"), InFlightId);
 		return 0;
 	}
-	// TODO(UE-6a): launch Simulate() with UE::Tasks::Launch on a worker; keep the task in InFlight.
-	TSharedRef<FRbShot> Shot = RunShotBlocking(MoveTemp(Request));
+	if (!Request.Table.IsValid())
+	{
+		++Stats.Refused;
+		UE_LOG(LogRawBreak, Warning, TEXT("SubmitShot refused: the request has no table context"));
+		return 0;
+	}
+	if (!Simulator.IsValid())
+	{
+		// Lazily: editor worlds get this subsystem too and never simulate. The first Run reserves WorkResult (~6 MB).
+		Simulator = MakeUnique<rb::Simulator>();
+		WorkResult = MakeUnique<rb::ShotResult>();
+	}
+
+	TSharedPtr<FRbShot> Shot = MakeShared<FRbShot>();
+	Shot->Request = MoveTemp(Request);
+	Shot->Request.Input.Table = &Shot->Request.Table->Geometry;
 	Shot->Id = NextShotId++;
-	LastShot = Shot;
-	OnShotSimulated.Broadcast(Shot);
+	Shot->SubmitFrame = GFrameCounter;
+
+	// The worker gets plain pointers to the pooled Simulator / result (alive until the task is waited for: TryCollect,
+	// CancelInFlight, Deinitialize, BeginDestroy) and the shot it exclusively owns until completion. Never `this`.
+	rb::Simulator* Sim = Simulator.Get();
+	rb::ShotResult* Work = WorkResult.Get();
+	InFlight = UE::Tasks::Launch(TEXT("RbSimulateShot"),
+		[Sim, Work, Shot]()
+		{
+			Simulate(*Sim, *Work, *Shot);
+			return Shot;
+		},
+		UE::Tasks::ETaskPriority::High);
+	bInFlight = true;
+	InFlightId = Shot->Id;
+	InFlightSubmitFrame = Shot->SubmitFrame;
+	++Stats.Submitted;
 	return Shot->Id;
 }
 
@@ -28,46 +76,149 @@ bool URbSimulationSubsystem::IsBusy() const
 	return bInFlight;
 }
 
-bool URbSimulationSubsystem::TryCollect(double /*MaxWaitSeconds*/)
+bool URbSimulationSubsystem::IsResultReady() const
 {
-	return false; // TODO(UE-6a)
+	return bInFlight && InFlight.IsCompleted();
+}
+
+bool URbSimulationSubsystem::TryCollect(double MaxWaitSeconds)
+{
+	check(IsInGameThread());
+	if (!bInFlight)
+	{
+		return false;
+	}
+	const bool bDone = MaxWaitSeconds > 0.0 ? InFlight.Wait(FTimespan::FromSeconds(MaxWaitSeconds)) : InFlight.IsCompleted();
+	if (!bDone)
+	{
+		return false;
+	}
+
+	TSharedPtr<FRbShot> Shot = InFlight.GetResult();
+	// Free the service BEFORE broadcasting: a listener may submit the next shot from its handler.
+	InFlight = UE::Tasks::TTask<TSharedPtr<FRbShot>>();
+	bInFlight = false;
+	InFlightId = 0;
+	check(Shot.IsValid());
+
+	Shot->HandOffFrame = GFrameCounter;
+	const bool bSameFrame = Shot->HandOffFrame == Shot->SubmitFrame;
+	++Stats.HandedOff;
+	Stats.SameFrameHandOffs += bSameFrame ? 1 : 0;
+	Stats.RanOnWorker += Shot->bSimulatedOnWorker ? 1 : 0;
+	Stats.LastSimMilliseconds = Shot->SimMilliseconds;
+	Stats.MaxSimMilliseconds = FMath::Max(Stats.MaxSimMilliseconds, Shot->SimMilliseconds);
+	Stats.TotalSimMilliseconds += Shot->SimMilliseconds;
+
+	using RbSimulationSubsystemPrivate::StatusName;
+	const rb::ShotResult& R = Shot->Result;
+	if (R.Status == rb::SimStatus::Ok)
+	{
+		UE_LOG(LogRawBreak, Log, TEXT("Shot %u simulated in %.3f ms %s (%s, %d events, stop %.3f s, %.0f KB), hand-off %s (+%llu frames)"), Shot->Id,
+			Shot->SimMilliseconds, Shot->bSimulatedOnWorker ? TEXT("on a worker") : TEXT("in place"), StatusName(R.Status),
+			R.Diagnostics.EventsProcessed, R.StopTime, static_cast<double>(RbShot::FootprintBytes(*Shot)) / 1024.0,
+			bSameFrame ? TEXT("in the submit frame") : TEXT("late"), Shot->HandOffFrame - Shot->SubmitFrame);
+	}
+	else
+	{
+		UE_LOG(LogRawBreak, Warning, TEXT("Shot %u: simulation status %s (input error %hs, %d events, stop %.3f s)"), Shot->Id, StatusName(R.Status),
+			rb::ToString(R.Diagnostics.InputError), R.Diagnostics.EventsProcessed, R.StopTime);
+	}
+
+	const TSharedRef<const FRbShot> Done = Shot.ToSharedRef();
+	LastShot = Done;
+	OnShotSimulated.Broadcast(Done);
+	return true;
+}
+
+void URbSimulationSubsystem::CancelInFlight()
+{
+	check(IsInGameThread());
+	DiscardInFlight(TEXT("cancelled"));
+}
+
+void URbSimulationSubsystem::DiscardInFlight(const TCHAR* Reason)
+{
+	if (!bInFlight)
+	{
+		return;
+	}
+	InFlight.Wait(); // bounded: Simulator::Run stops at its MaxEvents / time-horizon guards
+	InFlight = UE::Tasks::TTask<TSharedPtr<FRbShot>>();
+	UE_LOG(LogRawBreak, Log, TEXT("Shot %u dropped without hand-off (%s)"), InFlightId, Reason);
+	bInFlight = false;
+	InFlightId = 0;
+	++Stats.Discarded;
 }
 
 TSharedRef<FRbShot> URbSimulationSubsystem::RunShotBlocking(FRbShotRequest&& Request)
 {
 	TSharedRef<FRbShot> Shot = MakeShared<FRbShot>();
 	Shot->Request = MoveTemp(Request);
+	Shot->SubmitFrame = GFrameCounter;
+	Shot->HandOffFrame = GFrameCounter;
 	if (Shot->Request.Table.IsValid())
 	{
 		Shot->Request.Input.Table = &Shot->Request.Table->Geometry;
 		rb::Simulator Sim;
-		rb::ShotResult Work;
-		Simulate(Sim, Work, *Shot);
+		TUniquePtr<rb::ShotResult> Work = MakeUnique<rb::ShotResult>(); // large when reserved: heap, not stack
+		Simulate(Sim, *Work, *Shot);
+	}
+	else
+	{
+		UE_LOG(LogRawBreak, Warning, TEXT("RunShotBlocking: the request has no table context"));
+		Shot->Result.Status = rb::SimStatus::InvalidInput;
+		Shot->Result.Diagnostics.InputError = rb::ErrorCode::InvalidArgument;
+		Shot->InputHash = RbShot::InputHash(Shot->Request.Input);
+		Shot->ResultHash = RbShot::ResultHash(Shot->Result);
 	}
 	return Shot;
 }
 
 void URbSimulationSubsystem::Simulate(rb::Simulator& Sim, rb::ShotResult& Work, FRbShot& Shot)
 {
+	Shot.bSimulatedOnWorker = !IsInGameThread();
 	const double Start = FPlatformTime::Seconds();
 	Sim.Run(Shot.Request.Input, Work);
 	Shot.SimMilliseconds = 1000.0 * (FPlatformTime::Seconds() - Start);
 	RbShot::CopyCompact(Work, Shot.Result);
+	Shot.InputHash = RbShot::InputHash(Shot.Request.Input);
 	Shot.ResultHash = RbShot::ResultHash(Shot.Result);
 }
 
 void URbSimulationSubsystem::Deinitialize()
 {
-	// TODO(UE-6a): wait for an in-flight task before the Simulator is destroyed.
+	// World teardown with a shot in flight: wait for the worker before the Simulator / result it writes are destroyed,
+	// and never broadcast into listeners that are being torn down.
+	DiscardInFlight(TEXT("world teardown"));
+	OnShotSimulated.Clear();
+	LastShot.Reset();
+	Simulator.Reset();
+	WorkResult.Reset();
 	Super::Deinitialize();
 }
 
-void URbSimulationSubsystem::Tick(float /*DeltaTime*/)
+void URbSimulationSubsystem::BeginDestroy()
 {
+	// Deinitialize already waited; this only guards a subsystem destroyed without it (the worker must never outlive
+	// the Simulator it writes into).
+	DiscardInFlight(TEXT("destroyed"));
+	Super::BeginDestroy();
+}
+
+void URbSimulationSubsystem::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
 	if (bInFlight)
 	{
-		TryCollect(CollectBudgetSeconds);
+		// Wait (bounded) only in the frame of the submission; afterwards poll without blocking the game thread.
+		TryCollect(InFlightSubmitFrame == GFrameCounter ? CollectBudgetSeconds : 0.0);
 	}
+}
+
+bool URbSimulationSubsystem::IsTickable() const
+{
+	return bInFlight;
 }
 
 TStatId URbSimulationSubsystem::GetStatId() const
