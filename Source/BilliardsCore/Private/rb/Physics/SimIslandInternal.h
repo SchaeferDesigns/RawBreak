@@ -18,6 +18,8 @@
 //  * ReplaceSegment re-predicts the tip slots of every moving, non-island cue (a tip path that 6b changed when the tip left an
 //    island is re-predicted with the first member that leaves).
 //  * MakeTerminal logs nothing: 6b emits BallPocketed / BallOffTable itself before calling it.
+//  * The Zeno detector is the loop's (architecture 9 guard 5): the loop logs ZenoGuard (and counts ZenoTriggers) when it hands a
+//    Zeno seed to StartIsland; 6b does not log it again (IslandSeed::Zeno only documents the seed).
 
 #include "SimInternal.h"
 
@@ -73,6 +75,25 @@ namespace rb::sim
 
 	// Pocket whose drop-edge circle a_d (GeometricLevelA) or capture circle r_p (CaptureCircle) contains P strictly, -1 if none.
 	int PocketContaining(const TableGeometry& Table, PocketModel Model, const Vec2& P);
+
+	// Wall-like contacts inside a pocket (liner / back wall, the rim torus where it is steeper than 45 deg; collisions 5.3) of a ball
+	// running around the inside of the hole (DECISION, WP-6b review): Level A has no sustained contact there (the pocket interior is no
+	// island feature), so a ball sliding along the curved wall is a chain of grazing micro-contacts. With the separation of a grazing
+	// contact (e_l v_n, at least v_rest) the straight flight re-meets the wall after 2 v_n rho / v_t^2, i.e. every 2 atan(v_n / v_t) of
+	// arc: thousands of BallLiner events for one pocketed ball (1.9e5 per second at v_t = 5 m/s; a jump or a fast ball along a jaw
+	// reached the 20 000 event cap). The ball therefore leaves every wall-like contact at least kPocketWallMinExitAngle into the hole
+	// from the tangent of its circle about the pocket axis: the path around the wall becomes a polygon with at most
+	// 2 pi / (2 kPocketWallMinExitAngle) = 36 contacts per turn, 0.13 mm inside the circle at most (rho (1 - cos 5 deg)). This is the
+	// continuum limit of the sustained contact: the normal impulse per turn is 2 pi m v_t as for the continuous normal force
+	// m v_t^2 / rho (so the Coulomb losses of the GRI friction match), and the normal velocity returns with no energy loss (the
+	// horizontal velocity is turned, its length kept).
+	inline constexpr double kPocketWallMinExitAngle = 5.0 * kDegToRad;
+
+	// The horizontal velocity of a ball at Position leaving a wall-like contact inside Pocket, turned (its length kept, Velocity.z
+	// unchanged) so that it points into the hole by kPocketWallMinExitAngle from the tangent of the circle about the pocket axis through
+	// the center, if it is closer to that tangent than the angle (either side); otherwise Velocity unchanged (a ball thrown back
+	// across the hole or out of it keeps its direction).
+	Vec3 TurnOffPocketWall(const PocketGeometry& Pocket, const Vec3& Position, const Vec3& Velocity);
 
 	// ---------------------------------------------------------------------------------------------
 	// Rail top (collisions 6.2)

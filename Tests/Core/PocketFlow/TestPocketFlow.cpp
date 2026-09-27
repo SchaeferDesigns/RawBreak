@@ -65,6 +65,12 @@ RB_TEST(Integ_COL_P3_RollIntoCornerAlongTheAxis)
 	std::printf("  P-3: enter %.6f m/s, liner after %.4f s, dropped %.1f mm, pocketed at %.4f s\n", Enter->Value, Flight, Drop * 1e3, Pocketed->Time);
 	RB_CHECK(Flight > 0.09 && Flight < 0.11);
 	RB_CHECK(Drop > 0.045 && Drop < 0.056 && Drop < 2.0 * kR);
+	// Immediate leave: no pivot segment; then BallPocketed "at z = -R" (the capture depth; review addition).
+	for (const rb::TrajectorySegment& Seg : R.Tracks[0].Segments)
+	{
+		RB_CHECK(Seg.Motion.State != rb::MotionState::PocketPivot);
+	}
+	RB_CHECK_NEAR(Pocketed->Pre[0].Position.z, -kR, 1e-9);
 	RB_CHECK(R.Finals[0].Status == rb::BallFinalStatus::Pocketed);
 	RB_CHECK(R.Finals[0].Pocket == rb::PocketId::FootLeft);
 }
@@ -130,6 +136,10 @@ RB_TEST(Integ_COL_P5_SlowRattleAlongTheRail)
 		R.Finals[0].Status == rb::BallFinalStatus::Pocketed ? "pocketed" : "rattled out");
 	RB_CHECK(Jaws >= 1);
 	RB_CHECK(R.Finals[0].Status != rb::BallFinalStatus::OffTable);
+	// "Record the outcome once, then pin it" (review: the outcome was logged but not pinned). Recorded with the WP-6a loop at the
+	// WP-6b review (2026-09-27): 2 jaw contacts, pocketed in FOOT_LEFT.
+	RB_CHECK(R.Finals[0].Status == rb::BallFinalStatus::Pocketed);
+	RB_CHECK(R.Finals[0].Pocket == rb::PocketId::FootLeft);
 }
 
 RB_TEST(Integ_COL_P6_AirborneEntryWithoutSlate)

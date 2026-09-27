@@ -7,7 +7,8 @@
 //  * a low bounce (< h_min) on the sloped cushion top or on an edge -> rigid island with the rail-top Plane / EdgeLine features;
 //    a low bounce on the flat cap -> analytic surface segment on the cap (SupportZ = RailTopZ, rail-cap friction);
 //  * on the flat cap, SupportExit across a Seam -> context update; across CushionBack -> rigid island (the slope); across an
-//    OuterEdge -> BallOffTable(Floor); across a Facing edge or into the cut disc -> Airborne (into the pocket opening / hole);
+//    OuterEdge -> BallOffTable(Floor); across a Facing edge or into the cut disc -> rigid island rolling over that edge into the
+//    pocket opening / hole (review fix: a direct flight from the edge ping-ponged with the cap's plane contact, see SupportExit);
 //  * at rest on the cap -> BallOffTable(RestsOnRailOrFrame) (WPA 2.6).
 #include "SimIslandInternal.h"
 
@@ -107,13 +108,26 @@ namespace rb::sim
 			const TableGeometry& Table = TableOf(Ws);
 			const RailTopPolygon& Poly = Table.RailTops[Feature.Index];
 			BallState S = BallStateForEvent(Ws, Ball, Time);
-			if (Feature.SubIndex == kCutRimEdge)
+			const int Edge = Feature.SubIndex;
+			if (Edge == kCutRimEdge || (Edge < Poly.VertexCount && Poly.Edges[Edge] == RailEdgeKind::Facing))
 			{
-				// Into the pocket cut: the ball drops into the hole (the edge pivot is not modelled, architecture 8.9).
-				Fly(Ws, Ball, S, Time);
+				// Off the cap into the pocket cut or over the edge above a facing: the ball rolls over the edge and drops. Architecture 8.9
+				// lets it simply fly from here, but at this instant its center is ON the polygon's boundary, so the flight's plane contact
+				// point lies on it too and the cap's RailTop contact is found again at tau = 0 (zero speed, pressed by gravity):
+				// RailTopContact put the ball back on the cap, whose SupportExit fired at tau = 0 again - an endless loop at one instant
+				// that ran into the event cap (SimStatus::Aborted; a third of the balls rolling on the cap into a cut) (review fix,
+				// DECISION). The rigid rail-top island has the cap plane and the physical edge (the flat cut rim as a JawCircle, a facing
+				// edge as an EdgeLine, SimIslandFeatures.cpp) and lets the ball roll over it; the member leaves in flight once it is clear
+				// of both (MemberExit), beyond the edge.
+				IslandSeed Seed;
+				Seed.BallA = Ball;
+				Seed.Feature.Kind = TableFeatureKind::RailTopEdge;
+				Seed.Feature.Index = Feature.Index;
+				Seed.Feature.SubIndex = Feature.SubIndex;
+				Seed.RailTop = true;
+				StartIslandWithState(Ws, Seed, Time, S);
 				return;
 			}
-			const int Edge = Feature.SubIndex;
 			const RailEdgeKind Kind = Edge < Poly.VertexCount ? Poly.Edges[Edge] : RailEdgeKind::OuterEdge;
 			switch (Kind)
 			{
@@ -157,7 +171,7 @@ namespace rb::sim
 			}
 			case RailEdgeKind::Nose:
 			case RailEdgeKind::Facing:
-				// Off the cap into the pocket opening (or over a nose): the ball drops.
+				// Over a nose (a cushion-top edge; the flat cap has none): the ball drops.
 				Fly(Ws, Ball, S, Time);
 				return;
 			}

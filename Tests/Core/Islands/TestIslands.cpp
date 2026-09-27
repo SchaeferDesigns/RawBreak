@@ -144,16 +144,10 @@ RB_TEST(Integ_COL_Z3_SpinPressedIntoCushion)
 	RB_CHECK(R.Diagnostics.EventsProcessed < 100);
 	const rb::ShotEvent* Begin = First(R, rb::ShotEventType::IslandBegin);
 	RB_REQUIRE(Begin != nullptr);
-	int Before = 0;
-	for (const rb::ShotEvent& E : R.Events)
-	{
-		if (&E == Begin)
-		{
-			break;
-		}
-		Before += (E.Type == rb::ShotEventType::BallCushion) ? 1 : 0;
-	}
-	RB_CHECK(Before < 12);
+	// "Fewer than 12 events before the pressing rule or the Zeno island takes over": every logged event counts (cushion contacts,
+	// transitions, observers), not only the cushion contacts (review: the check counted BallCushion only).
+	const int Before = IndexOf(R, Begin);
+	RB_CHECK(Before >= 0 && Before < 12);
 	const double Limit = S->Table.HalfWidth - NoseOffset(S->Table);
 	double MaxY = -rb::kInfinity;
 	for (double T : TrackTimes(R, 1u, R.StopTime))
@@ -390,12 +384,34 @@ RB_TEST(Integ_VAL_ROB09_SymmetricDoubleHit)
 	RB_CHECK_NEAR(S0.Velocity.y, 0.0, 1e-9);
 	RB_CHECK_NEAR(A->Result.Finals[1].State.Position.y, -A->Result.Finals[2].State.Position.y, 1e-9);
 	RB_CHECK_NEAR(A->Result.Finals[1].State.Position.x, A->Result.Finals[2].State.Position.x, 1e-9);
-	// Deterministic: bitwise identical results.
-	RB_CHECK(A->Result.Events.size() == B->Result.Events.size());
+	// Deterministic: bitwise identical results - every logged event (times, participants, states) and every final state.
+	RB_REQUIRE(A->Result.Events.size() == B->Result.Events.size());
+	for (std::size_t k = 0; k < A->Result.Events.size(); ++k)
+	{
+		const rb::ShotEvent& EA = A->Result.Events[k];
+		const rb::ShotEvent& EB = B->Result.Events[k];
+		RB_CHECK(std::memcmp(&EA.Time, &EB.Time, sizeof(double)) == 0 && EA.Type == EB.Type && EA.A == EB.A && EA.B == EB.B);
+		RB_CHECK(SameState(EA.Post[0], EB.Post[0]) && SameState(EA.Post[1], EB.Post[1]));
+	}
 	for (int b = 0; b < 3; ++b)
 	{
-		RB_CHECK(std::memcmp(&A->Result.Finals[b].State.Position, &B->Result.Finals[b].State.Position, sizeof(rb::Vec3)) == 0);
+		RB_CHECK(SameState(A->Result.Finals[b].State, B->Result.Finals[b].State));
 	}
+	// Id independence (architecture 8.8, CL-8 / BRK-04 for the cluster solver): the same shot with the two object balls' ids swapped
+	// gives bit-identical final states after mapping the ids back (review addition).
+	std::unique_ptr<Scene> C = MakeScene(rb::kTableNineFootPro, kGVal);
+	Place(*C, 2, {0.3, kR, kR});
+	Place(*C, 1, {0.3, -kR, kR});
+	Place(*C, 0, {-0.2, 0.0, kR}, {1.5, 0.0, 0.0});
+	RB_REQUIRE(Run(*C) == rb::SimStatus::Ok);
+	const int Map[3] = {0, 2, 1};
+	for (int b = 0; b < 3; ++b)
+	{
+		RB_CHECK(SameState(A->Result.Finals[b].State, C->Result.Finals[Map[b]].State));
+		RB_CHECK(A->Result.Finals[b].Status == C->Result.Finals[Map[b]].Status);
+	}
+	RB_CHECK(A->Result.Diagnostics.EventsProcessed == C->Result.Diagnostics.EventsProcessed);
+	RB_CHECK(A->Result.Diagnostics.IslandSteps == C->Result.Diagnostics.IslandSteps);
 }
 
 RB_TEST(Integ_VAL_BRK01_NineBallBreak)
@@ -484,8 +500,56 @@ RB_TEST(Integ_VAL_BRK01_NineBallBreak)
 		}
 	}
 	RB_CHECK(MinGap >= -1e-9);
-	std::printf("  BRK-01: %d events, %d islands, %d island steps, min event-mode gap %.3g m, %d pocketed\n", R.Diagnostics.EventsProcessed,
-		R.Diagnostics.Islands, R.Diagnostics.IslandSteps, MinGap, Count(R, rb::ShotEventType::BallPocketed));
+	// Energy non-increasing after the stick event (review: this BRK-01 check was missing). The monitor is the mechanical energy
+	// KE + m g (z + R) (translation, spin, height above the capture depth z = -R): the spec's kinetic energy alone rises in every
+	// hop's descent and every fall into a pocket, and with the capture depth as the reference a ball that drops out of the sum
+	// (pocketed, KE >= 0 there) never raises the total. Evaluated at the event-mode instants (starts of Analytic segments) where
+	// no ball is inside an island or a pivot (Sampled), each ball from the segment that starts or runs there (the state after the
+	// event). Tolerance 1e-6 J: rounding and the documented v_rest separation floor of the pocket-interior contacts
+	// (<= m v_rest^2 / 2 = 3.4e-7 J) against a 9.7 J break; a spurious bounce or island gain would be orders larger.
+	std::sort(Times.begin(), Times.end());
+	Times.erase(std::unique(Times.begin(), Times.end()), Times.end());
+	double Previous = rb::kInfinity;
+	int Checked = 0;
+	double WorstRise = -rb::kInfinity;
+	for (double T : Times)
+	{
+		double Energy = 0.0;
+		bool Valid = true;
+		for (int b = 0; b <= 9 && Valid; ++b)
+		{
+			const rb::TrajectorySegment* At = nullptr;
+			for (const rb::TrajectorySegment& Seg : R.Tracks[b].Segments)
+			{
+				if (Seg.Motion.T0 <= T)
+				{
+					At = &Seg;
+				}
+			}
+			if (At == nullptr || At->Kind == rb::SegmentKind::Terminal)
+			{
+				continue;
+			}
+			if (At->Kind == rb::SegmentKind::Sampled || !(T < At->T1 || At->Motion.T0 == T))
+			{
+				Valid = false;
+				break;
+			}
+			const rb::BallState State = rb::EvaluateSegment(At->Motion, T - At->Motion.T0);
+			Energy += KineticEnergy(State) + kM * kGVal * (State.Position.z + kR);
+		}
+		if (!Valid)
+		{
+			continue;
+		}
+		++Checked;
+		WorstRise = rb::Max(WorstRise, Energy - Previous);
+		RB_CHECK(Energy <= Previous + 1e-6);
+		Previous = Energy;
+	}
+	RB_CHECK(Checked > 10);
+	std::printf("  BRK-01: %d events, %d islands, %d island steps, min event-mode gap %.3g m, %d pocketed, %d energy checks, worst rise %.3g J\n",
+		R.Diagnostics.EventsProcessed, R.Diagnostics.Islands, R.Diagnostics.IslandSteps, MinGap, Count(R, rb::ShotEventType::BallPocketed), Checked, WorstRise);
 }
 
 RB_TEST(Integ_ARCH_ISL1_FrozenRailNoTunnel)

@@ -405,11 +405,24 @@ namespace rb::sim
 			}
 			if (Tip.ContactBall != kNoBall)
 			{
+				// The touched ball is (still) a member: its body state, not its pre-island segment; the envelope data like the island's
+				// own TipEnd records (B = f, Value = the gap to f; rules F7).
 				const int Ball = Tip.ContactBall;
-				ShotEvent E = MakeBallEvent(ShotEventType::TipContactEnd, T, Ball, BallStateAt(Ws, Ball, T));
+				const auto CenterOf = [&](int Of) -> Vec3
+				{
+					const int Index = I.Solver.FindBody(Of);
+					return Index >= 0 ? I.Solver.Body(Index).Position : BallStateAt(Ws, Of, T).Position;
+				};
+				const int Member = I.Solver.FindBody(Ball);
+				ShotEvent E = MakeBallEvent(ShotEventType::TipContactEnd, T, Ball, Member >= 0 ? BodyState(I.Solver.Body(Member)) : BallStateAt(Ws, Ball, T));
 				E.Feature = static_cast<std::uint8_t>(Strike);
 				E.B = Tip.FrozenTarget;
 				E.SubFeature = Tip.StruckTouchedOther ? 1 : 0;
+				if (Tip.FrozenTarget != kNoBall && Tip.FrozenTarget < kMaxBalls)
+				{
+					const int F = Tip.FrozenTarget;
+					E.Value = Length(CenterOf(F) - E.Pre[0].Position) - (SpecOf(Ws, F).Radius + SpecOf(Ws, Ball).Radius);
+				}
 				EmitEvent(Ws, E);
 				Tip.ContactBall = kNoBall;
 			}
@@ -791,17 +804,8 @@ namespace rb::sim
 				E.Flags = Seed.Pressing ? ShotEventFlags::Pressing : 0;
 				EmitEvent(Ws, E);
 			}
-			if (Seed.Zeno)
-			{
-				ShotEvent E;
-				E.Time = T;
-				E.Type = ShotEventType::ZenoGuard;
-				E.A = static_cast<BallId>(Seed.BallA);
-				E.B = PairSeed ? static_cast<BallId>(Seed.BallB) : kNoBall;
-				E.Feature = PairSeed ? 0xFF : static_cast<std::uint8_t>(Seed.Feature.Kind);
-				E.SubFeature = PairSeed ? 0xFF : Seed.Feature.Index;
-				EmitEvent(Ws, E);
-			}
+			// A Zeno seed's ZenoGuard event is logged by the loop, which owns the Zeno detector (SimIslandInternal.h conventions; it was
+			// logged twice per trigger before the review).
 		}
 
 		// ---------------------------------------------------------------------------------------------
@@ -1238,7 +1242,12 @@ namespace rb::sim
 			{
 				return ExitKind::Fly;
 			}
-			const int Any = Pocket >= 0 || !OverRailRegion(Table, Body.Position) ? -1 : FindRailTopPolygon(Table, P, true, RailTopKind::CushionTop, Vec2{}, 0.0);
+			// Whether a rail-top surface is below the member is FindRailTopPolygon's alone: the polygons cover the rail top incl. the pocket
+			// surrounds and exclude the playing area, the pocket openings and the cut discs. (The drop-edge circle a_d and
+			// IsOverPocketOpening are cloth-level regions: the first reaches r_d beyond the cut disc onto the cap, the second covers cap
+			// surrounds behind a corner pocket. Testing them here kept a member rolling or spinning on the cap there in the rigid island
+			// until it came to rest - 98 000 steps for a ball spinning out on a corner surround, up to the whole step budget; review fix.)
+			const int Any = FindRailTopPolygon(Table, P, true, RailTopKind::CushionTop, Vec2{}, 0.0);
 			if (Any < 0)
 			{
 				return FreeOfFeatures(Ws, Body) ? ExitKind::Fly : ExitKind::None;

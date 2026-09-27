@@ -14,6 +14,7 @@
 #include "rb/Physics/ShotResult.h"
 #include "rb/Physics/Simulator.h"
 
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -188,6 +189,13 @@ namespace isltest
 			}
 		}
 		return Min;
+	}
+
+	// Bitwise equality of two states (position, velocity, spin and the motion state; BallState's padding bytes are not compared).
+	inline bool SameState(const rb::BallState& A, const rb::BallState& B)
+	{
+		return std::memcmp(&A.Position, &B.Position, sizeof(rb::Vec3)) == 0 && std::memcmp(&A.Velocity, &B.Velocity, sizeof(rb::Vec3)) == 0 &&
+			std::memcmp(&A.Omega, &B.Omega, sizeof(rb::Vec3)) == 0 && A.State == B.State;
 	}
 
 	inline double KineticEnergy(const rb::BallState& S, double Mass = kM, double Radius = kR)

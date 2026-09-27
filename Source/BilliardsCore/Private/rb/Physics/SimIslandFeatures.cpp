@@ -480,6 +480,29 @@ namespace rb::sim
 		return -1;
 	}
 
+	Vec3 TurnOffPocketWall(const PocketGeometry& Pocket, const Vec3& Position, const Vec3& Velocity)
+	{
+		const Vec2 Radial = XY(Position) - Pocket.CaptureCenter;
+		const double Rho = Length(Radial);
+		const Vec2 Horizontal = XY(Velocity);
+		const double Speed = Length(Horizontal);
+		if (!(Rho > 0.0) || !(Speed > 0.0))
+		{
+			return Velocity;
+		}
+		const Vec2 Out = Radial / Rho;      // from the pocket axis to the center
+		const Vec2 Tangent{-Out.y, Out.x};  // the circle's tangent through the center
+		const double Inward = -Dot(Horizontal, Out);
+		const double Limit = Speed * Sin(kPocketWallMinExitAngle);
+		if (!(Inward < Limit && Inward > -Limit))
+		{
+			return Velocity;
+		}
+		const double Along = Dot(Horizontal, Tangent) < 0.0 ? -1.0 : 1.0;
+		const Vec2 Turned = Tangent * (Along * Speed * Cos(kPocketWallMinExitAngle)) - Out * Limit;
+		return Vec3{Turned.x, Turned.y, Velocity.z};
+	}
+
 	LandingSurface ClassifyLandingPoint(const TableGeometry& Table, PocketModel Model, const Vec2& P, int& Pocket)
 	{
 		Pocket = -1;

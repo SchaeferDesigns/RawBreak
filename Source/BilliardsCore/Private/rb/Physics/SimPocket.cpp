@@ -5,7 +5,9 @@
 // Pocket state machine (collisions 5.4):
 //   surface on cloth --DropEdge--> BallPocketEnter; v_perp >= sqrt(g rho) -> PocketFall, else PocketPivot
 //   PocketPivot --pivot end (T_p) or truncation by a facing / jaw arc on the proxy--> PocketFall
-//   PocketFall --liner / rim torus (GRI)--> PocketFall; --CaptureDepth--> Pocketed; --PocketExit--> Airborne (BallPocketExit)
+//   PocketFall --liner / rim torus (GRI; wall-like contacts leave at least kPocketWallMinExitAngle into the hole)--> PocketFall;
+//             --CaptureDepth--> Pocketed; --PocketExit on the front arc--> Airborne (BallPocketExit); --PocketExit behind the back
+//             wall below its top (a missed wall contact, MissedEvents)--> Pocketed
 // Landing routing (collisions 6.1): capture circle or the rounded annulus on the front arc -> PocketFall (no slate; the torus
 // event follows from there, rb/Physics/Detect.h PredictRimTorus); playing surface / shelf -> ResolveSlateImpact; behind a nose
 // line -> a rail-top / nose event must have fired (MissedEvents, recovered as a slate impact).
@@ -57,7 +59,10 @@ namespace rb::sim
 		//    separating along the undercut normal. Then the wall is resolved with the detection's horizontal normal (DECISION);
 		//  * a zero-speed contact (e.g. leaving the pivot exactly on the rounded edge, where the free flight has the rim's
 		//    curvature) or a resting one (approach < v_rest, e = 0) leaves along the detection normal at v_rest (DECISION: the
-		//    termination guarantee of a surface Level A cannot roll on; v_rest = 2 mm/s is below every visible scale).
+		//    termination guarantee of a surface Level A cannot roll on; v_rest = 2 mm/s is below every visible scale);
+		//  * a wall-like contact (the liner, the rim where it is steeper than 45 deg) leaves at least kPocketWallMinExitAngle into the
+		//    hole (TurnOffPocketWall, SimIslandInternal.h): a ball running around the wall is a polygon of grazing contacts, not a
+		//    chain of thousands of v_rest micro-contacts (review fix).
 		BallState ResolvePocketInterior(Workspace& Ws, int Ball, const TableFeatureRef& Feature, const BallState& S, ShotEvent& E)
 		{
 			const TableGeometry& Table = TableOf(Ws);
@@ -76,6 +81,11 @@ namespace rb::sim
 			BallState Out = S;
 			Out.Velocity = R.Velocity;
 			Out.Omega = R.Omega;
+			const bool WallLike = Feature.Kind == TableFeatureKind::LinerWall || Detected.x * Detected.x + Detected.y * Detected.y >= Detected.z * Detected.z;
+			if (WallLike && Feature.Index < Table.Pockets.Size())
+			{
+				Out.Velocity = TurnOffPocketWall(Table.Pockets[Feature.Index], S.Position, Out.Velocity);
+			}
 			const double Floor = Ws.Params.Numerics.RestSpeed;
 			const double Separation = Dot(Out.Velocity, Detected);
 			if (Separation < Floor)
@@ -124,6 +134,20 @@ namespace rb::sim
 		double ApexHeight(const BallState& S, double Gravity)
 		{
 			return S.Velocity.z > 0.0 ? S.Position.z + S.Velocity.z * S.Velocity.z / (2.0 * Gravity) : S.Position.z;
+		}
+
+		// Liner / back wall or rim torus contact of a ball in state S (GRI, never the on-cloth models), then the pocket state.
+		void PocketWallContact(Workspace& Ws, int Ball, const TableFeatureRef& Feature, BallState S, MotionState State, double Time)
+		{
+			S.State = State == MotionState::Airborne ? MotionState::Airborne : MotionState::PocketFall;
+			ShotEvent E = MakeBallEvent(ContactEventType(Feature.Kind), Time, Ball, S);
+			E.Feature = static_cast<std::uint8_t>(Feature.Index);
+			BallState After = ResolvePocketInterior(Ws, Ball, Feature, S, E);
+			ClassifyPocketState(Ws, Ball, After, Feature.Index);
+			E.Post[0] = After;
+			EmitEvent(Ws, E);
+			NoteRailContact(Ws, Ball);
+			ReplaceSegment(Ws, Ball, After, Time);
 		}
 
 		// Pivot end / truncation: the pivot's Sampled track, then free flight inside the pocket.
@@ -281,6 +305,28 @@ namespace rb::sim
 				return false;
 			}
 			BallState S = BallStateForEvent(Ws, Ball, Time);
+			const PocketGeometry& G = Table.Pockets[Index];
+			if (!OnFrontArc(G, XY(S.Position)) && S.Position.z < G.WallTopZ)
+			{
+				// Behind the front arc the back wall stands up to WallTopZ (collisions 5.3): a center below its top cannot leave the hole
+				// there. The wall contact was missed: PredictLinerWall only finds outward crossings of r_p - R, and a ball that bounces
+				// off the rim near a front-arc end into the back sector already beyond r_p - R (past the end of a facing, where the back
+				// wall starts) never crosses it (the WP-5 / WP-2 facing-to-back-wall junction). By now the ball is embedded in the wall and
+				// the rail above it, so neither a flight (it went through the rail and off the table, VAL ROB-14) nor a late wall
+				// contact (the rail cap's plane then lifts it onto the rail) is right. Count it like a landing behind a nose line
+				// (collisions 6.1 step 3) and take the outcome of the missed contact: a ball thrown against the back wall below its
+				// top with e_l = 0.3 falls into the hole, so it is pocketed here (review fix, DECISION).
+				++Ws.Result->Diagnostics.MissedEvents;
+				ShotEvent D = MakeBallEvent(ShotEventType::Diagnostic, Time, Ball, S);
+				D.Feature = static_cast<std::uint8_t>(TableFeatureKind::LinerWall);
+				D.Value = Length(XY(S.Position) - G.CaptureCenter) - (G.CaptureRadius - SpecOf(Ws, Ball).Radius); // how far behind the wall
+				EmitEvent(Ws, D);
+				ShotEvent E = MakeBallEvent(ShotEventType::BallPocketed, Time, Ball, S);
+				E.Feature = static_cast<std::uint8_t>(Index);
+				EmitEvent(Ws, E);
+				MakeTerminal(Ws, Ball, MotionState::Pocketed, Time, static_cast<PocketId>(Index), OffTableReason::Floor);
+				return true;
+			}
 			ShotEvent E = MakeBallEvent(ShotEventType::BallPocketExit, Time, Ball, S);
 			E.Feature = static_cast<std::uint8_t>(Index);
 			S.State = MotionState::Airborne;
@@ -305,15 +351,7 @@ namespace rb::sim
 				S = EvaluatePivot(B.Pivot, Time - B.Pivot.T0);
 				SamplePivotTrack(Ws, Ball, Time);
 			}
-			S.State = State == MotionState::Airborne ? MotionState::Airborne : MotionState::PocketFall; // GRI: never the on-cloth models
-			ShotEvent E = MakeBallEvent(ContactEventType(Feature.Kind), Time, Ball, S);
-			E.Feature = static_cast<std::uint8_t>(Index);
-			BallState After = ResolvePocketInterior(Ws, Ball, Feature, S, E);
-			ClassifyPocketState(Ws, Ball, After, Index);
-			E.Post[0] = After;
-			EmitEvent(Ws, E);
-			NoteRailContact(Ws, Ball);
-			ReplaceSegment(Ws, Ball, After, Time);
+			PocketWallContact(Ws, Ball, Feature, S, State, Time); // GRI: never the on-cloth models
 			return true;
 		}
 		case TableFeatureKind::FacingFace:
