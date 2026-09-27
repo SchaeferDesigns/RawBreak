@@ -313,27 +313,39 @@ namespace rb
 		const bool Grip = CosPsi > 0.0 && SinPsi <= MiscueLimit(Cue.TipFriction);
 		const Vec3 PHat = Grip ? Tip.Direction : MiscueDirection(Tip.Direction, Normal, Cue.TipFrictionKinetic);
 		const double Approach = Dot(Relative, PHat);
-		if (!(Approach > 0.0))
-		{
-			return Result;
-		}
 		const double Dp = Dot(Tip.Direction, PHat);
 		const Vec3 QxP = Cross(QUnit, PHat);
 		const double InverseMass = Dp * Dp / Cue.Mass + (1.0 + LengthSquared(QxP) / InertiaK) / BallMass;
-		const double J = (1.0 + Cue.TipRestitution) * Approach / InverseMass;
+		const double J = Approach > 0.0 ? (1.0 + Cue.TipRestitution) * Approach / InverseMass : 0.0;
+
+		// Non-penetration (integration round 2, cross-package fix): the p_hat impulse reverses the approach ALONG p_hat, which in
+		// the miscue branch (and for a grip impulse whose axis is far from the normal) can leave the contact still approaching
+		// along the normal n - or give no impulse at all (v_rel . p_hat <= 0 while v_rel . n > 0). The same contact was then
+		// found again at the same instant with ever smaller impulses (a 4073-event chain at one time), or the dome passed into
+		// the ball (20 mm deep) until a later event found the overlap. A remaining normal approach v_n' > 0 is therefore
+		// resolved by a frictionless normal impulse J_n = (1 + e_tip) v_n' / ((d . n)^2 / M + 1/m) (dissipative: the normal
+		// velocity goes from v_n' to -e v_n'; spheres: no torque about the center). v_n' = v_n - J n . K p_hat, where only the
+		// translational parts reach the normal (the lever Q is along -n).
+		const double Dn = Dot(Tip.Direction, Normal);
+		const double NormalAfterP = Result.RelativeSpeed - J * (Dp * Dn / Cue.Mass + Dot(PHat, Normal) / BallMass);
+		const double Jn = NormalAfterP > 0.0 ? (1.0 + Cue.TipRestitution) * NormalAfterP / (Dn * Dn / Cue.Mass + 1.0 / BallMass) : 0.0;
+		if (!(J > 0.0) && !(Jn > 0.0))
+		{
+			return Result;
+		}
 
 		BallState After = Ball;
-		After.Velocity += PHat * (J / BallMass);
+		After.Velocity += PHat * (J / BallMass) + Normal * (Jn / BallMass);
 		After.Omega += QxP * (J * Radius / Spec.Inertia);
 		const bool OnSurface = IsOnSurface(Ball.State);
 		ApplyTableReaction(After, OnSurface, Spec, Surface, Slate, Gravity, Numerics);
 		ClassifyState(After, Radius, OnSurface ? Ball.Position.z - Radius : 0.0, Numerics);
 
 		Result.Ball = After;
-		Result.Impulse = J;
+		Result.Impulse = J + Jn;
 		Result.Tip.Start = TipCenter;
 		Result.Tip.StartTime = Time > Tip.StartTime ? Time : Tip.StartTime;
-		Result.Tip.Speed0 = TipSpeed - J * Dp / Cue.Mass;
+		Result.Tip.Speed0 = TipSpeed - J * Dp / Cue.Mass - Jn * Dn / Cue.Mass;
 		FinishTipPath(Result.Tip, Tip.Deceleration, Cue.FollowThroughDistance); // the arm keeps braking at the same rate
 		return Result;
 	}

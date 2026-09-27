@@ -162,9 +162,13 @@ namespace rb
 	// the ball is on; ignored if it is airborne).
 	// Contact normal n from the dome center at Time to the ball center; grip (p_hat = d) while d . n > 0 and |d x n| <=
 	// MiscueLimit(mu_tip), else the friction-cone edge of B.5; J = (1 + e_tip) (v_rel . p_hat) / ((d . p_hat)^2 / M +
-	// (1/m)(1 + |Q/R x p_hat|^2 / k)) with v_rel = V_tip d - (v + w x Q). No squirt (applied once, at the strike). A
-	// separating or grazing contact (v_rel . n <= 0) returns the inputs unchanged with Impulse 0. The new path starts at
-	// Time with V' = V_tip - J (d . p_hat) / M and keeps the incoming Deceleration (the arm keeps braking; architecture
+	// (1/m)(1 + |Q/R x p_hat|^2 / k)) with v_rel = V_tip d - (v + w x Q) (J = 0 when v_rel . p_hat <= 0). No squirt (applied
+	// once, at the strike). Non-penetration (integration round 2): if the pair still approaches along n after that impulse
+	// (v_n' = v_rel . n - J ((d . p_hat)(d . n) / M + (p_hat . n) / m) > 0: the miscue branch, or a grip axis far from n),
+	// a frictionless normal impulse J_n = (1 + e_tip) v_n' / ((d . n)^2 / M + 1/m) follows, so the contact always separates
+	// (no re-contact at the same instant, no tip passing into the ball); Impulse = J + J_n. A separating or grazing contact
+	// (v_rel . n <= 0) returns the inputs unchanged with Impulse 0. The new path starts at Time with
+	// V' = V_tip - (J (d . p_hat) + J_n (d . n)) / M and keeps the incoming Deceleration (the arm keeps braking; architecture
 	// decision), so StopTime = Time + V' / Deceleration.
 	RB_API TipRecontactResult ResolveTipRecontact(const CueTipPath& Tip, double Time, const BallState& Ball, const BallSpec& Spec, const CueSpec& Cue,
 		const ClothParams& Surface, const SlateParams& Slate, double Gravity, const NumericsConfig& Numerics);

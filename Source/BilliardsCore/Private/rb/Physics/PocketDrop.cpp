@@ -144,14 +144,30 @@ namespace rb
 			const double CosPsi = Cos(Psi);
 			const double HalfSin = Sin(0.5 * Psi);
 			const double Speed = Sqrt(I.A + I.B * HalfSin * HalfSin);
-			const Vec3 Radial = Path.EdgeNormal * SinPsi + Vec3::UnitZ() * CosPsi; // e_r: axis -> center
-			const Vec3 Along = Path.EdgeNormal * CosPsi - Vec3::UnitZ() * SinPsi;  // direction of motion in the normal plane
+			// The meridian plane turns about the pocket's vertical axis as the axis point moves along the edge circle at v_t
+			// (PocketDrop.h); no turn (bitwise the v1 frame) for v_t = 0 or a path without the circle.
+			Vec3 AxisPoint = Path.AxisPoint;
+			Vec3 EdgeNormal = Path.EdgeNormal;
+			Vec3 EdgeTangent = Path.EdgeTangent;
+			const double Theta = Path.AxisRadius > 0.0 ? -Path.TangentialSpeed * Tau / Path.AxisRadius : 0.0;
+			if (Theta != 0.0)
+			{
+				const double C = Cos(Theta);
+				const double Sn = Sin(Theta);
+				const auto Turn = [C, Sn](const Vec3& V) { return Vec3{C * V.x - Sn * V.y, Sn * V.x + C * V.y, V.z}; };
+				const Vec3 Offset = Path.AxisPoint - Path.AxisCenter;
+				AxisPoint = Path.AxisCenter + Turn(Offset);
+				EdgeNormal = Turn(Path.EdgeNormal);
+				EdgeTangent = Turn(Path.EdgeTangent);
+			}
+			const Vec3 Radial = EdgeNormal * SinPsi + Vec3::UnitZ() * CosPsi; // e_r: axis -> center
+			const Vec3 Along = EdgeNormal * CosPsi - Vec3::UnitZ() * SinPsi;  // direction of motion in the normal plane
 
 			BallState S;
-			S.Position = Path.AxisPoint + Path.EdgeTangent * (Path.TangentialSpeed * Tau) + Radial * Path.Rho;
-			S.Velocity = Along * Speed + Path.EdgeTangent * Path.TangentialSpeed;
+			S.Position = Theta != 0.0 ? AxisPoint + Radial * Path.Rho : Path.AxisPoint + Path.EdgeTangent * (Path.TangentialSpeed * Tau) + Radial * Path.Rho;
+			S.Velocity = Along * Speed + EdgeTangent * Path.TangentialSpeed;
 			// Rolling without slip on the edge in both directions, plus the spin about the contact normal.
-			S.Omega = Path.EdgeTangent * (Speed / Path.Radius) + (Vec3::UnitZ() * SinPsi - Path.EdgeNormal * CosPsi) * (Path.TangentialSpeed / Path.Radius) +
+			S.Omega = EdgeTangent * (Speed / Path.Radius) + (Vec3::UnitZ() * SinPsi - EdgeNormal * CosPsi) * (Path.TangentialSpeed / Path.Radius) +
 				Radial * Path.Omega0.z;
 			S.State = MotionState::PocketPivot;
 			return S;
@@ -186,6 +202,8 @@ namespace rb
 		Path.EdgeTangent = ToVec3(PerpCcw(Normal)); // z_hat x n_e
 		// The rounding axis lies directly below the center (psi = 0 is exactly the DropEdge position: no jump).
 		Path.AxisPoint = AtDropEdge.Position - Vec3::UnitZ() * Path.Rho;
+		Path.AxisCenter = Vec3{Pocket.CaptureCenter.x, Pocket.CaptureCenter.y, Path.AxisPoint.z};
+		Path.AxisRadius = Pocket.DropEdgeRadius; // the tangential motion follows the rounding-axis circle (PocketDrop.h)
 		Path.NormalSpeed0 = Dot(AtDropEdge.Velocity, Path.EdgeNormal);
 		Path.TangentialSpeed = Dot(AtDropEdge.Velocity, Path.EdgeTangent);
 
