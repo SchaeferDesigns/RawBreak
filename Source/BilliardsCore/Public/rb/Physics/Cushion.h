@@ -49,10 +49,12 @@ namespace rb
 		CushionModel OnClothModel = CushionModel::Mathavan2010;
 		CushionRestitutionLaw Restitution;   // also used for GRI (airborne) at v_c (ESTIMATE)
 		double Friction = 0.14;              // mu_w (Mathavan 2010; pooltool 0.2), range 0.1-0.3
-		int MathavanSteps = 32;              // RK4 steps N over (1 + e) m v_Y. DECISION (architecture 15): N is the smallest
-		                                     //   value for which M-2..M-4 stay within 2e-4 of the N = 20 000 reference WITH
-		                                     //   slip-reversal splitting; 32 is the placeholder until WP-4 measures it
-		                                     //   (expected 20-40). The spec's N = 200 is pinned only by M-6.
+		int MathavanSteps = 8;               // RK4 steps N over (1 + e) m v_Y. DECISION (architecture 15 row 22, accuracy gate
+		                                     //   A-CUSH-1): the smallest N from which M-2..M-4 stay within 2e-4 of the N = 20 000
+		                                     //   reference for N and every larger N (max error 1.0e-4 at N = 8; N = 7 gives
+		                                     //   2.8e-4: below 8 the error is set by the slip-direction step limiter, not by N,
+		                                     //   and is not monotone). ~1.9 us per typical hit (A-CUSH-2). The spec's N = 200
+		                                     //   (plain RK4) is pinned only by M-6.
 		int MathavanMaxBisections = 60;      // step bisection on v_Y = 0 and on the work target
 		bool MathavanSplitAtSlipReversal = true; // 4th-order convergence: split steps at slip zero crossings (collisions 4.5)
 		double StrongeOmegaRatio = 1.8;      // StrongeCompliant only: pooltool omega_ratio (XREF-02)
@@ -133,7 +135,7 @@ namespace rb
 		double Restitution = 0.97;     // e (energetic, Stronge), evaluated ONCE at the pre-impact v_Y
 		double CushionFriction = 0.14; // mu_w
 		double ClothFriction = 0.2;    // mu_s
-		int Steps = 32;
+		int Steps = 8;                 // N (CushionParams::MathavanSteps); clamped to [1, 2^22]
 		int MaxBisections = 60;
 		bool SplitAtSlipReversal = true;
 		double SlipEps = 1e-6;         // [m/s]
@@ -142,7 +144,9 @@ namespace rb
 
 	// Mathavan 2010 (4.5), LOCAL frame, ball on the cloth (v_Z = 0 throughout); precondition v_Y > 0.
 	// k_w = 1 / (k m R) with k = InertiaFactor(Spec) (5 / (2 m R) for a solid ball). Returns local
-	// v' = (v_X, v_Y, 0) and w'. Performance gate: <= 2 us per hit (Release, reference CPU) at the default N.
+	// v' = (v_X, v_Y, 0) and w'. v_Y <= 0 or a non-finite state: no impulse (Resting); v_Y < RestSpeed: v_Y := 0 only.
+	// Performance gate A-CUSH-2: <= 2 us per hit (Release) at the default N (measured ~1.9 us on typical rail hits,
+	// i5-13600K); the spec's plain RK4 at N = 200 costs ~36 us.
 	RB_API CushionImpactResult ResolveMathavan(const Vec3& VelocityLocal, const Vec3& OmegaLocal, const BallSpec& Spec, const MathavanSettings& Settings);
 
 	// Han 2005 (4.4), LOCAL frame; returns the full impulse result INCLUDING v_Z (C-H1 lists it); the

@@ -8,6 +8,15 @@
 // without slip, until N = 0: cos(psi_leave) = (2 + (1 + k) v0^2 / (g rho)) / (3 + k), which is the
 // spec's (10 + 7 v0^2 / (g rho)) / 17 for k = 2/5 (k = I / (m R^2)). If v0 >= sqrt(g rho) it leaves
 // immediately. T_p is integrated with the asinh substitution (16 Simpson panels, v0 >= 1e-4).
+//
+// General inertia (DERIVED): energy (1 + k)/2 m (v^2 - v0^2) = m g rho (1 - cos psi), so
+// v(psi)^2 = v0^2 + b sin^2(psi/2) with b = 4 g rho / (1 + k) ((20/7) g rho for k = 2/5), and with
+// x = sin(psi/2) = sqrt(a/b) sinh(u), a = v0^2: T(psi) = (2 rho / sqrt(b)) integral_0^U du / sqrt(1 - (a/b) sinh^2 u).
+// The pivot keeps the tangential velocity along the edge (straight, as the spec) and rolls without slip in
+// both directions: w = (v(psi)/R) t_e + (v_t/R)(sin psi z_hat - cos psi n_e) + w_z0 e_r, where e_r is the
+// direction from the axis to the center; the last term keeps the pre-pivot spin about the contact normal
+// (w_z on the cloth), so a ball rolling onto the edge has no spin jump at psi = 0 (spec: |w| = v/R for
+// v_t = w_z0 = 0).
 
 #include "rb/Config.h"
 #include "rb/Core/Tolerances.h"
@@ -48,10 +57,20 @@ namespace rb
 		double Rho = 0.0;         // R + r_d [m]
 		Vec3 AxisPoint;           // point on the rounding axis below the crossing point (z = -r_d) [m]
 		Vec3 EdgeNormal;          // n_e: horizontal unit normal of the drop edge, toward the hole
-		Vec3 EdgeTangent;         // horizontal unit tangent of the edge
+		Vec3 EdgeTangent;         // horizontal unit tangent of the edge, z_hat x n_e
 		double NormalSpeed0 = 0.0;    // v0 along n_e at the crossing [m/s]
 		double TangentialSpeed = 0.0; // speed along EdgeTangent, unchanged during the pivot [m/s]
 		PivotResult Result;
+		// v1 additions (WP-4): what EvaluatePivot needs to invert T(psi) and to rebuild the spin without the caller's
+		// parameters. PivotSpeed0 = max(NormalSpeed0, NumericsConfig::PivotMinSpeed) is the v0 the path uses.
+		double Gravity = 0.0;         // g [m/s^2]
+		double InertiaK = kSolidSphereInertiaFactor; // k = I / (m R^2)
+		double PivotSpeed0 = 0.0;     // v0 of the pivot integral (floored) [m/s]
+		int SimpsonPanels = 16;       // panels of the asinh-substituted integral (NumericsConfig::PivotSimpsonPanels, even)
+		double UpperLimit = 0.0;      // U(psi_leave) = asinh(sqrt(b/a) sin(psi_leave / 2)) of the substitution [1]
+		Vec3 Velocity0;               // ball velocity at the DropEdge event [m/s] (Immediate leave: unchanged)
+		Vec3 Omega0;                  // ball spin at the DropEdge event [rad/s] (Immediate leave: unchanged; its z
+		                              //   component is kept as spin about the contact normal during the pivot)
 	};
 
 	// Builds the pivot for a ball on the cloth whose center is exactly on the drop-edge circle.
