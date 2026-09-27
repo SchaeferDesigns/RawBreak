@@ -150,8 +150,10 @@ namespace rb::human
 
 	struct ExecutedStroke
 	{
-		ErrorCode Error = ErrorCode::NotImplemented; // Ok, or InvalidArgument for non-finite inputs or a non-finite result
-		                                //   (non-finite equipment state or parameters): Strike then all zero, Strike.Cue = the CueSpec
+		ErrorCode Error = ErrorCode::NotImplemented; // Ok, or InvalidArgument for non-finite inputs, a non-finite result
+		                                //   (non-finite equipment state or parameters) or a strike ValidateCueStrike rejects (e.g. e_tip
+		                                //   outside [0, 1], a HumanParams clamp beyond the core's limits that bit, an invalid CueSpec):
+		                                //   Strike then all zero, Strike.Cue = the CueSpec. Ok = a strike the core accepts (MOT B.1)
 		CueStrikeInput Strike;          // what the physics gets (MOT B.1 contract): Speed, Elevation, Azimuth, OffsetA/B (contact
 		                                //   point, current dome radius), Cue = CueSpec with TipFriction = TipFrictionKinetic = mu,
 		                                //   TipDomeRadius = r_dome, TipRestitution = e_tip; TipTouchesCloth from the executed pose
@@ -185,7 +187,8 @@ namespace rb::human
 	// intended stroke bit-exactly (HF-T08).
 	// The strike always satisfies MOT B.1 where the human layer could break it: theta_x = max(floor, raw) is kept inside
 	// [0, pi/2) (a negative floor counts as 0; a masse near vertical plus the elevation noise is capped at the largest double
-	// below pi/2, no flag, like the speed clamp), rho <= OffsetClamp, V_x in [0, MaxSpeed].
+	// below pi/2, no flag, like the speed clamp), rho <= OffsetClamp, V_x in [0, MaxSpeed]; the finished strike goes through
+	// ValidateCueStrike, and a strike the core would reject (equipment state or parameters beyond its limits) is InvalidArgument.
 	// Executed pose (3.6, UE 5.5 geometry, no margin): the dome centre is CueBallPosition + (R + r_dome) Q / R (Q = CueContactPoint
 	// of the clamped (a, b)), the tip rim (cap boundary, radius w_tip / 2) sits sqrt(r_dome^2 - (w_tip / 2)^2) ahead of it on the
 	// axis, and the body runs back from the rim along -d with r(s) = r_t + (r_b - r_t) s / Cue.Length. TipTouchesCloth: the rim,

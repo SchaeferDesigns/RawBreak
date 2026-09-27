@@ -91,7 +91,8 @@ namespace rb::human
 	// 3.8: phi_i = phi_p + bias_aim + sigma_aim eps20; y_s = sigma_steer eps21, phi_i += y_s / L_bg,
 	// A_i = A_p - y_s L_bc / (L_bg R); v_r,i = -(y_s V_p / 0.15 m) L_b / L_bg (animation only); B_i = B_p; theta_i = theta_p;
 	// V_i = V_p (1 + sigma_spd eps22); T_pause = mean (0.7 + 0.6 U23); a_c = U24 < p_jab ? -5 : 0; t_c = 1.5 + 1.5 U25 s;
-	// t_s = (UsesSettle and P > 0.4) ? t_c - 2 s : -1; HeadMoved = U26 < p_head; t_fwd = t_c - max(0.1 s, 2 L_stroke / V_p)
+	// t_s = (UsesSettle and P > 0.4) ? max(0, t_c - 2 s) : -1 (never before the get-down: a negative t_s is IntendedStroke's "no
+	// Settle", and t_c - 2 s < 0 for t_c < 2 s; the Settle is held at contact either way); HeadMoved = U26 < p_head; t_fwd = t_c - max(0.1 s, 2 L_stroke / V_p)
 	// (a uniformly accelerated final stroke of L_stroke = 0.15 m, animation only; V_p <= 0 -> t_c - 0.1 s). eps20-22 are
 	// streak-guarded like 3.2 (DrawPerShot with History, a cache rebuilt on mismatch, and Params.StreakGuard; plain for
 	// rollout keys); U23-U26 = PlainUniform. ExecuteStroke then runs with the AI's own attributes and a StrokeSituation built

@@ -213,11 +213,12 @@ namespace rb::human
 
 	// Stakes of a money game (Q6 decided: side bets and hustling with in-game cash, 3.4): 0.6 up to a bet of 10 % of the
 	// shooter's cash on hand before the bet, rising linearly to 1 (a final) at 50 % or more; Cash <= 0 (all in) -> 1.
-	// The same rule for the AI with its own bankroll (a rich hustler feels less). TUNING.
+	// The same rule for the AI with its own bankroll (a rich hustler feels less). TUNING. A non-finite ratio (a NaN bet or cash,
+	// inf / inf) counts as a small bet (0.6), never NaN stakes (UnitOrZero); finite values are the clamp.
 	constexpr double MoneyGameStakes(double Bet, double Cash)
 	{
 		return Cash <= 0.0 ? kStakesFinal
-			: kStakesMoneyOrLeague + (kStakesFinal - kStakesMoneyOrLeague) * Clamp((Bet / Cash - 0.1) / 0.4, 0.0, 1.0);
+			: kStakesMoneyOrLeague + (kStakesFinal - kStakesMoneyOrLeague) * UnitOrZero((Bet / Cash - 0.1) / 0.4);
 	}
 
 	struct PressureInputs
@@ -249,7 +250,9 @@ namespace rb::human
 	};
 
 	// P = clamp(0.35 stakes + 0.25 gameBall + 0.15 hill + 0.10 crowd + 0.10 clock + 0.05 run, 0, 1), then the mode.
-	// The same formula for the AI (3.4).
+	// The same formula for the AI (3.4). Never NaN: the unit inputs (stakes, shot-clock fraction) and the sum enter as UnitOrZero,
+	// so a 0 / 0 clock fraction counts as 0 (+inf as 1) instead of making P NaN, which ExecuteStroke would reject (the shot could
+	// not be played); finite inputs give the clamp bit for bit.
 	RB_API double ComputePressure(const PressureInputs& Inputs, PressureMode Mode, const PressureWeights& Weights = PressureWeights{});
 
 	// F = clamp((in-game hours of this night - 2) / 2, 0, 1); 0 when !Applies (Practice, hot-seat). Never real-world

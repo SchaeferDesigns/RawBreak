@@ -44,6 +44,10 @@ namespace rb::human
 			}
 			return 1.0;
 		}
+
+		// A zone's coverage for the chalking (4.1): itself in [0, 1] (bit for bit); a corrupted value (NaN, +-inf, outside [0, 1]:
+		// an old save, a replay header) counts as bare, so the automatic chalking repairs it instead of never touching the tip.
+		double ChalkableCoverage(double Coverage) { return Coverage >= 0.0 && Coverage <= 1.0 ? Coverage : 0.0; }
 	}
 
 	TipContactPoint LookupTipContact(const TipState& Tip, double OffsetA, double OffsetB, const TipParams& Params)
@@ -141,20 +145,24 @@ namespace rb::human
 		const double Cap = ChalkCap(Cube, Params);
 		const double EtaCenter = Params.CenterTwistGain * (1.0 - Params.GlazeRetentionLoss * Glaze);
 		const double EtaRing = (Params.RingTwistDrill + Params.RingTwistSweep * H) * (1.0 - Params.GlazeRetentionLoss * Glaze) * (1.0 - Params.HollowLoss * Hollow);
-		Tip.Coverage[0] = Tip.Coverage[0] + Max(0.0, Cap - Tip.Coverage[0]) * EtaCenter;
+		const double Center = ChalkableCoverage(Tip.Coverage[0]);
+		Tip.Coverage[0] = Center + Max(0.0, Cap - Center) * EtaCenter;
 		for (int z = 1; z < kTipZoneCount; ++z)
 		{
-			Tip.Coverage[z] = Tip.Coverage[z] + Max(0.0, Cap - Tip.Coverage[z]) * EtaRing;
+			const double Ring = ChalkableCoverage(Tip.Coverage[z]);
+			Tip.Coverage[z] = Ring + Max(0.0, Cap - Ring) * EtaRing;
 		}
 		Tip.Chalk = Cube.Grade;
 	}
 
 	int AutoChalkTwists(const TipState& Tip, const ChalkCube& Cube, const TipParams& Params)
 	{
-		double MinCoverage = Tip.Coverage[0];
+		// A corrupted zone counts as bare (ChalkableCoverage): a NaN no longer hides the need to chalk, and -inf no longer asks for
+		// +inf twists (a float -> int conversion out of range); the count is at most ceil(cap / step).
+		double MinCoverage = ChalkableCoverage(Tip.Coverage[0]);
 		for (int z = 1; z < kTipZoneCount; ++z)
 		{
-			MinCoverage = Min(MinCoverage, Tip.Coverage[z]);
+			MinCoverage = Min(MinCoverage, ChalkableCoverage(Tip.Coverage[z]));
 		}
 		const double Missing = ChalkCap(Cube, Params) - MinCoverage;
 		if (!(Missing > 0.0) || !(Params.TwistCoverageStep > 0.0))
@@ -181,7 +189,7 @@ namespace rb::human
 	void ShapeTip(TipState& Tip, double TargetDomeRadius)
 	{
 		const TipParams Params;
-		if (TargetDomeRadius > 0.0)
+		if (TargetDomeRadius > 0.0 && IsFinite(TargetDomeRadius)) // a non-finite target never reaches the saved tip
 		{
 			Tip.DomeRadius = TargetDomeRadius;
 		}

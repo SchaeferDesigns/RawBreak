@@ -500,9 +500,11 @@ namespace rb::human
 		const bool MarginNegative = SeparationMargin(Rho, Strike.Cue.TipRestitution, CueBall.Mass, Cue.Mass, InertiaFactor(CueBall)) < 0.0;
 		Result.DoubleHitRisk = MarginNegative || (Gap > Rules.Frozen && Gap < Cue.FollowThroughDistance && CutAngle < Rules.GrazeAngle);
 		Result.PushRisk = Gap > Rules.Frozen && Gap <= Rules.FrozenEnvelope;
-		if (!StrokeOutputFinite(Result))
+		if (!StrokeOutputFinite(Result) || ValidateCueStrike(Result.Strike) != ErrorCode::Ok)
 		{
-			// Non-finite equipment state or parameters: the same contract as a non-finite input (zero strike, the cue spec kept).
+			// Non-finite equipment state or parameters, or a strike the core rejects (MOT B.1: e_tip outside [0, 1] from a loose or
+			// corrupted tip, a rho clamp >= kCueOffsetValidLimit or a speed clamp > kMaxCueSpeed that bit, an invalid CueSpec): the
+			// same contract as a non-finite input (zero strike, the cue spec kept). Ok always means a strike StrikeCueBall accepts.
 			Result = ExecutedStroke{};
 			Result.Strike.Cue = Cue;
 			Result.Error = ErrorCode::InvalidArgument;

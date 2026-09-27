@@ -159,11 +159,13 @@ namespace rb::human
 	// One twist (the revolver rule, 4.1): c_0 += max(0, cap - c_0) eta_0, ring zones c_z += max(0, cap - c_z) eta_r, with
 	// Sweep = H_chalk (A/C/P modes) or the sweep coverage measured from the input (R mode, clamped to [0, 1], so a ritual
 	// never beats the habit-1 result, principle 5). Sweep, Tip.Glaze and Cube.Hollow enter as UnitOrZero (rb/Human/Skill.h): a
-	// NaN measurement or a corrupted save counts as 0 and never makes the coverage NaN. Sets Tip.Chalk = Cube.Grade.
+	// NaN measurement or a corrupted save counts as 0 and never makes the coverage NaN. A corrupted zone coverage (NaN, +-inf,
+	// outside [0, 1]) counts as bare (0), so chalking repairs it; valid coverage is used bit for bit. Sets Tip.Chalk = Cube.Grade.
 	RB_API void ApplyChalkTwist(TipState& Tip, const ChalkCube& Cube, double Sweep, const TipParams& Params);
 
 	// Automatic chalking before every shot (A/C/P): n_tw = ceil((cap - min_z c_z) / 0.15), 0 when nothing is missing
-	// (HF-B04: 40 % missing -> 3 twists, 10 % -> 1).
+	// (HF-B04: 40 % missing -> 3 twists, 10 % -> 1). A corrupted zone counts as bare (as in ApplyChalkTwist), so the count is at
+	// most ceil(cap / 0.15) and a corrupted tip is chalked, not skipped.
 	RB_API int AutoChalkTwists(const TipState& Tip, const ChalkCube& Cube, const TipParams& Params);
 
 	// Seconds per twist: 0.4 (1 - 0.3 H_chalk).
@@ -173,7 +175,7 @@ namespace rb::human
 	// trim: overhang 0; retip (career days): a new tip, height 6 mm, glaze 0.3 until 50 hits (BreakInHits; ApplyTipWear then
 	// removes the 0.3 again, keeping the glaze gained meanwhile), no overhang, bare leather (coverage 0: the next chalking,
 	// automatic before every shot in A / C / P mode, covers it), e_tip and chalk grade of the default TipState. Heights never
-	// drop below 0.
+	// drop below 0. ShapeTip ignores a non-positive or non-finite target (the dome stays; the height is still used up).
 	RB_API void ScuffTip(TipState& Tip);
 	RB_API void ShapeTip(TipState& Tip, double TargetDomeRadius);
 	RB_API void TrimTip(TipState& Tip);
