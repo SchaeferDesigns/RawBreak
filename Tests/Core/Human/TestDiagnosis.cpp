@@ -256,21 +256,27 @@ RB_TEST(Integ_HF_B06_DiagnosisOfConstructedMisses)
 		RB_CHECK(Execute(Shot.Human).PredictedMiscue);
 		Timed(Shot, MissCause::Equipment);
 	}
-	// (2) A slow shot missed only because of the slope -> "table".
+	// (2) A slow shot missed only because of the slope -> "table". Margins from WP-1's tilted motion (review): at V_i 0.7 m/s
+	// and 4 mm/m across the axis the ball centre is 83 mm off the axis at the mouth line, well past the jaw point (57 mm; the
+	// earlier 1.0 m/s at 3 mm/m gave 27 mm, inside the 28.6 mm window, so the "real" shot would have dropped); on the level
+	// table it arrives on the axis at 0.49 m/s. 4 mm/m < 0.7 mu_r = 4.9 mm/m of the worsted cloth (ValidatePhysicsParams).
 	{
 		ShotSetup Shot = Base;
-		Shot.Human.Intended.Speed = 1.0;
+		Shot.Human.Intended.Speed = 0.7;
 		const Vec2 Across = PerpCcw(Pocket.Axis);
-		Shot.Physics.Tilt.Slope = Across * 3e-3;
+		Shot.Physics.Tilt.Slope = Across * 4e-3;
 		RB_REQUIRE(ValidatePhysicsParams(Shot.Physics) == ErrorCode::Ok);
 		Timed(Shot, MissCause::Table);
 	}
-	// (3) A drift-only perturbation (per-shot channels masked in the real shot) -> "hand drift".
+	// (3) A drift-only perturbation (per-shot channels masked in the real shot, incl. the grip bias of channel 9) -> "hand drift".
+	// Full pressure doubles the drift (g^(1/3) = 2.08 at Nerve 0): the ball centre is 93 mm off the axis at the mouth line (review,
+	// WP-1 strike and motion; without pressure 44 mm, where a jaw rattle could still drop it); rho 0.27 stays below rho_max.
 	{
 		ShotSetup Shot = Base;
 		Shot.Human.Params.NoiseScale = 1.0;
 		Shot.Human.Params.ChannelMask = kPerShotChannelMask;
 		Shot.Human.Attributes = UniformAttributes(0.0);
+		Shot.Human.Situation.Pressure = 1.0;
 		Shot.Human.Situation.Bridge = BridgeType::Elevated;
 		Shot.Human.Situation.StanceDifficulty = 1.0;
 		Shot.Human.Situation.OffHand = true;

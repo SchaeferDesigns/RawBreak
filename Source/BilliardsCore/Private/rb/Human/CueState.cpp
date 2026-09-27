@@ -32,7 +32,7 @@ namespace rb::human
 
 	double NoticeableBow(double WarpCheckHabit)
 	{
-		return 1.0e-3 + (0.3e-3 - 1.0e-3) * Clamp(WarpCheckHabit, 0.0, 1.0);
+		return 1.0e-3 + (0.3e-3 - 1.0e-3) * UnitOrZero(WarpCheckHabit);
 	}
 
 	bool AutoRollTestNotices(const CueBodyState& Cue, double WarpCheckHabit)

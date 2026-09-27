@@ -34,7 +34,7 @@ namespace rb::human
 		{
 			Twists = TwistsBeforeAbort;
 		}
-		const double Sweep = Ritual ? Clamp(RitualSweep, 0.0, 1.0) : Clamp(ChalkHabit, 0.0, 1.0);
+		const double Sweep = UnitOrZero(Ritual ? RitualSweep : ChalkHabit); // a NaN measurement / habit counts as 0 (a drill)
 		// The habit-1 result (principle 5): the automatic chalking of a maxed habit from the same start. A ritual is capped at it
 		// zone by zone, so extra twists (or drilling the centre) never beat the habit once it is maxed.
 		TipState Habit1 = Tip;
@@ -68,7 +68,7 @@ namespace rb::human
 
 	RackGapParams RackGapsForQuality(double Quality)
 	{
-		const double Q = Clamp(Quality, 0.0, 1.0);
+		const double Q = UnitOrZero(Quality); // a NaN measured quality is the loosest valid rack, never NaN gaps
 		const double Gap = 0.08e-3 * (1.0 - Q) + 0.005e-3 * Q;
 		RackGapParams Params = kRackGapNone;
 		Params.Mean = Gap;
