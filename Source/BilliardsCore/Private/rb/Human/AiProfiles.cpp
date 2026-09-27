@@ -128,7 +128,10 @@ namespace rb::human
 		Stroke.PauseDuration = Hand.PauseMean * (0.7 + 0.6 * U23);
 		Stroke.ContactAcceleration = U24 < Hand.JabProbability ? kJabAcceleration : 0.0;
 		Stroke.TimeDown = 1.5 + 1.5 * U25;
-		Stroke.SettleStart = (Hand.UsesSettle && Situation.Pressure > kSettlePressure) ? Stroke.TimeDown - kSettleLead : -1.0;
+		// t_s = t_c - 2 s, but never before the get-down: t_c lies in [1.5, 3) s, and a negative t_s would be IntendedStroke's "no
+		// Settle" (the pro would silently not settle on a third of the pressure shots). From t_c >= 1.5 s > the 1.2 s ramp the
+		// Settle is held at contact either way.
+		Stroke.SettleStart = (Hand.UsesSettle && Situation.Pressure > kSettlePressure) ? Max(0.0, Stroke.TimeDown - kSettleLead) : -1.0;
 		Stroke.HeadMovedBeforeContact = U26 < Hand.HeadMoveProbability;
 		Stroke.ForwardStart = Stroke.TimeDown - (Plan.Speed > 0.0 ? Max(kMinFinalStroke, 2.0 * kStrokeLength / Plan.Speed) : kMinFinalStroke);
 		return Stroke;
