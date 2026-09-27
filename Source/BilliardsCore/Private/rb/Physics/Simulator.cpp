@@ -60,6 +60,26 @@ namespace rb
 				IsFinite(S.Velocity.z) && IsFinite(S.Omega.x) && IsFinite(S.Omega.y) && IsFinite(S.Omega.z);
 		}
 
+		// Orientation of a ball (playback, the chalk-mark cling): finite and not the zero quaternion.
+		bool ValidOrientation(const Quat& Q)
+		{
+			return IsFinite(Q.w) && IsFinite(Q.x) && IsFinite(Q.y) && IsFinite(Q.z) && Q.w * Q.w + Q.x * Q.x + Q.y * Q.y + Q.z * Q.z > 0.0;
+		}
+
+		// Chalk marks read by the cling (human-factors 4.3; PhysicsParams::ChalkCling): every value finite (ChalkMarkWeight ignores marks
+		// without a radius or direction and ContactClingFactor clamps the weight, so only a non-finite value can corrupt a contact).
+		bool ValidChalkMarks(const BallChalkMarks& Marks)
+		{
+			for (const ChalkMark& Mark : Marks)
+			{
+				if (!IsFinite(Mark.BodyDir.x) || !IsFinite(Mark.BodyDir.y) || !IsFinite(Mark.BodyDir.z) || !IsFinite(Mark.Strength) || !IsFinite(Mark.Radius))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
 		// Input validation (architecture 8.4) and the classification of the initial states. Contexts get the support surface
 		// (cloth, or the flat rail cap for a ball resting on a cap polygon).
 		ErrorCode ValidateInput(const SimInput& Input, BallState* States, BallTableContext* Contexts)
@@ -103,9 +123,13 @@ namespace rb
 					return ErrorCode::InvalidParameter;
 				}
 				BallState S = Ball.State;
-				if (!FiniteState(S))
+				if (!FiniteState(S) || !ValidOrientation(Ball.Orientation))
 				{
 					return ErrorCode::InvalidState;
+				}
+				if (Params.ChalkCling && !ValidChalkMarks(Ball.ChalkMarks))
+				{
+					return ErrorCode::InvalidArgument; // a non-finite mark would turn the contact's cling factor into NaN
 				}
 				if (S.State != MotionState::Stationary && S.State != MotionState::Spinning && S.State != MotionState::Sliding &&
 					S.State != MotionState::Rolling && S.State != MotionState::Airborne)
@@ -672,6 +696,14 @@ namespace rb
 				if (Members == 1)
 				{
 					sim::loop::ProcessEvent(W, E);
+				}
+				else if (W.EventsProcessed + (Members - 1) > MaxEvents)
+				{
+					// Every member is a processed event (guard 9): a group that does not fit under the cap is not handed off.
+					W.EventsProcessed = MaxEvents;
+					sim::loop::StopAllBalls(W, W.Now);
+					Status = SimStatus::Aborted;
+					break;
 				}
 				else
 				{

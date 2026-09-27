@@ -115,6 +115,14 @@ namespace rb::sim
 			return Q;
 		}
 
+		// Mean angular velocity of an island member's open Sampled stretch [From, To]: BallSlot::RotationAccumulator (the integral of
+		// w since SampleStart) over the duration, so the orientation law of the piece rotates by exactly the accumulated vector.
+		Vec3 IslandMeanOmega(const BallSlot& Slot, double From, double To)
+		{
+			const double Duration = To - From;
+			return Duration > 0.0 ? Slot.RotationAccumulator / Duration : Vec3{};
+		}
+
 		bool ObserverLess(const Observer& A, const Observer& B)
 		{
 			if (A.Time != B.Time)
@@ -459,6 +467,19 @@ namespace rb::sim
 			BallSlot& Slot = Ws.Balls[Ball];
 			const Observer O = Slot.Observers[0];
 			Slot.Observers.RemoveAt(0);
+			// A pair observer was predicted against the partner's event-mode segment. Once the partner is integrated by an island
+			// that segment no longer describes it: the observer is void (the island evaluates its members' freeze-leave and
+			// jump-over distances, 8.7), and the partner's return to event mode recomputes it (PredictBalls ->
+			// RecomputePairObservers).
+			const bool PairObserver = O.Kind == ObserverKind::JumpEnter || O.Kind == ObserverKind::JumpLeave || (O.Kind == ObserverKind::FreezeLeave && O.Index >= 32);
+			if (PairObserver)
+			{
+				const int Partner = O.Kind == ObserverKind::FreezeLeave ? O.Index - 32 : O.Index;
+				if (Partner < kMaxBalls && Ws.Balls[Partner].InIsland)
+				{
+					return;
+				}
+			}
 			switch (O.Kind)
 			{
 			case ObserverKind::LineCross:
@@ -469,11 +490,8 @@ namespace rb::sim
 				Event.A = static_cast<BallId>(Ball);
 				Event.Feature = O.Index;
 				Event.SubFeature = static_cast<std::uint8_t>(O.Direction > 0 ? 0 : 1);
-				if (Ws.Input->Record.EventStates)
-				{
-					Event.Pre[0] = BallStateAt(Ws, Ball, O.Time);
-					Event.Post[0] = Event.Pre[0];
-				}
+				Event.Pre[0] = BallStateAt(Ws, Ball, O.Time); // the record's position, whatever EventStates (EmitEvent)
+				Event.Post[0] = Event.Pre[0];
 				EmitEvent(Ws, Event);
 				break;
 			}
@@ -517,6 +535,10 @@ namespace rb::sim
 						Event.Type = ShotEventType::BallJumpedOver;
 						Event.A = static_cast<BallId>(Ball);
 						Event.B = static_cast<BallId>(O.Index);
+						Event.Pre[0] = BallStateAt(Ws, Ball, O.Time);
+						Event.Pre[1] = loop::CurrentState(Ws, O.Index, O.Time);
+						Event.Post[0] = Event.Pre[0];
+						Event.Post[1] = Event.Pre[1];
 						EmitEvent(Ws, Event);
 					}
 					Slot.JumpPending &= ~Bit;
@@ -637,7 +659,14 @@ namespace rb::sim
 		// Rules record: independent of the logging switches (RUL pitfall 17); tilt refreshes never belong to it.
 		if (Input.Record.ShotRecord && Event.Type != ShotEventType::TiltRefresh && IsRecordRelevant(Event.Type))
 		{
-			if (!AppendRecordEvent(Event, Result.Record))
+			// The overflow point is this simulator's MaxRecordEvents, not the vector's capacity (a ShotResult reserved larger by
+			// another simulator must give the same record: deterministic, like the event log and the tracks).
+			if (static_cast<int>(Result.Record.Events.size()) >= Ws.Caps.MaxRecordEvents)
+			{
+				Result.Record.Truncated = true;
+				Result.Diagnostics.RecordOverflow = true;
+			}
+			else if (!AppendRecordEvent(Event, Result.Record))
 			{
 				Result.Diagnostics.RecordOverflow = true;
 			}
@@ -709,7 +738,7 @@ namespace rb::sim
 			return Ws.Balls[Ball].Context.Support == SupportKind::RailCap ? Ws.Input->Table->Spec.RailTopZ : 0.0;
 		}
 
-		Vec3 CurrentPosition(const Workspace& Ws, int Ball, double Time)
+		BallState CurrentState(const Workspace& Ws, int Ball, double Time)
 		{
 			const BallSlot& Slot = Ws.Balls[Ball];
 			if (Slot.InIsland && Ws.Island.Active)
@@ -717,11 +746,19 @@ namespace rb::sim
 				const int Body = Ws.Island.Solver.FindBody(Ball);
 				if (Body >= 0)
 				{
-					return Ws.Island.Solver.Body(Body).Position;
+					const IslandBody& B = Ws.Island.Solver.Body(Body);
+					BallState S;
+					S.Position = B.Position;
+					S.Velocity = B.Velocity;
+					S.Omega = B.Omega;
+					S.State = B.ClothSupport ? MotionState::Sliding : MotionState::Airborne;
+					return S;
 				}
 			}
-			return BallStateAt(Ws, Ball, Time).Position;
+			return BallStateAt(Ws, Ball, Time);
 		}
+
+		Vec3 CurrentPosition(const Workspace& Ws, int Ball, double Time) { return CurrentState(Ws, Ball, Time).Position; }
 
 		Quat CloseOpenSegment(Workspace& Ws, int Ball, double Time, const Vec3& EndPosition)
 		{
@@ -754,6 +791,10 @@ namespace rb::sim
 						if (Last.Kind == SegmentKind::Sampled)
 						{
 							Last.EndPosition = EndPosition; // left open by an island
+							if (Slot.InIsland)
+							{
+								Last.Motion.Omega0 = IslandMeanOmega(Slot, Last.Motion.T0, Time); // BallSlot: Omega0 = accumulator / duration
+							}
 						}
 						Q = Last.Kind == SegmentKind::Terminal ? Last.Orientation0 : SegmentOrientationAt(Last.Orientation0, Last, Time - Last.Motion.T0);
 					}
@@ -765,7 +806,22 @@ namespace rb::sim
 				Slot.Orientation0 = Q;
 				return Q;
 			}
-			if (Tracked && !Slot.InIsland)
+			if (Tracked && Slot.InIsland)
+			{
+				// Leaving an island without a recorded track: Orientation0 is the orientation at SampleStart and RotationAccumulator
+				// the rotation since then (BallSlot), advanced by the law of the equivalent Sampled piece - bitwise what the
+				// recorded piece gives with Trajectories on (8.10; the chalk cling of marked balls, the Finals orientation).
+				TrajectorySegment Piece;
+				Piece.Kind = SegmentKind::Sampled;
+				Piece.Motion.State = Slot.Seg.State;
+				Piece.Motion.T0 = Slot.SampleStart;
+				Piece.Motion.Omega0 = IslandMeanOmega(Slot, Slot.SampleStart, Time);
+				Piece.T1 = Time;
+				Piece.Orientation0 = Q;
+				Q = SegmentOrientationAt(Q, Piece, Time - Slot.SampleStart);
+				Slot.Orientation0 = Q;
+			}
+			else if (Tracked)
 			{
 				if (Pivot)
 				{
@@ -891,7 +947,18 @@ namespace rb::sim
 					Tip.Moving = false;
 					continue;
 				}
-				const MotionSegment TipSeg = CueTipAsSegment(Tip.Path);
+				// The search starts at Now, never before: the path's own start can lie in the past (a later re-prediction of an
+				// unchanged path), where a contact that was already processed without an impulse would be found again and queued
+				// before Now (event time running backwards). Re-based exactly like EvaluateSegment's quadratic.
+				MotionSegment TipSeg = CueTipAsSegment(Tip.Path);
+				if (Ws.Now > TipSeg.T0)
+				{
+					const double Tau = Ws.Now - TipSeg.T0;
+					TipSeg.Pos0 = TipSeg.Pos0 + TipSeg.Vel0 * Tau + TipSeg.Accel2 * (Tau * Tau);
+					TipSeg.Vel0 = TipSeg.Vel0 + TipSeg.Accel2 * (2.0 * Tau);
+					TipSeg.T0 = Ws.Now;
+					TipSeg.TauEnd = Tip.Path.StopTime - Ws.Now;
+				}
 				const double TipRadius = Tip.Path.DomeRadius;
 				const Aabb3 TipBox = SweptBounds(TipSeg, 0.0, kInfinity);
 				ContactPrediction Best;

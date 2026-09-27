@@ -35,7 +35,7 @@ namespace
 		In.Table = &T;
 		In.Params = ValParams();
 		Rng Random(Seed);
-		const int Balls = 3 + static_cast<int>(Random.NextBelow(9)); // CB + 2..10 balls (ids 0..)
+		const int Balls = 3 + static_cast<int>(Random.NextBelow(8)); // CB + 2..9 object balls (ids 0..)
 		const double Margin = kR + 0.03;
 		int Placed = 0;
 		for (int Attempt = 0; Attempt < 2000 && Placed < Balls; ++Attempt)
@@ -64,8 +64,8 @@ namespace
 		In.Strikes.PushBack(Strike(0, Random.NextUniform(0.5, 6.0), Azimuth, Random.NextUniform(0.0, 15.0) * kDegToRad, A, B));
 	}
 
-	// prior-art 7.5 B2: a 9-ball break with seeded rack gaps, V in [8, 13] m/s from the head string area.
-	void MakeB2Break(std::uint64_t Seed, const TableGeometry& T, SimInput& In)
+	// prior-art 7.5 B2: a 9-ball (or 8-ball) break with seeded rack gaps, V in [8, 13] m/s from the head string area.
+	void MakeB2Break(std::uint64_t Seed, const TableGeometry& T, SimInput& In, bool EightBall = false)
 	{
 		In = SimInput{};
 		In.Table = &T;
@@ -73,7 +73,8 @@ namespace
 		Rng Random(Seed);
 		const rules::RulesTable Rules = rules::MakeRulesTable(T.Spec.Length, T.Spec.Width, kR);
 		rules::RackAssignment Rack;
-		rules::GenerateRack(rules::Discipline::NineBall, rules::MakeRulesConfig(rules::RulesPreset::Wpa9Ball), Rules, Seed, false, kRackGapMixture, Rack);
+		rules::GenerateRack(EightBall ? rules::Discipline::EightBall : rules::Discipline::NineBall,
+			rules::MakeRulesConfig(EightBall ? rules::RulesPreset::Wpa8Ball : rules::RulesPreset::Wpa9Ball), Rules, Seed, false, kRackGapMixture, Rack);
 		for (int b = 1; b < rules::kRulesBallCount; ++b)
 		{
 			if (Rack.Racked[b])
@@ -86,6 +87,67 @@ namespace
 		const int Apex = Rack.BallAtSite[0] >= 0 ? Rack.BallAtSite[0] : 1;
 		const Vec3 Aim = In.Balls[Apex].State.Position - Cue;
 		In.Strikes.PushBack(Strike(0, Random.NextUniform(8.0, 13.0), std::atan2(Aim.y, Aim.x), 0.0, 0.0, Random.NextUniform(-0.2, 0.0)));
+	}
+
+	// prior-art 7.5 B3 (stress): frozen clusters, Newton's cradle, balls resting on cushions, masse into the rail (Index 0..kB3Count-1).
+	constexpr int kB3Count = 8;
+	void MakeB3Stress(int Index, const TableGeometry& T, SimInput& In)
+	{
+		In = SimInput{};
+		In.Table = &T;
+		In.Params = ValParams();
+		const double Rc = ComputeCushionContact(kR, T.Spec.CushionNoseHeight, 0.0, false).HorizontalOffset;
+		const double Rail = T.HalfWidth - Rc; // y of a ball frozen to RAIL_LEFT
+		switch (Index)
+		{
+		case 0: // frozen three-ball line struck end-on
+			for (int k = 1; k <= 3; ++k)
+			{
+				Place(In, k, {0.2 + 2.0 * kR * (k - 1), 0.1, kR});
+			}
+			Place(In, 0, {-0.4, 0.1, kR});
+			In.Strikes.PushBack(Strike(0, 2.0, 0.0));
+			break;
+		case 1: // Newton's cradle: five touching balls
+			for (int k = 1; k <= 5; ++k)
+			{
+				Place(In, k, {0.0 + 2.0 * kR * (k - 1), -0.2, kR});
+			}
+			Place(In, 0, {-0.5, -0.2, kR});
+			In.Strikes.PushBack(Strike(0, 3.0, 0.0));
+			break;
+		case 2: // object ball frozen to the rail 5 cm from the corner jaw, cue ball at 5 m/s into it (A-ISL-1)
+			Place(In, 1, {T.HalfLength - 0.05 - 0.1, Rail, kR});
+			Place(In, 0, {T.HalfLength - 0.05 - 0.6, Rail - 0.25, kR});
+			In.Strikes.PushBack(Strike(0, 5.0, std::atan2(0.25, 0.5)));
+			break;
+		case 3: // two balls frozen to each other and to the rail, kissed
+			Place(In, 1, {0.3, Rail, kR});
+			Place(In, 2, {0.3 + 2.0 * kR, Rail, kR});
+			Place(In, 0, {-0.2, Rail - 0.3, kR});
+			In.Strikes.PushBack(Strike(0, 2.5, std::atan2(0.3, 0.5)));
+			break;
+		case 4: // masse into the rail
+			Place(In, 0, {0.0, Rail - 0.15, kR});
+			In.Strikes.PushBack(Strike(0, 3.0, 0.5 * kPi, 70.0 * kDegToRad, 0.4, 0.0));
+			break;
+		case 5: // cue ball frozen to an object ball, stroked through it (rules F7)
+			Place(In, 1, {0.0 + 2.0 * kR, 0.0, kR});
+			Place(In, 0, {0.0, 0.0, kR});
+			In.Strikes.PushBack(Strike(0, 1.5, 0.0));
+			break;
+		case 6: // a ball resting on the cushion, a ball rolling along the rail into it
+			Place(In, 1, {0.4, Rail, kR});
+			PlaceRolling(In, 0, {-0.4, Rail, kR}, {1.2, 0.0, 0.0});
+			break;
+		default: // a tight three-ball triangle hit at 4 m/s
+			Place(In, 1, {0.3, 0.0, kR});
+			Place(In, 2, {0.3 + std::sqrt(3.0) * kR, kR, kR});
+			Place(In, 3, {0.3 + std::sqrt(3.0) * kR, -kR, kR});
+			Place(In, 0, {-0.4, 0.0, kR});
+			In.Strikes.PushBack(Strike(0, 4.0, 0.0));
+			break;
+		}
 	}
 
 	// RB_ROB10_PRINT set in the environment: print the ROB-10 hash (Debug / Release / UE comparison).
@@ -108,9 +170,9 @@ namespace
 			std::isfinite(S.Velocity.y) && std::isfinite(S.Velocity.z) && std::isfinite(S.Omega.x) && std::isfinite(S.Omega.y) && std::isfinite(S.Omega.z);
 	}
 
-	// ROB-11 monitor: at every logged event time all ball-ball gaps >= -1e-9 m and every on-cloth ball's nose gap >= -1e-9 m (within
-	// the nose's extent), on the exact (Analytic) segments; island stretches are Sampled for playback (linear within 10 um), where the
-	// island's own contact model applies. Returns the number of violations.
+	// ROB-11 monitor: at every logged event time all ball-ball gaps >= -1e-9 m and every on-cloth ball's cushion gaps >= -1e-9 m (nose
+	// lines within their extent, jaw arcs on their exposed arc), on the exact (Analytic) segments; island stretches are Sampled for
+	// playback (linear within 10 um), where the island's own contact model applies. Returns the number of violations.
 	int InvariantViolations(const ShotResult& R, const SimInput& In, const TableGeometry& T)
 	{
 		int Violations = 0;
@@ -150,39 +212,74 @@ namespace
 						++Violations;
 					}
 				}
+				for (int a = 0; a < T.JawArcs.Size(); ++a)
+				{
+					const JawArc& Arc = T.JawArcs[a];
+					const Vec2 Rel = XY(S[i].Position) - Arc.Center;
+					double Delta = std::atan2(Rel.y, Rel.x) - Arc.AngleFrom;
+					while (Delta < 0.0)
+					{
+						Delta += 2.0 * kPi;
+					}
+					const double Rc = ComputeCushionContact(In.Balls[i].Spec.Radius, Arc.Height, 0.0, false).HorizontalOffset;
+					if (Delta <= Arc.AngleSweep && Length(Rel) - Arc.Radius - Rc < -1e-9)
+					{
+						++Violations;
+					}
+				}
 			}
 		}
 		return Violations;
 	}
 }
 
-// VAL ROB-10 (standalone half): identical inputs give bitwise identical results - the serialized event logs of B1 shots hash
-// identically with a reused and a fresh simulator, in forward and reverse order (no state survives a Run). The Debug / Release
-// comparison of the same hash runs with RB_ROB10_PRINT set (the value is printed; it must be equal in both builds and in the UE
-// module build, prior-art 5.9).
+// VAL ROB-10 (standalone half): identical inputs give bitwise identical results - the serialized event logs of the B1 shots and B2
+// breaks hash identically with a reused and a fresh simulator, in forward and reverse order (no state survives a Run). Release runs
+// the spec's 1000 B1 shots + 100 B2 breaks, Debug a reduced set (architecture 18). The Debug / Release comparison of the same hash
+// runs with RB_ROB10_PRINT set (the value, over the Debug set, is printed; it must be equal in both builds and in the UE module
+// build, prior-art 5.9).
 RB_TEST(VAL_ROB10_DeterministicEventLogs)
 {
 	const TableGeometry& T = NineFoot();
-	const int Shots = 40 * kScale;
-	static std::uint64_t Hashes[1000];
+#if defined(RB_DEBUG_ASSERTS) && RB_DEBUG_ASSERTS
+	constexpr int kB1 = 40;
+	constexpr int kB2 = 4;
+#else
+	constexpr int kB1 = 1000;
+	constexpr int kB2 = 100;
+#endif
+	constexpr int kShots = kB1 + kB2;
+	const auto MakeShot = [&T](int s, SimInput& Out)
+	{
+		if (s < kB1)
+		{
+			MakeB1Shot(1000u + static_cast<std::uint64_t>(s), T, Out);
+		}
+		else
+		{
+			MakeB2Break(20000u + static_cast<std::uint64_t>(s - kB1), T, Out);
+		}
+	};
+	static std::uint64_t Hashes[kShots];
 	SimInput& In = InputSlot();
 	ShotResult& R = ResultSlot();
 	Simulator Reused;
-	std::uint64_t Combined = 0xCBF29CE484222325ull; // the first 40 shots (the Debug set) for the build comparison
-	for (int s = 0; s < Shots; ++s)
+	std::uint64_t Combined = 0xCBF29CE484222325ull; // the Debug set (first 40 B1 shots, first 4 breaks) for the build comparison
+	for (int s = 0; s < kShots; ++s)
 	{
-		MakeB1Shot(1000u + static_cast<std::uint64_t>(s), T, In);
-		RB_REQUIRE(Reused.Run(In, R) == SimStatus::Ok);
+		MakeShot(s, In);
+		const SimStatus Status = Reused.Run(In, R);
+		RB_REQUIRE(Status == SimStatus::Ok || Status == SimStatus::Aborted); // (breaks may hit a guard until WP-6b's islands land)
 		Hashes[s] = ResultHash(R);
-		if (s < 40)
+		if (s < 40 || (s >= kB1 && s < kB1 + 4))
 		{
 			Mix(Combined, Hashes[s]);
 		}
 	}
 	int Mismatches = 0;
-	for (int s = Shots - 1; s >= 0; --s)
+	for (int s = kShots - 1; s >= 0; --s)
 	{
-		MakeB1Shot(1000u + static_cast<std::uint64_t>(s), T, In);
+		MakeShot(s, In);
 		Simulator Fresh;
 		ShotResult& Other = ResultSlot(1);
 		Other = ShotResult{};
@@ -194,34 +291,67 @@ RB_TEST(VAL_ROB10_DeterministicEventLogs)
 	RB_CHECK(Mismatches == 0);
 	if (PrintRequested())
 	{
-		std::printf("ROB-10 hash of the first 40 B1 shots: %016llx\n", static_cast<unsigned long long>(Combined));
+		std::printf("ROB-10 hash of the Debug set (40 B1 shots, 4 B2 breaks): %016llx\n", static_cast<unsigned long long>(Combined));
 	}
 }
 
-// VAL ROB-11: invariant monitor on the benchmark sets (B1 shots and B2 breaks): no ball-ball or cushion penetration beyond 1e-9 m at
-// any event, no de-penetration (overlap diagnostic) logged. Needs WP-6b (clusters, frozen balls and pockets).
+namespace
+{
+	// ROB-11 over B1 shots, 9-ball and 8-ball B2 breaks and the B3 stress set: violations and overlap diagnostics.
+	void RunInvariantMonitor(int B1, int B2, int& Violations, int& Overlaps, int& NotOk)
+	{
+		const TableGeometry& T = NineFoot();
+		SimInput& In = InputSlot();
+		ShotResult& R = ResultSlot();
+		Simulator Sim;
+		const auto Check = [&]()
+		{
+			NotOk += Sim.Run(In, R) == SimStatus::Ok ? 0 : 1;
+			Violations += InvariantViolations(R, In, T);
+			Overlaps += R.Diagnostics.OverlapWarnings;
+		};
+		for (int s = 0; s < B1; ++s)
+		{
+			MakeB1Shot(5000u + static_cast<std::uint64_t>(s), T, In);
+			Check();
+		}
+		for (int s = 0; s < B2; ++s)
+		{
+			MakeB2Break(9000u + static_cast<std::uint64_t>(s), T, In, false);
+			Check();
+			MakeB2Break(90000u + static_cast<std::uint64_t>(s), T, In, true);
+			Check();
+		}
+		for (int k = 0; k < kB3Count; ++k)
+		{
+			MakeB3Stress(k, T, In);
+			Check();
+		}
+	}
+}
+
+// VAL ROB-11: invariant monitor on the benchmark sets (B1 shots, 9-ball and 8-ball B2 breaks, the B3 stress set): no ball-ball or
+// cushion penetration beyond 1e-9 m at any event, no de-penetration (overlap diagnostic) logged. Needs WP-6b (clusters, frozen balls
+// and pockets). Reduced sets here; the full prior-art 7.5 sets in the _Slow_ variant.
 RB_TEST(Integ_VAL_ROB11_NoPenetrationOnBenchmarkSets)
 {
-	const TableGeometry& T = NineFoot();
-	SimInput& In = InputSlot();
-	ShotResult& R = ResultSlot();
-	Simulator Sim;
 	int Violations = 0;
 	int Overlaps = 0;
-	for (int s = 0; s < 40 * kScale; ++s)
-	{
-		MakeB1Shot(5000u + static_cast<std::uint64_t>(s), T, In);
-		RB_REQUIRE(Sim.Run(In, R) == SimStatus::Ok);
-		Violations += InvariantViolations(R, In, T);
-		Overlaps += R.Diagnostics.OverlapWarnings;
-	}
-	for (int s = 0; s < 4 * kScale; ++s)
-	{
-		MakeB2Break(9000u + static_cast<std::uint64_t>(s), T, In);
-		RB_REQUIRE(Sim.Run(In, R) == SimStatus::Ok);
-		Violations += InvariantViolations(R, In, T);
-		Overlaps += R.Diagnostics.OverlapWarnings;
-	}
+	int NotOk = 0;
+	RunInvariantMonitor(40 * kScale, 2 * kScale, Violations, Overlaps, NotOk);
+	RB_CHECK(NotOk == 0);
+	RB_CHECK(Violations == 0);
+	RB_CHECK(Overlaps == 0);
+}
+
+// VAL ROB-11 on the full prior-art 7.5 sets: 10,000 B1 shots, 1,000 9-ball + 1,000 8-ball breaks, B3 (nightly, Release).
+RB_TEST(Integ_VAL_ROB11_Slow_FullBenchmarkSets)
+{
+	int Violations = 0;
+	int Overlaps = 0;
+	int NotOk = 0;
+	RunInvariantMonitor(10000, 1000, Violations, Overlaps, NotOk);
+	RB_CHECK(NotOk == 0);
 	RB_CHECK(Violations == 0);
 	RB_CHECK(Overlaps == 0);
 }

@@ -111,8 +111,10 @@ namespace rb
 		bool InPlay = false;        // simulated (on the table); false for pocketed / out-of-play / unused ids
 		BallSpec Spec;              // per-ball R, m, I (InertiaFactor in (0, 2/3])
 		BallState State;            // initial state; must be classified-consistent (at rest for a strike)
-		Quat Orientation;           // initial orientation (playback; the chalk-mark cling with PhysicsParams::ChalkCling)
-		BallChalkMarks ChalkMarks;  // body-frame chalk marks (rb/Human/BallMarks.h); read only with PhysicsParams::ChalkCling
+		Quat Orientation;           // initial orientation (playback; the chalk-mark cling with PhysicsParams::ChalkCling); finite and
+		                            //   non-zero, else Run returns InvalidInput (InvalidState)
+		BallChalkMarks ChalkMarks;  // body-frame chalk marks (rb/Human/BallMarks.h); read only with PhysicsParams::ChalkCling, then every
+		                            //   value must be finite (else InvalidInput, InvalidArgument)
 	};
 
 	// One cue stroke at t = 0. Normal shots have exactly one (Ball = the cue ball); the lag has two

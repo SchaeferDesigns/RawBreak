@@ -21,6 +21,16 @@
 //    EndPosition = the new state's position; a segment that is already closed (T1 < +inf, e.g. the last Sampled piece an island
 //    wrote) is kept and the next Orientation0 continues from its T1. Next Orientation0 = SegmentOrientationAt of the closed
 //    segment (rb/Physics/Playback.h), so segment boundaries stay bitwise continuous.
+//  * Leaving an island (review addition). Call ReplaceSegment / MakeTerminal for a leaving member while its BallSlot::InIsland is
+//    still true: the loop then closes the open Sampled segment with Motion.Omega0 = RotationAccumulator / (Time - its T0), and
+//    without a recorded track (Trajectories off: a marked ball with ChalkCling, the Finals orientation) it advances
+//    Orientation0 (the orientation at SampleStart) by the Sampled law with RotationAccumulator / (Time - SampleStart) - bitwise
+//    the recorded result. So the island keeps SampleStart / RotationAccumulator for every member (BallSlot) and needs no
+//    orientation bookkeeping at the exit.
+//  * AdvanceIsland (review addition): return right after a step in which a member left the island (ReplaceSegment /
+//    MakeTerminal), so that the loop processes the leaving ball's new events and observers in time order before the next step
+//    (8.8 "before each step, all valid non-island events with Time <= step end are processed first"); Ws.Now is the time of the
+//    step being processed, never later than the Time passed to ReplaceSegment (the tip slots are searched from Ws.Now on).
 //  * ReplaceSegment(Ws, b, S, t) returns the ball to event mode (InIsland = false), bumps its version and re-predicts all its
 //    slots (end, table, pairs, and every moving tip). It does NOT log BallAirborne / BallLand / MotionTransition (callers do).
 //    S.State == PocketPivot builds the pivot from Balls[b].Context.Pocket (MakePivotPath at Time; an immediate pivot becomes
@@ -44,9 +54,20 @@
 //  * Every StartIsland call made by the loop increments SimDiagnostics::IslandHandOffs (and PressingContacts for pressing
 //    seeds, ZenoTriggers for Zeno seeds); SimDiagnostics::Islands (new islands) and IslandSteps are WP-6b's (the loop copies
 //    Workspace::IslandStepsUsed into IslandSteps if that is larger).
+//  * Tip slots (review addition) are searched from Ws.Now on, never from the path's older StartTime: a re-contact that
+//    ResolveTipRecontact answered with no impulse is not found again by a later re-prediction (the tip passes on). Tip slots are
+//    re-predicted by ReplaceSegment / MakeTerminal (every moving tip that is not InIsland), so an island that releases a tip
+//    (TipSlot::InIsland = false, new Path) does so before its last member's ReplaceSegment.
+//  * Pair observers (jump-over, ball freeze-leave) of an event-mode ball against a partner inside an island are void (never
+//    emitted); the partner's return to event mode recomputes them. The island evaluates its members' own crossings (8.7).
 //  * An open event-mode tip contact (TipSlot::ContactBall != kNoBall, pending TipContactEnd at TipSlot::ContactEnd) whose tip
 //    becomes an island participant (TipSlot::InIsland) is continued and closed by the island (TipContactEnd, ContactBall :=
 //    kNoBall); the loop emits pending ends only for tips that are not InIsland.
+//  * Record positions (review addition): every record-relevant event (IsRecordRelevant) passed to EmitEvent carries Pre[0] = A's
+//    state at the event (and Pre[1] = B's when B is a ball) WHATEVER RecordOptions::EventStates - the record takes PositionA /
+//    PositionB from them (the rules' FinalPosition of a pocketed, off-table or late-dropping ball is the last record position,
+//    rules F13). EmitEvent strips the states from the physics-log copy when EventStates is off. This holds for WP-6b's events too
+//    (BallLand, BallPocketEnter / Rim / Exit / Pocketed, BallLiner, BallRailTop, island records, tip events of islands).
 //  * EmitEvent maintains the loop's bookkeeping from the events themselves, so island records count as well: jump-over
 //    contacts (BallBall of a pending plan overlap) and TipSlot::StruckTouchedOther (a BallBall of the struck ball with a ball
 //    other than FrozenTarget, or a BallCushion / BallJaw / BallRailTop / BallLiner of the struck ball).
@@ -256,6 +277,8 @@ namespace rb::sim
 		double SupportHeight(const Workspace& Ws, int Ball);
 		// Position at Time from the island body (member), the pivot, or the segment.
 		Vec3 CurrentPosition(const Workspace& Ws, int Ball, double Time);
+		// (review addition) The same for the whole state (island member: the body's position, velocity and spin).
+		BallState CurrentState(const Workspace& Ws, int Ball, double Time);
 
 		// Segment replacement WITHOUT re-prediction (version bump, track, observers from Time with IncludeFrom). Initial
 		// segments (t = 0) pass Initial = true: no track segment is closed, Orientation0 comes from the input.

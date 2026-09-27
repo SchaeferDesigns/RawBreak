@@ -62,13 +62,22 @@ namespace rb::sim
 			return Length(loop::CurrentPosition(Ws, F, Time) - loop::CurrentPosition(Ws, Ball, Time)) - (SpecOf(Ws, F).Radius + SpecOf(Ws, Ball).Radius);
 		}
 
-		void EmitTipBegin(Workspace& Ws, int Strike, int Ball, double Time, double Gap)
+		// TipContactBegin of strike Strike on Ball; AtBall / AtTarget = the states of Ball and of the frozen target f at Time (the
+		// record's positions, whatever EventStates).
+		void EmitTipBegin(Workspace& Ws, int Strike, int Ball, double Time, double Gap, const BallState& AtBall, const BallState& AtTarget)
 		{
 			const TipSlot& Tip = Ws.Tips[Strike];
 			ShotEvent Event = MakeEvent(Time, ShotEventType::TipContactBegin, Ball, Tip.FrozenTarget);
 			Event.Feature = static_cast<std::uint8_t>(Strike);
 			Event.SubFeature = static_cast<std::uint8_t>(Tip.StruckTouchedOther ? 1 : 0);
 			Event.Value = Gap;
+			Event.Pre[0] = AtBall;
+			Event.Post[0] = AtBall;
+			if (Tip.FrozenTarget != kNoBall)
+			{
+				Event.Pre[1] = AtTarget;
+				Event.Post[1] = AtTarget;
+			}
 			EmitEvent(Ws, Event);
 		}
 
@@ -321,11 +330,8 @@ namespace rb::sim
 			ShotEvent Event = MakeEvent(Time, ShotEventType::MotionTransition, Ball);
 			Event.From = Seg.State;
 			Event.To = S.State;
-			if (Ws.Input->Record.EventStates)
-			{
-				Event.Pre[0] = EvaluateSegment(Seg, Seg.TauEnd);
-				Event.Post[0] = S;
-			}
+			Event.Pre[0] = EvaluateSegment(Seg, Seg.TauEnd); // the record's position, whatever EventStates (EmitEvent)
+			Event.Post[0] = S;
 			EmitEvent(Ws, Event);
 			if (S.State == MotionState::Stationary && Slot.Context.Support == SupportKind::RailCap)
 			{
@@ -691,7 +697,9 @@ namespace rb::sim
 				ResolveTipRecontact(Tip.Path, Time, Before, SpecOf(Ws, Ball), Cue, loop::SupportSurface(Ws, Ball), P.Slate, P.Gravity, P.Numerics);
 			if (!(R.Impulse > 0.0))
 			{
-				loop::PredictTips(Ws, Ball, Time); // separating at the exact state: no contact; the tip slot looks further
+				// No impulse (separating at the exact state, or WP-1's re-contact model gives none): no contact; the tip slot looks
+				// further from Now (PredictTips never searches the past, so this contact is not found again later).
+				loop::PredictTips(Ws, Ball, Time);
 				return;
 			}
 			const Vec3 Center = TipCenterAt(Tip.Path, Time);
@@ -729,7 +737,8 @@ namespace rb::sim
 			{
 				Tip.ContactBall = static_cast<BallId>(Ball);
 				Tip.ContactEnd = Time + Cue.ContactTime;
-				EmitTipBegin(Ws, Strike, Ball, Time, GapToFrozenTarget(Ws, Strike, Ball, Time));
+				const BallState AtTarget = Tip.FrozenTarget != kNoBall ? loop::CurrentState(Ws, Tip.FrozenTarget, Time) : BallState{};
+				EmitTipBegin(Ws, Strike, Ball, Time, GapToFrozenTarget(Ws, Strike, Ball, Time), Before, AtTarget);
 			}
 			Tip.Path = R.Tip;
 			Tip.Moving = Tip.Path.StopTime > Time;
@@ -807,6 +816,13 @@ namespace rb::sim
 			Event.Feature = static_cast<std::uint8_t>(Strike);
 			Event.SubFeature = static_cast<std::uint8_t>(Tip.StruckTouchedOther ? 1 : 0);
 			Event.Value = GapToFrozenTarget(Ws, Strike, Ball, Tip.ContactEnd);
+			Event.Pre[0] = CurrentState(Ws, Ball, Tip.ContactEnd); // the record's positions, whatever EventStates (EmitEvent)
+			Event.Post[0] = Event.Pre[0];
+			if (Tip.FrozenTarget != kNoBall)
+			{
+				Event.Pre[1] = CurrentState(Ws, Tip.FrozenTarget, Tip.ContactEnd);
+				Event.Post[1] = Event.Pre[1];
+			}
 			Tip.ContactBall = kNoBall;
 			EmitEvent(Ws, Event);
 		}
@@ -882,7 +898,8 @@ namespace rb::sim
 				Event.Pre[0] = Before;
 				Event.Post[0] = R.State;
 				EmitEvent(Ws, Event);
-				EmitTipBegin(Ws, k, Ball, 0.0, FrozenGap); // segments start after the strikes: the gap from the t = 0 positions
+				// Segments start after the strikes: the gap and the record's positions from the t = 0 states.
+				EmitTipBegin(Ws, k, Ball, 0.0, FrozenGap, Before, Frozen != kNoBall ? States[Frozen] : BallState{});
 				OpenTipPiece(Ws, k);
 				if (R.State.State == MotionState::Airborne)
 				{
