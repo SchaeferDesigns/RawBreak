@@ -38,7 +38,7 @@ namespace rb
 	enum class BallBallFrictionModel : std::uint8_t
 	{
 		Alciatore,  // mu_b(s) = k_cling (a + b exp(-c s)), frozen at the pre-impact slip speed (default)
-		Constant,   // mu_b = MuConstant (TP A.5 test mode, prior-art BB-02)
+		Constant,   // mu_b = MuConstant, not scaled by the cling factor (TP A.5 test mode, prior-art BB-02)
 		None,       // frictionless (90-degree-rule tests, prior-art BB-01)
 	};
 

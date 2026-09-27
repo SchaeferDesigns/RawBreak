@@ -20,12 +20,31 @@
 //    plain impulses (an impulse cannot resolve a zero-speed contact, collisions pitfall 16).
 //
 // Determinism and id independence (COL CL-8, prior-art BRK-04): contacts are processed in the order
-// of an id-INDEPENDENT geometric key (lexicographic (x, y, z) of the contact point, ties by the
-// canonically signed normal, then by feature index), never by ball id. Compliant mode computes every
-// contact force from the state at the start of the step and then accumulates them per body in key
-// order (Jacobi); Rigid mode sweeps contacts in key order (Gauss-Seidel). Pair forces are computed so
-// that the two bodies receive exactly negated values. Hence permuting ball ids gives bit-identical
-// bodies after mapping ids back.
+// of an id-INDEPENDENT geometric key (lexicographic (x, |y|, z, y) of the contact point, ties by the
+// canonically signed normal, then by the feature's table source (kind, index, sub)), never by ball id.
+// (|y| before the sign of y makes a body's contact order the mirror image of its mirror body's order, so
+// configurations symmetric about the long axis y = 0, e.g. the break, stay exactly symmetric, COL CL-7.)
+// The key is evaluated when the candidate list (a Verlet list: every ball pair / ball-feature pair
+// within a skin distance) is rebuilt, which happens at id-independent instants (a body moved more than
+// half the skin, or bodies / features were added); pair roles are canonical (the body with the
+// lexicographically smaller centre at the rebuild is "A"). Compliant mode computes every contact force
+// from the state at the start of the step and then accumulates them per body in key order (Jacobi);
+// Rigid mode sweeps contacts in key order (Gauss-Seidel). Pair forces are computed so that the two
+// bodies receive exactly negated values. Hence permuting ball ids gives bit-identical bodies after
+// mapping ids back. Tip contacts follow the pair contacts (in strike order), support (cloth) contacts
+// come last and are per body (they commute).
+//
+// Support (cloth) model (collisions 3.9.2 "cloth"; architecture 8.8, 8.11): bodies flagged ClothSupport
+// get the table reaction (v_z >= 0 at z = R) and Coulomb cloth friction with the normal impulse the cloth
+// actually carries (m g dt plus any downward contact force, e.g. from a cushion nose above the centre),
+// applied as a per-step impulse capped at the stop-slip value (exact Coulomb: rolling and rest are
+// exact, no creep); while rolling, the rolling resistance mu_r and the spin deceleration alpha_sp of
+// the cloth act like in event mode (capped, so a ball at rest on a table tilted within the validity rule
+// stays exactly at rest, A-CLI-5), which lets rigid islands come to rest (8.8). Plane features (rail top)
+// support bodies through their contact force; their rolling resistance and spin deceleration act in Rigid
+// mode (rail-top islands are rigid, 6.2). Landings of hopping bodies inside an island are inelastic.
+// Rigid mode warm-starts sustained contacts with the previous step's impulses and ends the sweeps early once
+// no contact velocity changes by more than EpsV.
 
 #include "rb/Config.h"
 #include "rb/Core/Constants.h"
@@ -63,7 +82,8 @@ namespace rb
 		int RigidIterations = 4;           // sequential-impulse sweeps per rigid step
 		double SustainedSpeed = 2.0e-3;    // [m/s] sustained-contact detector: every active contact |v_n| below this (= v_rest) ...
 		int SustainedSteps = 200;          // ... for this many consecutive compliant steps (0.2 ms) -> switch to Rigid mode
-		double GridCell = 0.06;            // [m] uniform broad-phase grid cell for large islands (pitfall 11)
+		double GridCell = 0.06;            // [m] reserved: the broad phase is a Verlet candidate list (skin 2 mm, rebuilt when a
+		                                   //   body moved 1 mm), so no step is O(N^2) (pitfall 11); a grid is not needed for 24 balls
 		bool ClothSupport = true;          // bodies flagged ClothSupport keep v_z >= 0 at z = R and feel cloth friction (off for CL-1..CL-5)
 	};
 
@@ -147,15 +167,18 @@ namespace rb
 		TipEnd,      // tip force returned to zero on BallA
 	};
 
+	// A contact is "active" while its force (compliant) is positive with a compression beyond the numerical touching band
+	// (delta > NumericsConfig::ContactTol), or while its normal impulse (rigid) exceeds ApproachSpeedTol times its effective
+	// mass: frozen neighbours resting in the touching band (a racked cluster) carry no record and do not block the exit.
 	struct IslandContactRecord
 	{
 		IslandRecordKind Kind = IslandRecordKind::BallBall;
-		double Time = 0.0;
-		int BallA = -1;
-		int BallB = -1;          // ball-ball partner, -1 otherwise
+		double Time = 0.0;       // start of the step whose state gave the first positive force (or the zero force of a TipEnd) [s]
+		int BallA = -1;          // ball-ball: the LOWER ball id; feature / tip records: the ball
+		int BallB = -1;          // ball-ball partner (higher id), -1 otherwise
 		int Feature = -1;        // island feature index, -1 otherwise
 		int Strike = -1;         // tip records: index into SimInput::Strikes
-		Vec3 Normal;             // from A to B (ball-ball), from the feature / tip to the ball
+		Vec3 Normal;             // from A to B (ball-ball, like the event-mode n_hat), from the feature / tip to the ball
 		double NormalSpeed = 0.0;// approach speed at first touch [m/s]
 	};
 
@@ -183,7 +206,8 @@ namespace rb
 	class CompliantIsland
 	{
 	public:
-		// Params.TsujiAlpha must already be resolved (>= 0). Starts in Mode.
+		// Params.TsujiAlpha should already be resolved (>= 0; a negative value is resolved here from BallBall.Restitution).
+		// Starts in Mode; bodies, features, tips and contact states are cleared.
 		RB_API void Reset(double StartTime, CliMode Mode, const CliParams& Params, const BallBallParams& BallBall, const ClothParams& Cloth,
 			double Gravity, const NumericsConfig& Numerics);
 
@@ -196,14 +220,16 @@ namespace rb
 		RB_API void SetInPlaneGravity(const Vec2& Accel);
 		Vec2 InPlaneGravityAcceleration() const { return InPlaneGravityAccel; }
 
-		RB_API bool AddBody(const IslandBody& NewBody);          // false if full or the ball is already present
+		RB_API bool AddBody(const IslandBody& NewBody);          // false if full, the id is outside [0, kMaxBalls) or already present
 		RB_API bool AddFeature(const IslandFeature& NewFeature); // false if full; an already present (SourceKind, SourceIndex, SourceSub) is ignored (true)
 		// A member leaves the island (reached a drop edge, left the cloth region, left the rail top, ...):
 		// its current state is returned and every contact state involving it is dropped.
 		RB_API bool RemoveBody(int Ball, IslandBody& Out);
 
-		// Cue tips (index = strike): add while the tip moves and could touch a member; remove when the
-		// island ends or the tip stops (its state is returned as a new analytic path at Time()).
+		// Cue tips (index = strike): add while the tip moves and could touch a member (its position and speed at Time() follow
+		// from the path); remove when the island ends or the tip stops: its state is returned as a new analytic path starting at
+		// Time() with the same deceleration (a tip pushed backwards by a ball leaves at rest). The caller closes an open tip
+		// contact interval (TipEnd) when it removes a touching tip.
 		RB_API bool SetTip(int Strike, const IslandTip& Tip);
 		RB_API bool RemoveTip(int Strike, CueTipPath& Out);
 		RB_API bool HasTip(int Strike) const;
@@ -211,16 +237,23 @@ namespace rb
 		RB_API void SetMode(CliMode NewMode);
 		CliMode Mode() const { return CurrentMode; }
 
-		// Advances all bodies (and tips) by one step of the current mode and appends first-touch / tip
-		// records (in contact-key order).
+		// Advances all bodies (and tips) by one step of the current mode (semi-implicit Euler with Jacobi contact forces,
+		// or sequential impulses + position projection) and appends first-touch / tip records (in contact-key order; pair records
+		// leave 4 slots of the list per active tip free for the tip records of the step; a pair record that does not fit stays
+		// armed and is emitted at the next step, a tip transition that does not fit is recorded at the next step, so TipBegin /
+		// TipEnd always come in pairs).
 		RB_API void Step(IslandRecordList& NewRecords);
 
-		// Compliant mode: every active contact has had |v_n| < SustainedSpeed for SustainedSteps steps.
+		// Compliant mode: at least one active contact, and every active contact (pairs and tips) has had |v_n| < SustainedSpeed
+		// for SustainedSteps consecutive steps. Always false in Rigid mode.
 		RB_API bool SustainedContact() const;
 
-		// Exit test (3.9.2 + architecture 8.8): no contact force for ExitZeroForceSteps steps, every pair
-		// separating (f' >= 0), every geometric gap >= 0, and no touching pair (|gap| <= ContactTol) with
-		// |f'| <= ApproachSpeedTol and f'' < 0 (it would re-trigger the pressing rule at once).
+		// Exit test (3.9.2 + architecture 8.8): no active contact for ExitZeroForceSteps steps, every pair within
+		// LeaveDistance separating (gap rate >= -ApproachSpeedTol), every geometric gap >= -ContactTol (the touching band;
+		// no overlap), and no touching pair (|gap| <= ContactTol) with |gap rate| <= ApproachSpeedTol and gap'' < 0 under the
+		// accelerations the bodies will have in event mode (sliding / rolling on the cloth incl. the tilt drive, ballistic
+		// otherwise): it would re-trigger the pressing rule at once. Tips: no overlap and not approaching. Never true while a body
+		// has a non-finite state (a corrupt island runs into NumericsConfig::MaxIslandSteps instead of returning it to event mode).
 		RB_API bool CanExit() const;
 
 		// Body at rest (|v| <= EpsV, |w| R <= EpsWTimesRadius): rigid islands end on rest.
@@ -238,17 +271,40 @@ namespace rb
 		int StepCount() const { return Steps; }
 
 	private:
-		// One contact / pair state (sparse): ball-ball, ball-feature or tip-ball.
-		struct ContactState
+		// One candidate pair of the Verlet list (sparse) with its contact state: ball-ball (A, B body indices, A = the
+		// body with the lexicographically smaller centre at the last rebuild) or ball-feature (A body, Feature index).
+		// Pairs leave the list only when their gap exceeds skin + LeaveDistance at a rebuild, i.e. after they separated
+		// by more than LeaveDistance: a pair that enters again starts re-armed (3.9.6).
+		struct PairState
 		{
-			std::int16_t BodyBall = -1;  // lower ball id (ball-ball) or the ball (feature / tip)
-			std::int16_t Other = -1;     // partner ball id, or kFeatureBase + feature, or kTipBase + strike
+			std::int8_t A = -1;          // body index
+			std::int8_t B = -1;          // body index (ball-ball) or -1
+			std::int8_t Feature = -1;    // feature index (ball-feature) or -1
+			bool InContact = false;      // geometric overlap at the last step: friction / damping / restitution frozen at first touch
+			bool Active = false;         // positive force (compliant) or impulse (rigid) beyond the touching band at the last step
+			bool Armed = true;           // emits a record on the next first positive force
+			int SlowSteps = 0;           // consecutive compliant steps with |v_n| < SustainedSpeed while active
 			double Mu0 = 0.0;            // friction coefficient frozen at first touch
-			double Damping = 0.0;        // eta / c_c / tip damping, frozen at first touch
-			bool Touching = false;
-			bool Armed = true;           // emits a record on the next first touch
-			int SlowSteps = 0;           // consecutive steps with |v_n| < SustainedSpeed while touching
+			double Damping = 0.0;        // ball-ball: Tsuji eta of the pair; ball-feature: c_c frozen at first touch
+			double Restitution = 0.0;    // rigid-mode restitution frozen at first touch
+			double RadiusSum = 0.0;      // ball-ball: R_A + R_B [m]
+			double WarmNormal = 0.0;     // rigid mode: normal impulse of the last step (warm start of a sustained contact) [N s]
+			Vec3 WarmTangent;            // rigid mode: tangential impulse of the last step [N s]
 		};
+
+		// Contact state of one cue tip with one ball (indexed by ball id).
+		struct TipBallState
+		{
+			bool InContact = false;
+			bool Active = false;
+			int SlowSteps = 0;
+			double Damping = 0.0;        // frozen at first touch (from e_tip and the reduced mass of ball and cue)
+		};
+
+		void StepCompliant(IslandRecordList& NewRecords);
+		void StepRigid(IslandRecordList& NewRecords);
+		void RebuildPairs();
+		void RebuildIfMoved();
 
 		double CurrentTime = 0.0;
 		CliMode CurrentMode = CliMode::Compliant;
@@ -260,10 +316,18 @@ namespace rb
 		Vec2 InPlaneGravityAccel;    // g_t [m/s^2] of a tilted table (0 = level)
 		int Steps = 0;
 		int ZeroForceSteps = 0;
+		bool PairsDirty = true;      // bodies / features changed: rebuild the candidate list before use
+		double CandidateSkin = 0.0;  // [m] skin of the current candidate list (0 after a capacity fallback: rebuilt every step)
 		FixedVector<IslandBody, kMaxBalls> Bodies;
 		FixedVector<IslandFeature, kMaxIslandFeatures> Features;
-		FixedVector<ContactState, kMaxIslandContacts> Contacts;
+		FixedVector<PairState, kMaxIslandContacts> Pairs;
+		Vec3 RebuildPosition[kMaxBalls] = {}; // body centres at the last candidate rebuild (by body index)
+		double ClothWarmNormal[kMaxBalls] = {}; // rigid mode: last cloth impulses per body index (warm start)
+		Vec3 ClothWarmTangent[kMaxBalls] = {};
 		IslandTip Tips[kMaxStrikes] = {};
 		bool TipActive[kMaxStrikes] = {};
+		Vec3 TipCenter[kMaxStrikes] = {};     // current tip dome centre [m]
+		double TipSpeed[kMaxStrikes] = {};    // current speed along Path.Direction [m/s]
+		TipBallState TipContacts[kMaxStrikes][kMaxBalls] = {};
 	};
 }
