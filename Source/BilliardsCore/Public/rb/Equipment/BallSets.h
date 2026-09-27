@@ -32,6 +32,10 @@ namespace rb
 	inline constexpr BallSpec kMagneticCueBall = MakeBallSpec(0.028575, 0.167);
 	inline constexpr BallSpec kOversizedCueBall = MakeBallSpec(0.0301625, 0.2211);
 
-	// Deterministic for a given (Preset, Seed): the seed comes from the game layer / replay.
+	// Deterministic for a given (Preset, Seed): the seed comes from the game layer / replay. Counts: 16 (pool,
+	// Blackball), 22 (snooker); slots beyond Count stay BallSpec{}. DiveBar / OldBarOversizedCue draw with
+	// rb::Rng(Seed), per object ball 1..15 in id order: mass (NextNormal, clamped), then diameter (NextUniform),
+	// so both presets share the object balls for one seed; the other presets ignore the seed. Every ball is a
+	// solid sphere (MakeBallSpec, k = 2/5). Unknown preset: InvalidArgument (Out = BallSet{}).
 	RB_API ErrorCode BuildBallSet(BallSetPreset Preset, std::uint64_t Seed, BallSet& Out);
 }
