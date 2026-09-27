@@ -27,6 +27,26 @@ namespace rb
 		{
 			return Kind == FixedContactKind::FacingFace || Kind == FixedContactKind::FacingTopEdge;
 		}
+
+		// Resting / pressing contact of a ball on the cloth (4.5, 7.1, 7.3), LOCAL frame, the same for every on-cloth model:
+		// an approach below v_rest is an e = 0 micro-impact of a rigid cushion on a rigid slate, so v_Y := 0 and nothing
+		// else changes; the normal impulse is the constrained one, m v_Y / cos(theta). Separating (v_Y <= 0): no impulse.
+		// (Han / Stronge with e = 0 would leave v_Y' = v_Y sin^2(theta) > 0 - 4.4: the vertical part of their impulse is
+		// wasted on the DOF the slate blocks - so the ball would still approach and re-trigger the contact at tau = 0.)
+		CushionImpactResult RestOnCloth(const Vec3& VelocityLocal, const Vec3& OmegaLocal, const BallSpec& Spec, double Elevation)
+		{
+			CushionImpactResult Result;
+			Result.Velocity = {VelocityLocal.x, VelocityLocal.y, 0.0};
+			Result.Omega = OmegaLocal;
+			Result.Resting = true;
+			if (VelocityLocal.y > 0.0)
+			{
+				Result.Velocity.y = 0.0;
+				Result.NormalSpeed = VelocityLocal.y;
+				Result.NormalImpulse = Spec.Mass * VelocityLocal.y / Cos(Elevation);
+			}
+			return Result;
+		}
 	}
 
 	CushionFrame MakeCushionFrame(const Vec3& IntoFeatureHorizontal)
@@ -130,7 +150,8 @@ namespace rb
 	{
 		// 4.7 model selection. Ball on the cloth (or the shelf) against an edge or a facing face -> the on-cloth model
 		// (Mathavan by default) in the cushion-local frame; everything else -> GRI with the element's e / mu.
-		// Resting-contact rule (7.1, 7.3): an approach speed below v_rest uses e = 0 (Mathavan: v_Y := 0, nothing else).
+		// Resting-contact rule (7.1, 7.3): an approach speed below v_rest uses e = 0 (on the cloth, whatever the model:
+		// v_Y := 0, nothing else; GRI: P_N = m v_c).
 		const bool Facing = IsFacingKind(Contact.Kind);
 		const double RestitutionScale = Facing ? Cushion.FacingRestitutionScale : 1.0;
 
@@ -144,8 +165,10 @@ namespace rb
 			const bool Resting = NormalSpeed < Numerics.RestSpeed;
 			const double Restitution = Resting ? 0.0 : RestitutionScale * CushionRestitution(NormalSpeed, Cushion.Restitution);
 
+			// Resting: the same rule for every on-cloth model (RestOnCloth; Mathavan applies it internally too).
+			const CushionModel Model = Resting ? CushionModel::Mathavan2010 : Cushion.OnClothModel;
 			CushionImpactResult Local;
-			switch (Cushion.OnClothModel)
+			switch (Model)
 			{
 			case CushionModel::Han2005:
 				Local = ResolveHan(VelocityLocal, OmegaLocal, Spec, Contact.Elevation, Restitution, Friction);
@@ -160,6 +183,11 @@ namespace rb
 			case CushionModel::Mathavan2010:
 			default:
 			{
+				if (Resting)
+				{
+					Local = RestOnCloth(VelocityLocal, OmegaLocal, Spec, Contact.Elevation);
+					break;
+				}
 				MathavanSettings Settings;
 				Settings.Elevation = Contact.Elevation;
 				Settings.Restitution = Restitution;

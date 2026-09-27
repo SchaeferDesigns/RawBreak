@@ -158,7 +158,9 @@ namespace rb
 	RB_API CushionImpactResult ResolveMirror(const Vec3& VelocityLocal, const Vec3& OmegaLocal, double Restitution);
 
 	// Port of pooltool's Stronge compliant cushion model (XREF-02), LOCAL frame, with OmegaRatio,
-	// restitution and friction as in pooltool (prior-art 2.8 / pitfall 12: Apache-2.0 attribution).
+	// restitution and friction as in pooltool (prior-art 2.8 / pitfall 12: Apache-2.0 attribution). Equal to
+	// pooltool 0.6.0 for e >= 1 / OmegaRatio (its defaults); below that pooltool's regime test is wrong and gains
+	// energy, and this implementation follows Stronge's model instead (CushionStronge.cpp).
 	RB_API CushionImpactResult ResolveStronge(const Vec3& VelocityLocal, const Vec3& OmegaLocal, const BallSpec& Spec, double Elevation, double Restitution,
 		double Friction, double OmegaRatio);
 
@@ -170,7 +172,8 @@ namespace rb
 	// Dispatcher (4.7): on-cloth edge/face contacts -> OnClothModel (Mathavan: theta_c for edges,
 	// theta = beta_v and e_f = k_f e_c for facing faces; Han / Mirror / StrongeCompliant when selected);
 	// airborne, liner, rim, rail top and rail-top edges -> GRI with the element's e/mu. Applies the
-	// resting-contact rule (v_n < RestSpeed -> e = 0). Output in the world frame; the caller classifies
+	// resting-contact rule (v_n < RestSpeed -> e = 0; on the cloth v_Y := 0 and nothing else for EVERY model, so
+	// the ball never leaves the contact still approaching). Output in the world frame; the caller classifies
 	// (ClassifyState) and re-predicts.
 	RB_API CushionImpactResult ResolveFixedContact(const FixedContact& Contact, const BallState& Ball, const BallSpec& Spec, const CushionParams& Cushion,
 		const PocketContactParams& Pocket, const ClothParams& Cloth, const NumericsConfig& Numerics);

@@ -40,7 +40,8 @@
 //    (Tests/Core/Cushion/TestMathavanGate.cpp): M-2..M-4 within 1.0e-4 of the N = 20 000 reference (tolerance 2e-4),
 //    every larger N passes too; 4th-order convergence above N = 12. The slip-slip evaluation (the common mode) has a
 //    fast path with the normalisations folded into its products (EvaluateSlipSlip); ~1.9 us per typical hit (A-CUSH-2).
-//    If the loop budget ever ran out, the plain integrator (N >= 200) redoes the impact.
+//    If the loop budget runs out (rare: a slip creeping just above s_eps, see IntegrateSplit), the plain integrator
+//    (N >= 200) redoes the impact.
 #include "rb/Physics/Cushion.h"
 
 #include "rb/Core/Assert.h"
@@ -274,6 +275,10 @@ namespace rb
 					for (int k = 0; k < MaxBisections; ++k)
 					{
 						const double Half = 0.5 * (Lo + Hi);
+						if (!(Half > Lo && Half < Hi))
+						{
+							break; // the bracket cannot shrink any more (every further halving would be a no-op)
+						}
 						PlainStep(M, Y, Half, Mid);
 						if (Mid.Y[kVY] > 0.0)
 						{
@@ -315,6 +320,10 @@ namespace rb
 					for (int k = 0; k < MaxBisections; ++k)
 					{
 						const double Half = 0.5 * (Lo + Hi);
+						if (!(Half > Lo && Half < Hi))
+						{
+							break;
+						}
 						PlainStep(M, Y, Half, Mid);
 						const double DwMid = 0.5 * Half * (Abs(Y.Y[kVY]) + Abs(Mid.Y[kVY])) * M.Cos;
 						if (WorkRestitution + DwMid < Target)
@@ -1184,8 +1193,11 @@ namespace rb
 			return Limited;
 		}
 
-		// Returns false if the loop budget ran out before the end of restitution (not seen in the random sweeps of
-		// Tests/Core/Cushion; the caller then falls back to the plain integrator).
+		// Returns false if the loop budget ran out before the end of restitution; the caller then falls back to the plain
+		// integrator. Measured in the WP-4 review: a slip that passes CLOSE TO (not through) zero and then creeps just above
+		// s_eps (stick marginally infeasible) stays in Slip mode with steps held at kStabilityFactor |s| / kappa, so the
+		// budget can run out: ~1 in 1e5 rail hits at the default mu_w, ~3 in 1e4 at mu_w 0.1-0.3 (~0.2 ms each instead
+		// of ~2 us; accuracy then that of the plain N = 200 scheme, COL_Mathavan_CreepingSlipNearZeroStaysAccurate).
 		bool IntegrateSplit(const Model& M, State& Y, double Restitution, int Steps, int MaxIterations, double& ImpulseOut)
 		{
 			const double VY0 = Y.Y[kVY];

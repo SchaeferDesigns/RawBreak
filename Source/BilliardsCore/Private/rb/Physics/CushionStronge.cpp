@@ -18,11 +18,16 @@
 //   sticking:              d(s/U)/dtheta = -OmegaRatio^2 u,   du/dtheta = s/U  (harmonic)
 //   slip -> stick when the slider velocity vanishes: s/U = mu eta^2 dS/dtheta;
 //   stick -> slip when |u| reaches the friction limit mu eta^2 S(theta).
-// Regimes (as in the model): gross slip (r > mu ((1 + e) beta' - eta^2 / e)), initial stick (r < mu eta^2),
-// otherwise slip - stick - slip. The final slip after a stick phase acts along the spring force: this
+// Regimes: initial stick (r < mu eta^2), gross slip (r > mu max(beta', (1 + e) beta' - eta^2 / e): the slider
+// velocity stays positive over the whole impact; the beta' term matters only for e < 1 / OmegaRatio, where pooltool
+// 0.6.0 misclassifies and gains energy - see StrongeFinalSlipRatio), otherwise slip - stick - slip. Checked against a
+// direct time integration of the spring-slider contact (Tests/Core/Cushion/TestCushionAdversarial.cpp).
+// The final slip after a stick phase acts along the spring force: this
 // implementation takes its sign from the deflection at the release (pooltool 0.6.0 always uses the reversed
 // direction; the two agreed to 7e-15 on a 300-case random oracle sweep with e in [0.3, 1], mu in [0.05, 0.4]
-// and OmegaRatio in [1.2, 1.95]). The normal impulse is (1 + e) m U. The velocities follow from the impulses
+// and OmegaRatio in [1.2, 1.95]; after the review's regime fix, 3000 such cases agree to 1e-15 wherever
+// e >= 1 / OmegaRatio and differ only below it, where the direct integration sides with this implementation).
+// The normal impulse is (1 + e) m U. The velocities follow from the impulses
 // (pitfall 1: normal k_hat from the contact to the center, r_I = -R k_hat).
 #include "rb/Physics/Cushion.h"
 
@@ -136,15 +141,17 @@ namespace rb
 			const double Mu = P.Mu;
 			const double Beta = P.BetaRatio;
 			const double Eta2 = P.EtaSquared;
-			StickOut = false;
-
-			if (R > Mu * ((1.0 + P.E) * Beta - Eta2 / P.E))
-			{
-				// Gross slip for the whole impact.
-				return R - Mu * Beta * (1.0 + P.E);
-			}
 			StickOut = true;
 
+			// Regimes by the slider velocity g(theta) = r - mu beta' p(theta) - mu eta^2 S'(theta) (header). g(0) = r - mu eta^2:
+			// initial stick below. dg/dtheta = mu S (eta^2 - beta') < 0 in compression and mu S (eta^2 / e^2 - beta') in
+			// restitution, so min g is g(theta_end) = r - mu ((1 + e) beta' - eta^2 / e) for e >= 1 / OmegaRatio and
+			// g(pi/2) = r - mu beta' for e < 1 / OmegaRatio (g rises again during restitution). Gross slip needs min g > 0.
+			// REVIEW FIX (WP-4 review): pooltool 0.6.0 tests only g(theta_end), and before the initial-stick test. For
+			// e < 1 / OmegaRatio that threshold drops below mu beta' (and below mu eta^2 for e < 1 / OmegaRatio^2), so it
+			// took slip-stick-slip and initial-stick impacts for gross slip, applied friction against a reversed slider and
+			// fed energy in (up to 5e-2 J at OmegaRatio 1.07, e = 0.6). For e >= 1 / OmegaRatio (pooltool's defaults e_c =
+			// 0.85, omega_ratio 1.8: XREF-02) both give bitwise the same result.
 			if (R < Mu * Eta2)
 			{
 				// Initial stick (the spring starts unloaded); it holds through compression (sin(Rho x) <= Rho sin(x)).
@@ -155,13 +162,19 @@ namespace rb
 				const double Release = StickReleaseTheta(St, P, kHalfPi, ThetaEnd);
 				return FinishAfterStick(St, P, Release, ThetaEnd);
 			}
+			if (R > Mu * Max(Beta, (1.0 + P.E) * Beta - Eta2 / P.E))
+			{
+				// Gross slip for the whole impact.
+				StickOut = false;
+				return R - Mu * Beta * (1.0 + P.E);
+			}
 
 			// Slip, then stick where the slider velocity vanishes, then slip again.
 			double ThetaStick = 0.0;
 			const double X = R / Mu - Beta;
 			if (R <= Mu * Beta)
 			{
-				// During compression: cos(theta) = (r/mu - beta') / (eta^2 - beta').
+				// During compression: cos(theta) = (r/mu - beta') / (eta^2 - beta') (always here for e < 1 / OmegaRatio).
 				const double C = Clamp(X / (Eta2 - Beta), -1.0, 1.0);
 				ThetaStick = Acos(C);
 			}

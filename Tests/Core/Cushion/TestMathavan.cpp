@@ -175,6 +175,21 @@ RB_TEST(VAL_CUSH02_MeasuredRollingRebound)
 		SumSq += Diff * Diff;
 	}
 	RB_CHECK(rb::Sqrt(SumSq / 8.0) <= 0.05);
+
+	// Reported (WP-4 review): the literal "snooker set" (snooker ball, h = 7R/5, mu_s = 0.212) with the game's default law
+	// misses the +-0.08 band at 3.5 m/s (+0.099) and the RMS (0.057); with the 0.07 fit law it is worse (the fit was made
+	// with pool geometry). Spec conflict recorded for the spec owner (collisions OQ 2 / 10).
+	double MaxSnooker = 0.0;
+	double SumSqSnooker = 0.0;
+	for (double V0 : Speeds)
+	{
+		const rb::Vec3 V{0.0, V0, 0.0};
+		const rb::CushionImpactResult S = rb::ResolveMathavan(V, RollingOmega(V, kSnookerR), SnookerBall(), SnookerMathavan(rb::CushionRestitution(V0, Default)));
+		const double Diff = -S.Velocity.y - MeasuredRebound(V0);
+		MaxSnooker = rb::Max(MaxSnooker, rb::Abs(Diff));
+		SumSqSnooker += Diff * Diff;
+	}
+	std::printf("  CUSH-02 literal snooker set, default law: max |diff| %.4f (band 0.08), RMS %.4f (0.05) [reported]\n", MaxSnooker, rb::Sqrt(SumSqSnooker / 8.0));
 }
 
 RB_TEST(VAL_CUSH03_Mathavan2010ParametersReproduceTheData)
