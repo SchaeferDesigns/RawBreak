@@ -47,7 +47,8 @@ namespace rb
 	// [rad] theta_c = asin((h - R)/R) = asin(0.27) = 15.66427 deg. (equipment 11.1 / T-CUSH-2 print 0.2733943 rad,
 	// which contradicts their own 15.66427 deg and collisions C-G1 / verification log: asin(0.27) = 0.2733930.)
 	inline constexpr double kCushionContactAngle = 0.27339303146747335;
-	inline constexpr double kCushionContactOffsetXY = 0.027513733700867; // [m] R_c = R cos(theta_c) = 0.0275137 (DERIVED)
+	// [m] R_c = R cos(theta_c) = sqrt(R^2 - (h - R)^2) = 0.0275137 (DERIVED); the exact double ComputeCushionContact returns.
+	inline constexpr double kCushionContactOffsetXY = 0.02751373370586951;
 	inline constexpr double kCushionWidth = 0.0508;              // [m] nose to feather strip
 	inline constexpr double kCushionNoseProfileRadius = 0.001;   // [m] ART ONLY (physics uses r_n = 0)
 	inline constexpr double kFacingThicknessPro = 0.003175;      // [m]

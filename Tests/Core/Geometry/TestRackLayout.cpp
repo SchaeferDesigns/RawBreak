@@ -83,7 +83,7 @@ namespace
 					const double Raw = Uo < Gaps.OutlierProbability ? Gaps.OutlierMin + (Gaps.OutlierMax - Gaps.OutlierMin) * U : Gaps.Mean + Gaps.Jitter * (2.0 * U - 1.0);
 					A[N] = i;
 					B[N] = j;
-					G[N] = Max(0.0, Raw);
+					G[N] = IsFinite(Raw) ? Max(0.0, Raw) : 0.0;
 					++N;
 				}
 			}
@@ -438,6 +438,143 @@ RB_TEST(Geometry_RackGapsArgumentsAndDisplacement)
 	ApplyRackGaps(Q, Center.Count, 4, kD, kRackGapSloppyBar, 3);
 	RB_CHECK(Q[0].x < Center.Positions[0].x && Q[12].x > Center.Positions[12].x);
 	RB_CHECK(Q[4] == Center.Positions[4]);
+}
+
+RB_TEST(Geometry_RackGapsNonFiniteParameters)
+{
+	// Review fix: a non-finite gap parameter (e.g. an uninitialised or divided-by-zero rack quality) produced infinite
+	// targets and NaN ball positions. Non-finite gaps now count as 0 like NaN ones: every target 0 -> the frozen lattice
+	// is kept bitwise; a mixed rack stays finite and overlap-free.
+	const Rack Lattice = MakeRack(RackShape::Triangle15, RackAnchor::ApexOnFootSpot, 0.635, kD);
+	const RackGapParams AllInfinite[] = {{kInfinity, 0.0, 0.0, 0.0, 0.0}, {0.0, kInfinity, 0.0, 0.0, 0.0}, {0.0, 0.0, 1.0, kInfinity, kInfinity},
+		{0.0, 0.0, 1.0, 0.0, kInfinity}, {std::nan(""), std::nan(""), std::nan(""), std::nan(""), std::nan("")}, {-kInfinity, 0.0, 0.0, 0.0, 0.0}};
+	for (const RackGapParams& Gaps : AllInfinite)
+	{
+		for (std::uint64_t Seed = 0; Seed < 20; ++Seed)
+		{
+			Vec2 P[kMaxRackSites];
+			for (int i = 0; i < Lattice.Count; ++i)
+			{
+				P[i] = Lattice.Positions[i];
+			}
+			ApplyRackGaps(P, Lattice.Count, 0, kD, Gaps, Seed);
+			for (int i = 0; i < Lattice.Count; ++i)
+			{
+				RB_CHECK(IsFinite(P[i].x) && IsFinite(P[i].y));
+				// Every draw is infinite (-> 0), NaN (-> 0) or a uniform over [0, inf) whose value is infinite.
+				RB_CHECK(P[i] == Lattice.Positions[i]);
+			}
+		}
+	}
+	// Half the contacts infinite (outlier branch), the others a normal wooden-rack gap: finite, no overlap.
+	const RackGapParams Mixed{0.02e-3, 0.02e-3, 0.5, kInfinity, kInfinity};
+	for (std::uint64_t Seed = 0; Seed < 50; ++Seed)
+	{
+		Vec2 P[kMaxRackSites];
+		for (int i = 0; i < Lattice.Count; ++i)
+		{
+			P[i] = Lattice.Positions[i];
+		}
+		ApplyRackGaps(P, Lattice.Count, 0, kD, Mixed, Seed);
+		for (int i = 0; i < Lattice.Count; ++i)
+		{
+			RB_CHECK(IsFinite(P[i].x) && IsFinite(P[i].y) && Length(P[i] - Lattice.Positions[i]) < 1e-3);
+		}
+		RB_CHECK(MinPairDistance(P, Lattice.Count) >= kD);
+		RB_CHECK(P[0] == Lattice.Positions[0]);
+	}
+}
+
+RB_TEST(Geometry_RackGapsCoincidentAndPerturbedInputs)
+{
+	// Review fix: two coincident input centres have no center line, so every projection skipped them; after 256 sweeps
+	// the "guaranteed" scaling fallback did nothing either (closest distance 0) and the rack left with two balls on top of
+	// each other. Coincident centres now separate along +x (deterministic); the postcondition (anchor bitwise, no pair
+	// closer than D) holds for any finite input, also for perturbed, partly overlapping non-lattice positions.
+	const Rack Lattice = MakeRack(RackShape::Triangle15, RackAnchor::ApexOnFootSpot, 0.635, kD);
+	for (const int Anchor : {0, 4})
+	{
+		for (const int Twin : {1, 4, 7, 14})
+		{
+			for (const RackGapParams& Gaps : {kRackGapWoodenRack, kRackGapSloppyBar, kRackGapMixture})
+			{
+				Vec2 P[kMaxRackSites];
+				for (int i = 0; i < Lattice.Count; ++i)
+				{
+					P[i] = Lattice.Positions[i];
+				}
+				const int Other = Twin == 1 ? 2 : 1;
+				P[Other] = P[Twin]; // a stacked site
+				const Vec2 AnchorBefore = P[Anchor];
+				ApplyRackGaps(P, Lattice.Count, Anchor, kD, Gaps, 5);
+				RB_CHECK(P[Anchor] == AnchorBefore);
+				RB_CHECK(MinPairDistance(P, Lattice.Count) >= kD);
+				for (int i = 0; i < Lattice.Count; ++i)
+				{
+					RB_CHECK(IsFinite(P[i].x) && IsFinite(P[i].y));
+				}
+			}
+		}
+	}
+	// The failing cases: a stacked pair whose own target gap is 0 and that no other contact pulls apart asymmetrically
+	// (here: isolated from the three-ball group that carries the gaps). Gaps are 0 or 0.1 mm per contact; every seed
+	// with a 0 on the stacked pair ended with the two balls on top of each other: with a 0.1 mm gap elsewhere because
+	// no projection could separate them, with all gaps 0 because the zero-gap early exit returned the input as it was.
+	int Stacked = 0;
+	for (std::uint64_t Seed = 0; Seed < 64; ++Seed)
+	{
+		Vec2 P[5] = {{0.0, 0.0}, {0.5 * Sqrt(3.0) * kD, -0.5 * kD}, {0.5 * Sqrt(3.0) * kD, 0.5 * kD}, {0.3, 0.2}, {0.3, 0.2}};
+		const RackGapParams ZeroOrOutlier{0.0, 0.0, 0.5, 0.1e-3, 0.1e-3};
+		ApplyRackGaps(P, 5, 0, kD, ZeroOrOutlier, Seed);
+		RB_CHECK(P[0] == (Vec2{0.0, 0.0}));
+		RB_CHECK(MinPairDistance(P, 5) >= kD);
+		Stacked += Length(P[4] - P[3]) < kD ? 1 : 0;
+	}
+	RB_CHECK(Stacked == 0);
+	// kRackGapNone: a frozen lattice stays bitwise (ARCH_RACK1_MixtureAndZeroGaps), a stacked site is separated.
+	{
+		Vec2 P[kMaxRackSites];
+		for (int i = 0; i < Lattice.Count; ++i)
+		{
+			P[i] = Lattice.Positions[i];
+		}
+		P[9] = P[8];
+		ApplyRackGaps(P, Lattice.Count, 0, kD, kRackGapNone, 1);
+		RB_CHECK(P[0] == Lattice.Positions[0]);
+		RB_CHECK(MinPairDistance(P, Lattice.Count) >= kD);
+		for (int i = 0; i < Lattice.Count; ++i)
+		{
+			RB_CHECK(Length(P[i] - Lattice.Positions[i]) < 2.0 * kD); // separated locally, not blown apart
+		}
+	}
+	// Degenerate: every ball on one point (the projection sweeps or the scaling fallback must still separate them).
+	for (const RackGapParams& Gaps : {kRackGapNone, kRackGapSloppyBar})
+	{
+		Vec2 P[kMaxRackSites];
+		for (int i = 0; i < kMaxRackSites; ++i)
+		{
+			P[i] = {0.635, 0.0};
+		}
+		ApplyRackGaps(P, kMaxRackSites, 3, kD, Gaps, 9);
+		RB_CHECK(P[3] == (Vec2{0.635, 0.0}));
+		RB_CHECK(MinPairDistance(P, kMaxRackSites) >= kD);
+	}
+	// Random finite perturbations of the lattice (up to +-0.4 mm per coordinate, many pairs overlapping).
+	Rng Stream(424242);
+	for (int n = 0; n < 300; ++n)
+	{
+		Vec2 P[kMaxRackSites];
+		for (int i = 0; i < Lattice.Count; ++i)
+		{
+			P[i] = Lattice.Positions[i] + Vec2{Stream.NextUniform(-0.4e-3, 0.4e-3), Stream.NextUniform(-0.4e-3, 0.4e-3)};
+		}
+		const int Anchor = static_cast<int>(Stream.NextBelow(15u));
+		const Vec2 AnchorBefore = P[Anchor];
+		const RackGapParams Gaps{Stream.NextUniform(0.0, 0.2e-3), Stream.NextUniform(0.0, 0.2e-3), Stream.NextUniform(0.0, 0.3), 0.1e-3, 0.5e-3};
+		ApplyRackGaps(P, Lattice.Count, Anchor, kD, Gaps, static_cast<std::uint64_t>(n));
+		RB_CHECK(P[Anchor] == AnchorBefore);
+		RB_CHECK(MinPairDistance(P, Lattice.Count) >= kD);
+	}
 }
 
 RB_TEST(Geometry_Slow_BuildAndRackTiming)

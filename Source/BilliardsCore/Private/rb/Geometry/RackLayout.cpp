@@ -65,15 +65,39 @@ namespace rb
 			double Target = 0.0; // D + g [m]
 		};
 
+		// Separates two coincident centres to distance Target along +x (see ProjectPair).
+		void ProjectCoincident(Vec2* P, int A, int B, int Anchor, double Target)
+		{
+			if (A == Anchor)
+			{
+				P[B].x += Target;
+			}
+			else if (B == Anchor)
+			{
+				P[A].x -= Target;
+			}
+			else
+			{
+				P[A].x -= 0.5 * Target;
+				P[B].x += 0.5 * Target;
+			}
+		}
+
 		// Moves A and B along their center line so that |p_B - p_A| = Target: each ball takes half of the
-		// correction; a fixed ball (the anchor) does not move and the other takes all of it.
+		// correction; a fixed ball (the anchor) does not move and the other takes all of it. Coincident centres
+		// (no center line; not produced by a lattice, but a stacked input site must not survive) separate along +x
+		// (B ahead of A), deterministically. Non-finite positions are left alone.
 		void ProjectPair(Vec2* P, int A, int B, int Anchor, double Target)
 		{
 			const Vec2 Delta = P[B] - P[A];
 			const double Dist = Length(Delta);
 			if (!(Dist > 0.0))
 			{
-				return; // coincident centres: no direction (cannot occur for a lattice input)
+				if (Dist == 0.0)
+				{
+					ProjectCoincident(P, A, B, Anchor, Target);
+				}
+				return;
 			}
 			const Vec2 Correction = Delta * ((Target - Dist) / Dist);
 			if (A == Anchor)
@@ -100,7 +124,8 @@ namespace rb
 			const double ValueDraw = Stream.NextDouble01();
 			const double Gap = OutlierDraw < Gaps.OutlierProbability ? Gaps.OutlierMin + (Gaps.OutlierMax - Gaps.OutlierMin) * ValueDraw
 			                                                         : Gaps.Mean + Gaps.Jitter * (2.0 * ValueDraw - 1.0);
-			return Max(0.0, Gap); // also maps NaN parameters to 0
+			// Negative, NaN and infinite gaps count as 0 (an infinite target would turn every position into NaN).
+			return IsFinite(Gap) ? Max(0.0, Gap) : 0.0;
 		}
 	}
 
@@ -177,7 +202,22 @@ namespace rb
 		}
 		if (!AnyGap)
 		{
-			return; // every target gap is 0: the frozen lattice is already the exact solution (kept bitwise)
+			// Every target gap is 0: a frozen lattice is already the exact solution (kept bitwise; its rounding is
+			// ~1e-16 D). Only an input that overlaps (a stacked or perturbed site, not a lattice) goes on to the
+			// steps below, so the postcondition "no pair closer than D" holds for it too.
+			const double Frozen = D * (1.0 - kProjectionMargin);
+			bool Overlapping = false;
+			for (int i = 0; i < Count && !Overlapping; ++i)
+			{
+				for (int j = i + 1; j < Count && !Overlapping; ++j)
+				{
+					Overlapping = Length(Positions[j] - Positions[i]) < Frozen;
+				}
+			}
+			if (!Overlapping)
+			{
+				return;
+			}
 		}
 
 		// Rows: balls grouped by x (ascending), each row sorted by y (ascending); ties keep the input order.
@@ -331,7 +371,8 @@ namespace rb
 		}
 		if (Overlap)
 		{
-			// Guaranteed fallback (never observed): scale the rack about the anchor until the closest pair is D.
+			// Fallback (never observed; the sweeps separate every finite input, coincident centres included): scale
+			// the rack about the anchor until the closest pair is D.
 			double MinDist = kInfinity;
 			for (int i = 0; i < Count; ++i)
 			{

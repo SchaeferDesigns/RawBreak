@@ -96,6 +96,8 @@ namespace rb::human
 	// streak-guarded like 3.2 (DrawPerShot with History, a cache rebuilt on mismatch, and Params.StreakGuard; plain for
 	// rollout keys); U23-U26 = PlainUniform. ExecuteStroke then runs with the AI's own attributes and a StrokeSituation built
 	// like the player's (pressure incl. MoneyGameStakes, fatigue, Intoxication through StrokeIntoxication: principle 4).
+	// The synthetic hand is the AI's INPUT: Params.NoiseScale does not scale it; a ChannelMask bit of channel 20-22 switches
+	// that flaw off. BallRadius <= 0 or BridgeToGrip <= 0 fall back to the standard ball and 0.80 m.
 	RB_API IntendedStroke SyntheticHand(const PlannedStroke& Plan, const AiCharacter& Character, const StrokeSituation& Situation, double BallRadius,
 		const NoiseKey& Key, const NoiseHistory& History, const HumanParams& Params);
 }

@@ -56,8 +56,9 @@ namespace rb
 	// Apex (row 0) center x for a rack whose anchor sits on the foot spot: FootSpotX for ApexOnFootSpot,
 	// FootSpotX - 2 dx (= x_FS - sqrt(3) D) for CenterOnFootSpot, with the lattice row spacing dx of
 	// BuildRackLattice. dx is (sqrt 3 / 2) D rounded UP to a multiple of 2^-44 m (< 6e-14 m): then
-	// ApexX + 2 dx == FootSpotX exactly (|FootSpotX| < 256 m), so the anchor ball lies bitwise on the spot,
-	// and no lattice distance is below D.
+	// ApexX + 2 dx == FootSpotX exactly for dx <= FootSpotX < 256 m (every table: L/4 >= 0.48 m; ApexX is then no
+	// larger in magnitude than FootSpotX, so no bit is lost), the anchor ball lies bitwise on the spot, and no
+	// lattice distance is below D. (A foot spot closer than dx to the center, or a negative one, can miss by an ulp.)
 	RB_API double RackApexX(RackShape Shape, RackAnchor Anchor, double FootSpotX, double BallDiameter);
 
 	// Site index (BuildRackLattice order) of the ball that sits on the foot spot: 0 for ApexOnFootSpot,
@@ -79,21 +80,23 @@ namespace rb
 	//   1. Nominal contacts: input pairs with |p_i - p_j| <= D (1 + 1e-7), in canonical pair order (i < j,
 	//      sorted by i then j). One target gap g_c per contact from rb::Rng(Seed), two draws per contact
 	//      always (u_o, u): g = OutlierMin + (OutlierMax - OutlierMin) u if u_o < OutlierProbability, else
-	//      Mean + Jitter (2u - 1); then g = max(0, g). If every g_c is 0 (kRackGapNone) the positions are
-	//      left unchanged (the frozen lattice is the exact solution).
+	//      Mean + Jitter (2u - 1); then g = max(0, g), and a NaN or infinite g is 0. If every g_c is 0
+	//      (kRackGapNone) and no input pair is closer than D (1 - 1e-9), the positions are left unchanged (the
+	//      frozen lattice is the exact solution); an overlapping input goes through steps 2-4.
 	//   2. Row expansion. Rows = balls grouped by x (within D/4), each sorted by y. Rows move away from the
 	//      anchor row along x by the mean target gap of the contacts between consecutive rows times 2/sqrt(3)
 	//      (cumulative); balls in a row move apart along y by the cumulative target gaps of their in-row
 	//      contacts, the anchor row centred on the anchor ball, every other row on the midpoint of its extremes.
 	//   3. Relaxation: 32 Gauss-Seidel sweeps over the contacts in canonical order, each projecting the pair
 	//      onto |p_i - p_j| = D + g_c with each ball moving half of the correction (a pair with the anchor:
-	//      the other ball moves all of it; the anchor never moves).
+	//      the other ball moves all of it; the anchor never moves). Coincident centres (a stacked input site)
+	//      are separated along +x, the higher index ahead.
 	//   4. Projection: sweeps over ALL pairs in canonical order separating any pair closer than D to
 	//      D (1 + 1e-9) (5.7e-11 m for pool balls, below the physics touching tolerance), repeated until no pair
 	//      is closer than D (at most 256 sweeps; tens are needed only for the outliers of kRackGapMixture). A
 	//      rack still overlapping after that (never observed) is scaled about the anchor until its closest pair
 	//      is D (1 + 1e-9).
-	// Result: anchor unchanged, no pair closer than D. For the per-contact uniform presets (tight, wooden,
+	// Result (any finite input positions): anchor unchanged, no pair closer than D. For the per-contact uniform presets (tight, wooden,
 	// sloppy) the mean realised gap of a rack is within 20 % of its mean target gap (A-RACK-1; the per-contact
 	// residual is the least-squares one, ~10-15 % of the mean). kRackGapMixture's isolated 0.1-0.5 mm outliers
 	// are geometrically inconsistent with their zero-gap neighbours: the projection that removes the resulting

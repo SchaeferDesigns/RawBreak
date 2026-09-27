@@ -39,7 +39,8 @@ namespace rb::human
 
 	RB_API WarpEffect ComputeWarp(const CueBodyState& Cue, const CueSpec& Spec, const NoiseKey& Key, const HumanParams& Params);
 
-	// Smallest bow the automatic pickup roll test notices: 1 mm at WarpCheck habit 0 -> 0.3 mm at 1, linear (HF-31, TUNING).
+	// Smallest bow the automatic pickup roll test notices: 1 mm at WarpCheck habit 0 -> 0.3 mm at 1, linear (HF-31, TUNING); the
+	// habit enters as UnitOrZero (a non-finite habit counts as 0).
 	RB_API double NoticeableBow(double WarpCheckHabit);
 
 	// Result of the automatic 1-2 s pickup roll test (A mode, always done): BowSag >= NoticeableBow(habit). In R mode the

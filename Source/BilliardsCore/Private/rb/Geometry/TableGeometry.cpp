@@ -27,6 +27,10 @@ namespace rb
 
 		double WrapTwoPi(double Angle) { return Angle - kTwoPi * Floor(Angle / kTwoPi); }
 
+		// Plan angle of a direction in (-pi, pi]: atan2 with a -0 y component turned into +0 (atan2(-0, x < 0) = -pi;
+		// directions built from sin/cos of exact angles such as a 90 deg cut carry -0 components).
+		double PlanAngle(const Vec2& V) { return Atan2(Tidy(V.y), V.x); }
+
 		// ---------------------------------------------------------------------------------------------
 		// Ids and mirrors (equipment 12.8: one corner and one side pocket, mirrored). The canonical quadrant
 		// is x >= 0, y >= 0: corner P3 (FootLeft), side P4 (SideLeft, its +x half), cushions C3 and C2.
@@ -145,8 +149,8 @@ namespace rb
 			Arc.TangentOnFacing = J.VirtualPoint + J.FacingDir * TangentOffset;
 			// Exposed arc: from Center, the tangent points lie along the outward normals of the two lines (NoseInward,
 			// PocketNormal), pi - C apart.
-			const double AngleNose = Atan2(J.NoseInward.y, J.NoseInward.x);
-			const double AngleFacing = Atan2(PocketNormal.y, PocketNormal.x);
+			const double AngleNose = PlanAngle(J.NoseInward);
+			const double AngleFacing = PlanAngle(PocketNormal);
 			Arc.AngleFrom = Cross(J.NoseInward, PocketNormal) > 0.0 ? AngleNose : AngleFacing;
 			Arc.AngleSweep = kPi - CutAngle;
 
@@ -174,19 +178,29 @@ namespace rb
 			return true;
 		}
 
-		// Front (table-side) arc of the drop-edge circle (Center, Radius): the arc through the circle's point
+		// Front (table-side) arc of the capture circle (Center, Radius): the arc through the circle's point
 		// nearest the table (FrontAngle) that stays inside the pocket opening, i.e. on the pocket side of both
 		// facing lines and in front of the rail faces (the cushion-back lines). Walking from the front point in
-		// each direction, the arc ends at the first crossing of any of these lines (for every real pocket a
-		// facing line; a hole narrower than the throat ends at a cushion-back line instead). Returns false if the
-		// front point itself is not inside the opening.
+		// each direction, the arc ends at the first crossing of any of these lines (a facing line on most presets;
+		// a hole whose wall reaches the cushion back before the facing, e.g. TABLE_7FT_78's side pockets, ends at
+		// a cushion-back line instead). Returns false if the front point itself is not inside the opening or if the
+		// whole circle is (no back wall under the rail).
 		struct HalfPlane
 		{
 			Vec2 Point;  // on the line
 			Vec2 Inward; // unit normal toward the allowed side
 		};
 
-		bool FrontArc(const Vec2& Center, double Radius, double FrontAngle, const HalfPlane* Planes, int Count, double& From, double& Sweep)
+		// Extent of the front arc about the front angle: it runs from FrontAngle - Cw to FrontAngle + Ccw; From is the
+		// start angle as atan2 returns it.
+		struct ArcExtent
+		{
+			double Cw = 0.0;
+			double Ccw = 0.0;
+			double From = 0.0;
+		};
+
+		bool FrontArc(const Vec2& Center, double Radius, double FrontAngle, const HalfPlane* Planes, int Count, ArcExtent& Out)
 		{
 			const Vec2 Front = Center + Vec2{Cos(FrontAngle), Sin(FrontAngle)} * Radius;
 			double BestCcw = kTwoPi;
@@ -210,7 +224,7 @@ namespace rb
 				for (const double Sign : {-1.0, 1.0})
 				{
 					const Vec2 X = Foot + Along * (Sign * HalfChord) - Center;
-					const double Angle = Atan2(X.y, X.x);
+					const double Angle = PlanAngle(X);
 					const double Ccw = WrapTwoPi(Angle - FrontAngle);
 					const double Cw = WrapTwoPi(FrontAngle - Angle);
 					if (Ccw < BestCcw)
@@ -226,12 +240,13 @@ namespace rb
 			}
 			if (BestCcw >= kTwoPi || BestCw >= kTwoPi)
 			{
-				From = FrontAngle - kPi; // the whole circle lies inside the opening
-				Sweep = kTwoPi;
-				return true;
+				// The whole circle lies inside the opening: the hole never reaches under the rail, so there is no back
+				// wall and the vertical rail faces behind the opening (not modelled) would be the pocket's back.
+				return false;
 			}
-			From = FromAngle;
-			Sweep = BestCw + BestCcw;
+			Out.Cw = BestCw;
+			Out.Ccw = BestCcw;
+			Out.From = FromAngle;
 			return true;
 		}
 
@@ -323,17 +338,32 @@ namespace rb
 			{
 				return false;
 			}
-			// Front (table-side) drop edge between the facings (collisions 5.3).
+			// Front (table-side) arc: "the capture circle's front arc between the facings" (collisions 5.3), i.e. where the
+			// r_p circle (slate cut, liner) lies inside the pocket opening. It serves the rim / drop edge (a_d, same angles:
+			// the a_d points outside it lie behind a facing plan line, which a ball on the shelf never reaches) and the hole
+			// wall (below the rim only on this arc, up to WallTopZ elsewhere). Taking it from the larger a_d circle would
+			// cut 4-9 deg off each end and leave a phantom back wall standing in the open mouth next to each facing.
 			const HalfPlane Opening[4] = {
 				{Incoming.VirtualPoint, Faces[0].PocketNormal},
 				{Outgoing.VirtualPoint, Faces[1].PocketNormal},
 				{Faces[0].End, -Incoming.RailNormal},
 				{Faces[1].End, -Outgoing.RailNormal},
 			};
-			if (!FrontArc(G.CaptureCenter, G.DropEdgeRadius, Atan2(-Axis.y, -Axis.x), Opening, 4, G.FrontArcFrom, G.FrontArcSweep))
+			const double FrontAngle = PlanAngle(-Axis);
+			ArcExtent Hole;
+			ArcExtent Rim;
+			if (!FrontArc(G.CaptureCenter, G.CaptureRadius, FrontAngle, Opening, 4, Hole) ||
+				!FrontArc(G.CaptureCenter, G.DropEdgeRadius, FrontAngle, Opening, 4, Rim))
 			{
-				return false; // the circle's front point lies behind a facing or the rail: inconsistent pocket
+				return false; // the front point lies behind a facing or the rail, or the hole never reaches under the rail
 			}
+			// On every preset the a_d circle meets the facings 4-9 deg inside the r_p crossings, so the arc is the r_p one.
+			// A hole centred far behind a cushion-back line can let the rounding (a_d) reach the opening at angles where
+			// the slate cut (r_p) is already under the rail; the arc is widened to cover them, so a ball rolling onto the
+			// drop edge always finds it (the wall sector gained there lies under the rail, beside a rail face).
+			const ArcExtent& Start = Rim.Cw > Hole.Cw ? Rim : Hole;
+			G.FrontArcFrom = Start.From;
+			G.FrontArcSweep = Max(Hole.Cw, Rim.Cw) + Max(Hole.Ccw, Rim.Ccw);
 
 			Out.Pockets[Index] = G;
 			Out.JawArcs[2 * Index] = Arcs[0];
@@ -591,8 +621,11 @@ namespace rb
 					return false;
 				}
 			}
+			// The undercut facing and liner faces are tilted from vertical by less than 90 deg (a horizontal or flipped
+			// face has no contact normal; s_f = (R - (h - R) sin beta_v) / cos beta_v would blow up).
 			return Spec.Length > 0.0 && Spec.Width > 0.0 && Spec.CushionNoseHeight > 0.0 && Spec.CushionWidth > 0.0 &&
-				Spec.RailWidthTotal > Spec.CushionWidth && Spec.RailTopZ > 0.0;
+				Spec.RailWidthTotal > Spec.CushionWidth && Spec.RailTopZ > 0.0 && Abs(Spec.Backdraft) < 0.5 * kPi &&
+				Abs(Spec.LinerUndercut) < 0.5 * kPi;
 		}
 	}
 
@@ -705,9 +738,9 @@ namespace rb
 	{
 		CushionContactGeometry G;
 		const double Reach = BallRadius + NoseProfileRadius; // center to the profile circle's center at contact
-		if (!(Reach > 0.0))
+		if (!IsFinite(BallRadius) || !IsFinite(NoseHeight) || !IsFinite(NoseProfileRadius) || !(Reach > 0.0))
 		{
-			return G;
+			return G; // neutral default: no NaN / Inf leaks into a contact frame
 		}
 		const double Rise = NoseHeight - BallRadius; // nose above the ball's center
 		G.SinTheta = Clamp(Rise / Reach, -1.0, 1.0);
@@ -783,12 +816,13 @@ namespace rb
 		}
 
 		const int PerArc = SamplesPerArc < 2 ? 2 : SamplesPerArc;
-		int Needed = 0;
+		// 64-bit: 12 arcs x a huge SamplesPerArc must not wrap around and pass the capacity check.
+		std::int64_t Needed = 0;
 		for (const JawArc& Arc : Geometry.JawArcs)
 		{
-			Needed += (Arc.Radius > 0.0 ? PerArc : 1) + 1; // arc samples + the facing end
+			Needed += (Arc.Radius > 0.0 ? static_cast<std::int64_t>(PerArc) : 1) + 1; // arc samples + the facing end
 		}
-		if (Out == nullptr || Capacity < Needed)
+		if (Out == nullptr || static_cast<std::int64_t>(Capacity) < Needed)
 		{
 			return -1;
 		}

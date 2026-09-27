@@ -99,13 +99,18 @@ namespace rb
 		double CaptureRadius = 0.0;  // r_p: hole wall / liner cylinder [m]
 		double DropRadius = 0.0;     // r_d: slate-edge rounding [m]
 		double DropEdgeRadius = 0.0; // a_d = r_p + r_d: drop-edge trigger / pivot axis radius [m] (collisions pitfall 19)
-		// Front (table-side) drop edge: the arc of the a_d circle through its point nearest the table
-		// (CaptureCenter - a_d Axis) that stays inside the pocket opening (on the pocket side of both facing plan
-		// lines and in front of the cushion-back lines). Its ends are the front intersections with the two facing
-		// lines on every preset; a hole narrower than the throat ends at a cushion-back line instead (the rest of
-		// the circle lies under the rail: back wall up to WallTopZ).
-		double FrontArcFrom = 0.0;   // plan angle about CaptureCenter where the front (table-side) drop edge starts [rad]
-		double FrontArcSweep = 0.0;  // CCW sweep of the front drop edge between the facings, > 0 (< pi on every preset) [rad]
+		// Front (table-side) arc, "the capture circle's front arc between the facings" (collisions 5.3): the angular
+		// range about CaptureCenter where the r_p circle (slate cut / liner) lies inside the pocket opening (on the
+		// pocket side of both facing plan lines and in front of the cushion-back lines), through its point nearest the
+		// table (CaptureCenter - r_p Axis). Its ends are where the r_p circle meets the facing plan lines, or a
+		// cushion-back line where the wall reaches the cushion back first (TABLE_7FT_78 side pockets); the rest of the
+		// circle lies under the rail (back wall up to WallTopZ). The same angles bound the rim / drop edge at a_d: on
+		// every preset the a_d circle meets the facing lines 4-9 deg inside the r_p crossings (the a_d points beyond
+		// lie behind a facing, where no ball center on the shelf can be). A custom hole centred far behind a
+		// cushion-back line can let the a_d circle reach the opening at wider angles; the arc is then widened to the
+		// a_d circle's, so every drop-edge point in the opening is on the arc.
+		double FrontArcFrom = 0.0;   // plan angle about CaptureCenter where the front (table-side) arc starts, in (-pi, pi] [rad]
+		double FrontArcSweep = 0.0;  // CCW sweep of the front arc between the facings, > 0 (< pi on every preset) [rad]
 		double LinerUndercut = 0.0;  // beta_l [rad]
 		double Backdraft = 0.0;      // beta_v [rad]
 		// Hole wall / liner (collisions 5.3): cylinder r_p around CaptureCenter. On the FRONT arc (between the
@@ -251,14 +256,17 @@ namespace rb
 	// face bottom (0.4 CushionWidth, 0), nose (0, h), cushion back (CushionWidth, RailTopZ), outer edge
 	// (RailWidthTotal, RailTopZ). Landmarks use the expressions of rules::MakeRulesTable (bitwise equal).
 	// Returns ErrorCode::InvalidTable (Out = {Spec}, everything else empty) for a non-finite field,
-	// L, W, h, CushionWidth, RailTopZ <= 0, RailWidthTotal <= CushionWidth, a cut angle outside (0, pi), jaw
+	// L, W, h, CushionWidth, RailTopZ <= 0, RailWidthTotal <= CushionWidth, |Backdraft| or |LinerUndercut| >= pi/2
+	// (a horizontal or flipped face), a cut angle outside (0, pi), jaw
 	// rounding longer than a facing or nose, facings that meet before the cushion back, a drop-edge circle
-	// that reaches a jaw point or whose front point lies behind a facing or the rail, or a cut disc that would
-	// reach a second pocket's rail pieces.
+	// that reaches a jaw point, a capture circle whose front point lies behind a facing or the rail or that lies
+	// entirely inside the pocket opening (no back wall under the rail), or a cut disc that would reach a second
+	// pocket's rail pieces.
 	RB_API ErrorCode BuildTableGeometry(const TableSpec& Spec, TableGeometry& Out);
 
 	// theta_c, R_c for a ball of radius R against a nose at height h with profile radius r_n (physics: 0).
 	// |h - R| > R + r_n is clamped (sin = +-1, R_c = 0). PooltoolCompat: HorizontalOffset = R (equipment 12.2).
+	// A non-finite input or R + r_n <= 0 returns the default (sin 0, cos 1, theta 0, offset 0).
 	RB_API CushionContactGeometry ComputeCushionContact(double BallRadius, double NoseHeight, double NoseProfileRadius, bool PooltoolCompat);
 
 	// Horizontal center-to-facing-plan-line distance at contact for a ball ON THE SHELF:

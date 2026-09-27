@@ -8,6 +8,7 @@
 
 #include "rb/Config.h"
 #include "rb/Geometry/RackLayout.h"
+#include "rb/Human/Skill.h"
 #include "rb/Human/TipState.h"
 
 #include <cstdint>
@@ -37,21 +38,30 @@ namespace rb::human
 	// Coins one by one plus the slide: Coins x 1 s + 2 s (HF-70, HF-B04 "coin insertion is per coin").
 	RB_API double CoinChoreDuration(int Coins, const ChoreTiming& Timing = ChoreTiming{});
 
-	// Leftover balls cleared before the next rack: linear in the balls left (HF-71, HF-B04).
+	// Leftover balls cleared before the next rack: linear in the balls left (HF-71, HF-B04), the middle of the 1.5-3 s range
+	// ((BallClearMin + BallClearMax) / 2) per ball.
 	RB_API double BallClearDuration(int BallsLeft, const ChoreTiming& Timing = ChoreTiming{});
 
 	// Chalking chore (4.1): AutoChalkTwists twists (A / C / P) of TwistDuration(H_chalk) each; aborting after k twists keeps
 	// exactly k twists of coverage (HF-B04). Returns the twists applied; Duration receives the seconds used.
+	// A / C / P give the same coverage bit for bit (sweep = ChalkHabit; TwistsBeforeAbort >= 0 aborts after that many twists,
+	// < 0 = no abort); Duration: A twists x TwistDuration, C 1.5 s (ChoreTiming::CutSeconds, 0 if nothing to do), P 0 (done while
+	// the opponent shoots). R: the player's TwistsBeforeAbort twists (< 0 = the automatic count) with the measured RitualSweep,
+	// clamped to [0, 1] (UnitOrZero: a NaN measurement is a drill, 0; likewise a NaN ChalkHabit), and every zone capped at the
+	// habit-1 result (the automatic count with sweep 1 from the same start), so extra twists never beat a maxed habit
+	// (principle 5); Duration twists x TwistDuration(ChalkHabit) as an estimate.
 	RB_API int PerformChalking(TipState& Tip, const ChalkCube& Cube, ChoreMode Mode, double ChalkHabit, double RitualSweep, int TwistsBeforeAbort,
 		double& Duration, const TipParams& Params = TipParams{});
 
 	// Rack quality -> micro-gaps (4.6): Mean = Jitter = 0.08 mm (1 - Q) + 0.005 mm Q; Q = H_rack in A / C mode, from the
-	// push-and-lift motion in R mode (capped at the habit-1 result Q = 1), the NPC's personality otherwise.
+	// push-and-lift motion in R mode (capped at the habit-1 result Q = 1), the NPC's personality otherwise. Q = UnitOrZero(Quality):
+	// a NaN (failed measurement) gives the loosest valid rack, never NaN gaps.
 	RB_API RackGapParams RackGapsForQuality(double Quality);
 
-	// The habitual result of a skipped chore (principle 5): a pure function of the habit, independent of real time.
-	constexpr double HabitualRackQuality(double RackHabit) { return RackHabit < 0.0 ? 0.0 : (RackHabit > 1.0 ? 1.0 : RackHabit); }
+	// The habitual result of a skipped chore (principle 5): a pure function of the habit, independent of real time (UnitOrZero: a
+	// corrupted, non-finite habit counts as 0).
+	constexpr double HabitualRackQuality(double RackHabit) { return UnitOrZero(RackHabit); }
 
-	// Ritual result capped at the habit-1 result: min(RitualQuality, 1) (principle 5, HF-B05).
-	constexpr double CapRitualResult(double RitualQuality) { return RitualQuality < 0.0 ? 0.0 : (RitualQuality > 1.0 ? 1.0 : RitualQuality); }
+	// Ritual result capped at the habit-1 result: min(RitualQuality, 1) (principle 5, HF-B05); a NaN measurement counts as 0.
+	constexpr double CapRitualResult(double RitualQuality) { return UnitOrZero(RitualQuality); }
 }

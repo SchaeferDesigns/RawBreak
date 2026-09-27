@@ -4,15 +4,29 @@
 
 namespace rb::human
 {
-	double ComputePressure(const PressureInputs& /*Inputs*/, PressureMode /*Mode*/, const PressureWeights& /*Weights*/)
+	double ComputePressure(const PressureInputs& Inputs, PressureMode Mode, const PressureWeights& Weights)
 	{
-		// TODO(WP-11): weighted sum of 3.4, clamp [0, 1], Subtle x0.5, Off 0.
-		return 0.0;
+		if (Mode == PressureMode::Off)
+		{
+			return 0.0;
+		}
+		const double Stakes = Clamp(Inputs.Stakes, 0.0, 1.0);
+		const double GameBall = Inputs.GameBall ? 1.0 : 0.0;
+		const double Hill = Inputs.Hill ? 1.0 : 0.0;
+		const double Crowd = Clamp(static_cast<double>(Inputs.Watchers) / 10.0, 0.0, 1.0);
+		const double Clock = Clamp(Inputs.ShotClockFraction, 0.0, 1.0);
+		const double Run = Clamp(static_cast<double>(Inputs.RunLength) / 8.0, 0.0, 1.0);
+		const double P = Clamp(Weights.Stakes * Stakes + Weights.GameBall * GameBall + Weights.Hill * Hill + Weights.Crowd * Crowd +
+			Weights.Clock * Clock + Weights.Run * Run, 0.0, 1.0);
+		return Mode == PressureMode::Subtle ? 0.5 * P : P;
 	}
 
-	double FatigueFromNight(double /*InGameHoursThisNight*/, bool /*Applies*/)
+	double FatigueFromNight(double InGameHoursThisNight, bool Applies)
 	{
-		// TODO(WP-11): clamp((hours - 2) / 2, 0, 1), 0 when not applicable (HF-16).
-		return 0.0;
+		if (!Applies || !(InGameHoursThisNight > 2.0))
+		{
+			return 0.0;
+		}
+		return Clamp((InGameHoursThisNight - 2.0) / 2.0, 0.0, 1.0);
 	}
 }
