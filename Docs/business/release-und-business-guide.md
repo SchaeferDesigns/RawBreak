@@ -853,3 +853,17 @@ Alle Zahlen, Fristen, Gebühren und Regeln wurden am 27.09.2026 gegen Primärque
 - Die Meta-Richtlinie zu simuliertem Glücksspiel: Die Seite war nicht lesbar.
 - Das Enddatum des zweiten BMFTR-Förderaufrufs.
 - Rechtsfragen, die mit **[StB]** oder **[RA]** markiert sind, bleiben beim Steuerberater bzw. Anwalt.
+
+---
+
+## Nachtrag (27.09.2026): Baden-Württemberg – MFG „Games BW“
+
+Colins Gewerbe sitzt in **Baden-Württemberg**, damit ist die Landesförderung der **MFG Baden-Württemberg („Games BW“)** relevant.
+
+- **Höhe (Stand MFG-Meldungen 2026):** Konzept-Zuschuss bis 20.000 €, Prototyp-Zuschuss bis 120.000 €, Produktion als bedingt rückzahlbares, zinsloses Darlehen (Zuschuss nur im begründeten Ausnahmefall) bis 500.000 €. Erste Förderrunde 2026: rund 668.000 € für 10 Projekte, darunter **Solo-Entwickler** [MFG-1].
+- **Voraussetzungen (Richtlinie):** Sitz/Betriebsstätte in BW; Altersfreigabe höchstens **USK 16**; Kriterienkatalog: je mindestens zwei Kriterien aus „Kultureller Kontext“ (z. B. Setting in Deutschland/EWR, deutsche Sprachfassung, deutsche Alltagskultur – die geplante **deutsche Kneipe** passt) und „Kreative Plattform“ (davon II.1 oder II.2: kreative Arbeit bzw. Team in BW) sowie mindestens eins aus „Innovation“ (z. B. Anwendung künstlicher Intelligenz, neue Technologie); Förderung im Abspann nennen; Eigenanteil nötig [MFG-2].
+- **Achtung:** Laut Richtlinie darf das **Vorhaben bei Antragstellung noch nicht begonnen sein**. RAW BREAK läuft bereits – ob eine spätere Phase (z. B. Produktion) noch förderfähig ist, **direkt bei der MFG klären** **[unsicher]**. Die gefundene Richtlinie (Stand 2019, Geltung bis 30.06.2025) ist älter als die aktuellen Förderbeträge; die aktuelle Fassung und die nächste Einreichfrist bei der MFG erfragen.
+- **Kontakt:** Iris Harr (harr@mfg.de, 0711 90715-414), Yannick Wiesner (wiesner@mfg.de, 0711 90715-412).
+
+Quellen: [MFG-1] https://www.mfg.de/aktuelles/details/4861-games-foerderung-des-landes-mfg-baden-wuerttemberg-vergibt-rund-668000-euro/ ·
+[MFG-2] https://games-bw.mfg.de/files/11_Games_BW/PDF/MFG_Gamesrichtlinie_GBW.pdf · https://wm.baden-wuerttemberg.de/de/service/foerderprogramme-und-aufrufe/liste-foerderprogramme/gamesbw
