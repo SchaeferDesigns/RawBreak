@@ -213,11 +213,15 @@ RB_TEST(MOT_Review_StrikeRejectsNonFiniteParameters)
 
 RB_TEST(MOT_Review_TipRecontactConservation)
 {
-	// Random tip-ball contacts (airborne ball: no table reaction): the impulse is along p_hat, the cue's axial momentum
-	// goes to the ball, the relative velocity along p_hat is reversed with e_tip, and the energy never grows.
+	// Random tip-ball contacts (airborne ball: no table reaction): the cue's axial momentum goes to the ball, the energy never
+	// grows, and the contact always separates along the normal n (integration round 2: the p_hat impulse alone left the pair
+	// approaching along n in many glancing configurations - the same contact then re-fired at the same instant, or the dome
+	// passed into the ball - so a frictionless normal impulse completes it). Without that completion (the p_hat impulse already
+	// separates the normal) the impulse is along p_hat and the relative velocity along p_hat is reversed with e_tip, as before.
 	rb::Rng Rng(0x71B5u);
 	const rb::BallSpec Spec = MotSpec();
 	int Hits = 0;
+	int Completed = 0;
 	for (int Case = 0; Case < 20000; ++Case)
 	{
 		rb::CueSpec Cue = rb::kCuePlaying19oz;
@@ -259,17 +263,30 @@ RB_TEST(MOT_Review_TipRecontactConservation)
 		}
 		++Hits;
 		const Vec3 Dv = Hit.Ball.Velocity - Ball.Velocity;
-		const Vec3 PHat = Dv / rb::Length(Dv);
-		RB_CHECK(rb::Dot(PHat, N) > 0.0); // pushes the ball away from the tip
-		const double NewCue = Hit.Tip.Speed0 > 0.0 ? Hit.Tip.Speed0 : TipSpeed - Hit.Impulse * rb::Dot(Path.Direction, PHat) / Cue.Mass;
+		RB_CHECK(rb::Dot(Dv, N) > 0.0); // pushes the ball away from the tip
+		// The tip moves along d only: its speed after follows from the axial momentum (a tip pushed backwards is clamped to rest
+		// in the path, so the momentum defines it).
+		const double NewCue = TipSpeed - kM * rb::Dot(Dv, Path.Direction) / Cue.Mass;
+		RB_CHECK(Hit.Tip.Speed0 == 0.0 || std::fabs(Hit.Tip.Speed0 - NewCue) <= 1e-11 * rb::Max(1.0, TipSpeed));
 		RB_CHECK(Hit.Ball.State == MotionState::Airborne);
-		RB_CHECK_NEAR(rb::Length(Dv), Hit.Impulse / kM, 1e-12 * rb::Max(1.0, Hit.Impulse / kM));
-		RB_CHECK_NEAR(kM * rb::Dot(Dv, Path.Direction) + Cue.Mass * NewCue, Cue.Mass * TipSpeed, 1e-11 * rb::Max(1.0, Cue.Mass * TipSpeed));
-		// Relative contact-point velocity along p_hat after = -e_tip * before.
+		RB_CHECK(rb::Length(Dv) <= Hit.Impulse / kM * (1.0 + 1e-12)); // two non-negative impulses along unit directions
+		// The contact separates along the normal (at least not approaching).
 		const Vec3 Q = -N * kR;
-		const double Before = rb::Dot(Path.Direction * TipSpeed - (Ball.Velocity + rb::Cross(Ball.Omega, Q)), PHat);
-		const double After = rb::Dot(Path.Direction * NewCue - (Hit.Ball.Velocity + rb::Cross(Hit.Ball.Omega, Q)), PHat);
-		RB_CHECK_NEAR(After, -Cue.TipRestitution * Before, 1e-10 * rb::Max(1.0, std::fabs(Before)));
+		const double NormalBefore = rb::Dot(Path.Direction * TipSpeed - (Ball.Velocity + rb::Cross(Ball.Omega, Q)), N);
+		const double NormalAfter = rb::Dot(Path.Direction * NewCue - (Hit.Ball.Velocity + rb::Cross(Hit.Ball.Omega, Q)), N);
+		RB_CHECK(NormalAfter <= 1e-10 * rb::Max(1.0, std::fabs(NormalBefore)));
+		if (std::fabs(rb::Length(Dv) - Hit.Impulse / kM) <= 1e-12 * rb::Max(1.0, Hit.Impulse / kM))
+		{
+			// A single impulse direction (no normal completion): relative contact-point velocity along p_hat after = -e_tip * before.
+			const Vec3 PHat = Dv / rb::Length(Dv);
+			const double Before = rb::Dot(Path.Direction * TipSpeed - (Ball.Velocity + rb::Cross(Ball.Omega, Q)), PHat);
+			const double After = rb::Dot(Path.Direction * NewCue - (Hit.Ball.Velocity + rb::Cross(Hit.Ball.Omega, Q)), PHat);
+			RB_CHECK_NEAR(After, -Cue.TipRestitution * Before, 1e-10 * rb::Max(1.0, std::fabs(Before)));
+		}
+		else
+		{
+			++Completed;
+		}
 		const double E0 = BallEnergy(Ball.Velocity, Ball.Omega, Spec) + 0.5 * Cue.Mass * TipSpeed * TipSpeed;
 		const double E1 = BallEnergy(Hit.Ball.Velocity, Hit.Ball.Omega, Spec) + 0.5 * Cue.Mass * NewCue * NewCue;
 		RB_CHECK(E1 <= E0 * (1.0 + 1e-12));
@@ -278,6 +295,7 @@ RB_TEST(MOT_Review_TipRecontactConservation)
 		RB_CHECK(!(Hit.Tip.Speed0 > 0.0 && Path.Deceleration > 0.0) || Hit.Tip.Deceleration == Path.Deceleration);
 	}
 	RB_CHECK(Hits > 5000);
+	RB_CHECK(Completed > 0); // the normal completion is exercised
 }
 
 RB_TEST(MOT_Review_TableReactionBranches)

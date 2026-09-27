@@ -358,7 +358,16 @@ RB_TEST(Integ_VAL_ROB11_Slow_FullBenchmarkSets)
 
 // VAL ROB-12: energy monitor - total mechanical energy (translational + rotational + lift) never increases along a segment or across
 // a cue-free event (+1e-12 J), except at the stick events (the cue strike and follow-through tip impulses); ball-ball events are
-// checked on the pair's total.
+// checked on the pair's total. (Integration round 2: the lift is measured from the resting height WITH its sign - a ball falling
+// into a pocket below the cloth converts potential energy; the clamped MechanicalEnergy of Motion.h read every pocket fall as a gain.)
+namespace
+{
+	double SignedEnergy(const BallState& S, const BallSpec& Spec, double Gravity)
+	{
+		return 0.5 * Spec.Mass * LengthSquared(S.Velocity) + 0.5 * Spec.Inertia * LengthSquared(S.Omega) + Spec.Mass * Gravity * (S.Position.z - Spec.Radius);
+	}
+}
+
 RB_TEST(VAL_ROB12_EnergyNeverIncreasesBetweenEvents)
 {
 	const TableGeometry& T = NineFoot();
@@ -377,14 +386,14 @@ RB_TEST(VAL_ROB12_EnergyNeverIncreasesBetweenEvents)
 		{
 			if (E.Type == ShotEventType::BallBall)
 			{
-				const double Before = KineticEnergy(E.Pre[0], In.Balls[E.A].Spec, G) + KineticEnergy(E.Pre[1], In.Balls[E.B].Spec, G);
-				const double After = KineticEnergy(E.Post[0], In.Balls[E.A].Spec, G) + KineticEnergy(E.Post[1], In.Balls[E.B].Spec, G);
+				const double Before = SignedEnergy(E.Pre[0], In.Balls[E.A].Spec, G) + SignedEnergy(E.Pre[1], In.Balls[E.B].Spec, G);
+				const double After = SignedEnergy(E.Post[0], In.Balls[E.A].Spec, G) + SignedEnergy(E.Post[1], In.Balls[E.B].Spec, G);
 				Increases += After > Before + 1e-12 ? 1 : 0;
 				++Checked;
 			}
 			else if (E.Type == ShotEventType::BallCushion || E.Type == ShotEventType::BallJaw || E.Type == ShotEventType::MotionTransition)
 			{
-				Increases += KineticEnergy(E.Post[0], In.Balls[E.A].Spec, G) > KineticEnergy(E.Pre[0], In.Balls[E.A].Spec, G) + 1e-12 ? 1 : 0;
+				Increases += SignedEnergy(E.Post[0], In.Balls[E.A].Spec, G) > SignedEnergy(E.Pre[0], In.Balls[E.A].Spec, G) + 1e-12 ? 1 : 0;
 				++Checked;
 			}
 		}
@@ -396,8 +405,8 @@ RB_TEST(VAL_ROB12_EnergyNeverIncreasesBetweenEvents)
 				{
 					continue;
 				}
-				const double Start = KineticEnergy(EvaluateSegment(S.Motion, 0.0), In.Balls[b].Spec, G);
-				const double End = KineticEnergy(EvaluateSegment(S.Motion, S.T1 - S.Motion.T0), In.Balls[b].Spec, G);
+				const double Start = SignedEnergy(EvaluateSegment(S.Motion, 0.0), In.Balls[b].Spec, G);
+				const double End = SignedEnergy(EvaluateSegment(S.Motion, S.T1 - S.Motion.T0), In.Balls[b].Spec, G);
 				Increases += End > Start + 1e-12 ? 1 : 0;
 				++Checked;
 			}

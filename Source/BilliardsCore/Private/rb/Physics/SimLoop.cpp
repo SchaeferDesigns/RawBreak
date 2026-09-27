@@ -974,7 +974,33 @@ namespace rb::sim
 					{
 						continue;
 					}
-					const ContactPrediction P = PredictBallBall(TipSeg, TipRadius, Ws.Balls[j].Seg, Rj, N.TimeHorizon, N);
+					MotionSegment From = TipSeg;
+					if (Tip.StrikeContactOpen && j == Tip.Path.StruckBall)
+					{
+						// The strike's own contact (SimInternal.h): search only from the separation of the dome and the ball on.
+						const MotionSegment& BallSeg = Ws.Balls[j].Seg;
+						const double RefTime = Max(From.T0, BallSeg.T0);
+						const double Gap = Length(PositionAt(BallSeg, RefTime - BallSeg.T0) - PositionAt(From, RefTime - From.T0)) - (TipRadius + Rj);
+						if (Gap > N.ContactTol)
+						{
+							Tip.StrikeContactOpen = false; // seen apart: an ordinary tip slot from now on
+						}
+						else
+						{
+							const double End = Min(From.T0 + From.TauEnd, SegmentLimit(Ws, BallSeg));
+							const double Separation = FirstUpCrossing(BallBallGapPolynomial(From, TipRadius + N.ContactTol, BallSeg, Rj, RefTime), 0.0, End - RefTime);
+							if (!(Separation < kInfinity))
+							{
+								continue; // still touching until the tip or the ball segment ends (the next segment re-predicts)
+							}
+							const double Tau = RefTime + Separation - From.T0;
+							From.Pos0 = From.Pos0 + From.Vel0 * Tau + From.Accel2 * (Tau * Tau);
+							From.Vel0 = From.Vel0 + From.Accel2 * (2.0 * Tau);
+							From.T0 += Tau;
+							From.TauEnd -= Tau;
+						}
+					}
+					const ContactPrediction P = PredictBallBall(From, TipRadius, Ws.Balls[j].Seg, Rj, N.TimeHorizon, N);
 					++Ws.Result->Diagnostics.Predictions;
 					if (!P.Found || (j == ExcludeBall && P.Time == ExcludeTime))
 					{

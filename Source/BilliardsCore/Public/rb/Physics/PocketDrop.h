@@ -12,11 +12,16 @@
 // General inertia (DERIVED): energy (1 + k)/2 m (v^2 - v0^2) = m g rho (1 - cos psi), so
 // v(psi)^2 = v0^2 + b sin^2(psi/2) with b = 4 g rho / (1 + k) ((20/7) g rho for k = 2/5), and with
 // x = sin(psi/2) = sqrt(a/b) sinh(u), a = v0^2: T(psi) = (2 rho / sqrt(b)) integral_0^U du / sqrt(1 - (a/b) sinh^2 u).
-// The pivot keeps the tangential velocity along the edge (straight, as the spec) and rolls without slip in
-// both directions: w = (v(psi)/R) t_e + (v_t/R)(sin psi z_hat - cos psi n_e) + w_z0 e_r, where e_r is the
-// direction from the axis to the center; the last term keeps the pre-pivot spin about the contact normal
-// (w_z on the cloth), so a ball rolling onto the edge has no spin jump at psi = 0 (spec: |w| = v/R for
-// v_t = w_z0 = 0).
+// The pivot keeps the tangential speed along the edge and rolls without slip in both directions:
+// w = (v(psi)/R) t_e + (v_t/R)(sin psi z_hat - cos psi n_e) + w_z0 e_r, where e_r is the direction from the axis
+// to the center; the last term keeps the pre-pivot spin about the contact normal (w_z on the cloth), so a ball
+// rolling onto the edge has no spin jump at psi = 0 (spec: |w| = v/R for v_t = w_z0 = 0).
+// Along the edge (integration round 2, cross-package fix; v1 drifted STRAIGHT along the crossing tangent): the rounding
+// axis is the circle a_d about the capture center, so the whole meridian-plane pivot (axis point, n_e, t_e, the state)
+// turns about the pocket's vertical axis by theta(tau) = -v_t tau / a_d (the axis point moves along the circle at v_t).
+// The center then stays exactly rho from the rounding axis: the straight drift of v1 put a ball entering at an angle
+// up to a few mm INTO the rounded slate edge at the leave (rim-torus overlap diagnostics, VAL ROB-11). The speeds, the
+// leave angle and T_p are unchanged (energy as the spec); v_t = 0 gives bitwise the v1 path.
 
 #include "rb/Config.h"
 #include "rb/Core/Tolerances.h"
@@ -71,6 +76,9 @@ namespace rb
 		Vec3 Velocity0;               // ball velocity at the DropEdge event [m/s] (Immediate leave: unchanged)
 		Vec3 Omega0;                  // ball spin at the DropEdge event [rad/s] (Immediate leave: unchanged; its z
 		                              //   component is kept as spin about the contact normal during the pivot)
+		// Integration round 2 additions: the rounding axis is a circle, so the tangential motion follows it (see EvaluatePivot).
+		Vec3 AxisCenter;              // center of the rounding-axis circle: the capture center at z = -r_d [m]
+		double AxisRadius = 0.0;      // its radius a_d = r_p + r_d [m] (0: no curvature, the straight drift of v1)
 	};
 
 	// Builds the pivot for a ball on the cloth whose center is exactly on the drop-edge circle.

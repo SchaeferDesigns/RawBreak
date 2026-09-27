@@ -691,6 +691,26 @@ namespace rb::sim
 				loop::HandOffToIsland(Ws, Seed, Time); // tip and ball at zero relative speed, pressed together: the island's IslandTip
 				return;
 			}
+			if (Ball == Tip.Path.StruckBall)
+			{
+				Tip.StrikeContactOpen = false; // predicted from the separation on: a genuine re-contact (double hit)
+			}
+			// Zeno detector (architecture 9 guard 5) for the tip-ball pair too (integration round 2): tip-ball pairs had no guard,
+			// and a re-contact that left the pair approaching along the normal was found again at the same instant with ever smaller
+			// impulses (4073 TipRecontacts at one time, the 20 000 event cap: VAL ROB-11 B1 shot 5476). The cause is fixed in
+			// ResolveTipRecontact (non-penetration, CueStrike.h); this is the termination backstop every other contact pair has:
+			// 8 contacts of the pair within ZenoWindow go to the island, whose IslandTip resolves a sustained tip contact with a force
+			// model. Key: ball-feature slot with Kind None and Index 0xF0 + strike (no table feature uses Kind None).
+			const TableFeatureRef TipKey{TableFeatureKind::None, static_cast<std::uint8_t>(0xF0 + Strike), 0};
+			if (RecordZenoContact(Ws, Ball, -1, TipKey, Time))
+			{
+				EmitZenoGuard(Ws, Ball, -1, TipKey, Time);
+				IslandSeed Seed;
+				Seed.BallA = Ball;
+				Seed.Zeno = true;
+				loop::HandOffToIsland(Ws, Seed, Time);
+				return;
+			}
 			const CueSpec& Cue = Ws.Input->Strikes[Strike].Input.Cue;
 			const BallState Before = BallStateForEvent(Ws, Ball, Time);
 			const TipRecontactResult R =
@@ -887,6 +907,7 @@ namespace rb::sim
 				Tip.FrozenTarget = static_cast<BallId>(Frozen);
 				Tip.ContactBall = static_cast<BallId>(Ball);
 				Tip.ContactEnd = R.ContactDuration;
+				Tip.StrikeContactOpen = true; // the strike resolved this contact incl. the slate reaction (SimInternal.h)
 
 				ShotEvent Event = MakeEvent(0.0, ShotEventType::CueStrike, Ball);
 				Event.Feature = static_cast<std::uint8_t>(k);

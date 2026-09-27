@@ -160,8 +160,20 @@ RB_TEST(COL_PivotPathContinuityAndGeometry)
 	RB_CHECK(MaxAbsDiff(S0.Omega, In.Omega) * kR <= 1e-15);
 	RB_CHECK(S0.State == rb::MotionState::PocketPivot);
 
-	// Along the path: the center stays on the circle rho about the axis (plus the straight tangential drift), rolling
-	// without slip on the edge, and the energy (1 + k)/2 m v^2 + m g z is conserved.
+	// Along the path: the center stays on the circle rho about the axis point, which moves along the rounding-axis circle a_d
+	// at v_t (the meridian plane turns about the pocket axis by -v_t tau / a_d; integration round 2), so the center is exactly
+	// rho from the rounding axis (never inside the rounded edge); rolling without slip on the edge, and the energy
+	// (1 + k)/2 m v^2 + m g z is conserved.
+	RB_CHECK_NEAR(Path.AxisRadius, Pocket.DropEdgeRadius, 1e-15);
+	RB_CHECK(Path.AxisCenter.x == Pocket.CaptureCenter.x && Path.AxisCenter.y == Pocket.CaptureCenter.y && Path.AxisCenter.z == Path.AxisPoint.z);
+	const auto TurnedFrame = [&Path](double Tau, rb::Vec3& AxisPoint, rb::Vec3& Normal, rb::Vec3& Tangent)
+	{
+		const double Theta = -Path.TangentialSpeed * Tau / Path.AxisRadius;
+		const auto Turn = [Theta](const rb::Vec3& V) { return rb::Vec3{rb::Cos(Theta) * V.x - rb::Sin(Theta) * V.y, rb::Sin(Theta) * V.x + rb::Cos(Theta) * V.y, V.z}; };
+		AxisPoint = Path.AxisCenter + Turn(Path.AxisPoint - Path.AxisCenter);
+		Normal = Turn(Path.EdgeNormal);
+		Tangent = Turn(Path.EdgeTangent);
+	};
 	const double K = rb::InertiaFactor(Ball);
 	const double Energy0 = 0.5 * (1.0 + K) * rb::LengthSquared(S0.Velocity) + kG * S0.Position.z;
 	double LastPsiZ = S0.Position.z;
@@ -169,9 +181,17 @@ RB_TEST(COL_PivotPathContinuityAndGeometry)
 	{
 		const double Tau = Path.Result.Duration * i / 20.0;
 		const rb::BallState S = rb::EvaluatePivot(Path, Tau);
-		const rb::Vec3 Arm = S.Position - Path.AxisPoint - Path.EdgeTangent * (Path.TangentialSpeed * Tau);
+		rb::Vec3 AxisPoint;
+		rb::Vec3 Normal;
+		rb::Vec3 Tangent;
+		TurnedFrame(Tau, AxisPoint, Normal, Tangent);
+		const rb::Vec3 Arm = S.Position - AxisPoint;
 		RB_CHECK_NEAR(rb::Length(Arm), kRho, 1e-12);
-		RB_CHECK_NEAR(rb::Dot(Arm, Path.EdgeTangent), 0.0, 1e-12);
+		RB_CHECK_NEAR(rb::Dot(Arm, Tangent), 0.0, 1e-12);
+		// Distance to the rounding-axis circle (the torus of the rim from inside, collisions 5.3) is rho: no rim overlap.
+		const rb::Vec3 Rel = S.Position - Path.AxisCenter;
+		const double Horizontal = rb::Sqrt(Rel.x * Rel.x + Rel.y * Rel.y);
+		RB_CHECK_NEAR(rb::Sqrt((Horizontal - Path.AxisRadius) * (Horizontal - Path.AxisRadius) + Rel.z * Rel.z), kRho, 1e-12);
 		const rb::Vec3 ContactPointVelocity = S.Velocity + rb::Cross(S.Omega, rb::Normalized(Arm) * (-kR));
 		RB_CHECK(rb::Length(ContactPointVelocity) <= 1e-12);
 		RB_CHECK_NEAR(0.5 * (1.0 + K) * rb::LengthSquared(S.Velocity) + kG * S.Position.z, Energy0, 1e-9);
@@ -179,12 +199,16 @@ RB_TEST(COL_PivotPathContinuityAndGeometry)
 		LastPsiZ = S.Position.z;
 	}
 
-	// The leave state: psi_leave, v_leave (cos psi n_e - sin psi z) + v_t t_e, State = PocketFall.
+	// The leave state: psi_leave, v_leave (cos psi n_e - sin psi z) + v_t t_e in the turned frame, State = PocketFall.
 	const rb::BallState Leave = rb::PivotLeaveState(Path);
 	RB_CHECK(Leave.State == rb::MotionState::PocketFall);
 	const double Psi = Path.Result.LeaveAngle;
+	rb::Vec3 LeaveAxis;
+	rb::Vec3 LeaveNormal;
+	rb::Vec3 LeaveTangent;
+	TurnedFrame(Path.Result.Duration, LeaveAxis, LeaveNormal, LeaveTangent);
 	const rb::Vec3 ExpectedV =
-		(Path.EdgeNormal * rb::Cos(Psi) - rb::Vec3::UnitZ() * rb::Sin(Psi)) * Path.Result.LeaveSpeed + Path.EdgeTangent * Path.TangentialSpeed;
+		(LeaveNormal * rb::Cos(Psi) - rb::Vec3::UnitZ() * rb::Sin(Psi)) * Path.Result.LeaveSpeed + LeaveTangent * Path.TangentialSpeed;
 	RB_CHECK(MaxAbsDiff(Leave.Velocity, ExpectedV) <= 1e-12);
 	RB_CHECK(MaxAbsDiff(Leave.Position, rb::EvaluatePivot(Path, Path.Result.Duration).Position) <= 1e-15);
 	// N = 0 there: g cos(psi) = v_leave^2 / rho.
@@ -196,8 +220,12 @@ RB_TEST(COL_PivotPathContinuityAndGeometry)
 	// psi(tau) inverts T(psi): the time to reach the angle at tau, integrated independently, is tau.
 	const double TauMid = 0.37 * Path.Result.Duration;
 	const rb::BallState Mid = rb::EvaluatePivot(Path, TauMid);
-	const rb::Vec3 ArmMid = Mid.Position - Path.AxisPoint - Path.EdgeTangent * (Path.TangentialSpeed * TauMid);
-	const double PsiMid = rb::Atan2(rb::Dot(ArmMid, Path.EdgeNormal), ArmMid.z);
+	rb::Vec3 MidAxis;
+	rb::Vec3 MidNormal;
+	rb::Vec3 MidTangent;
+	TurnedFrame(TauMid, MidAxis, MidNormal, MidTangent);
+	const rb::Vec3 ArmMid = Mid.Position - MidAxis;
+	const double PsiMid = rb::Atan2(rb::Dot(ArmMid, MidNormal), ArmMid.z);
 	RB_CHECK_NEAR(ReferencePivotTime(Path.PivotSpeed0, kRho, K, PsiMid) / TauMid, 1.0, 2e-4);
 }
 

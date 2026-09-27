@@ -184,7 +184,10 @@ RB_TEST(Sim_Review_DisjointBallsDoNotReplayTipContacts)
 		}
 		if (Run != 0)
 		{
-			PlaceRolling(In, 1, {0.9, Y, kR}, {0.3, 1.0, 0.0}); // into the side cushion within 5 ms, then transitions
+			// Into the side cushion within 5 ms, then transitions. (Integration round 2: at (0.9, Y) moving (0.3, 1.0) the ball met
+			// the cue ball after its foot-rail rebound once the real landing physics ran; at the head end of the other side rail it
+			// stays > 0.2 m from every point of the cue ball's path.)
+			PlaceRolling(In, 1, {-0.9, -Y, kR}, {-0.1, -0.5, 0.0});
 		}
 		ShotResult& R = ResultSlot();
 		RB_REQUIRE(Sim.Run(In, R) == SimStatus::Ok);

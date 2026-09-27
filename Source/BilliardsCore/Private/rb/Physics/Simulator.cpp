@@ -166,6 +166,23 @@ namespace rb
 				{
 					return ErrorCode::InvalidState; // on the cloth height under a rail
 				}
+				// (integration round 2) On the cloth height with the center over a pocket hole: past the drop-edge circle a_d
+				// (Level A; the capture circle r_p for CaptureCircle) there is no support (collisions 5.4: a center that reaches
+				// the circle always falls), and pocket states are the simulator's. A ball exactly on the lip (within ContactTol) is
+				// valid (5.5: a stopped ball on the circle has not crossed it). Accepting it made an island "project" such a ball
+				// back onto the circle - centimetres, into its neighbour.
+				if (OnCloth)
+				{
+					for (int p = 0; p < Table.Pockets.Size(); ++p)
+					{
+						const PocketGeometry& Pocket = Table.Pockets[p];
+						const double Edge = Params.Pockets == PocketModel::CaptureCircle ? Pocket.CaptureRadius : Pocket.DropEdgeRadius;
+						if (Length(Plan - Pocket.CaptureCenter) < Edge - Numerics.ContactTol)
+						{
+							return ErrorCode::InvalidState;
+						}
+					}
+				}
 				ClassifyState(S, Spec.Radius, SupportZ, Numerics);
 				States[b] = S;
 				Contexts[b] = Context;

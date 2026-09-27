@@ -620,6 +620,10 @@ RB_TEST(Integ_ARCH_ISL2_Slow_PressingIslandsCpu)
 			std::unique_ptr<Scene> S = Case == 0 ? PressingPair() : SpinPressedIntoRail();
 			S->Input.Record.Trajectories = false;
 			rb::Simulator Sim;
+			// A warm simulator and result, as in the game and the AI (architecture 12: one Simulator per worker, ShotResult reserved once
+			// and reused): the first Run of a fresh pair reserves the result buffers (about 5.8 MB at the default capacity) and touches
+			// the workspace pages, which is not simulation CPU (integration round 2: that made up ~0.07 ms of the 1.0 ms Z-3 gate).
+			Sim.Run(S->Input, S->Result);
 			const auto Start = std::chrono::steady_clock::now();
 			Sim.Run(S->Input, S->Result);
 			Times[Case][Repeat] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();

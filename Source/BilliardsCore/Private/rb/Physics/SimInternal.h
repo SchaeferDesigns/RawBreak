@@ -58,6 +58,13 @@
 //    ResolveTipRecontact answered with no impulse is not found again by a later re-prediction (the tip passes on). Tip slots are
 //    re-predicted by ReplaceSegment / MakeTerminal (every moving tip that is not InIsland), so an island that releases a tip
 //    (TipSlot::InIsland = false, new Path) does so before its last member's ReplaceSegment.
+//  * The strike's own tip contact (integration round 2, cross-package fix WP-1 / WP-6a). StrikeCueBall resolves the whole
+//    tip-ball interaction of the stroke at t = 0 incl. the slate reaction (sequential for jump cues, pinched for masse; MOT B.8.1,
+//    B.8.3: "handled inside the strike"). The follow-through dome starts touching the struck ball, and after an elevated stroke
+//    the slate rebound drives the ball back into it at once: a TipRecontact at t = 0 would resolve the same interaction twice (it
+//    took a 4 m/s, 50 deg jump shot from the 21 cm hop of MOT T-B14 down to 4 cm). While TipSlot::StrikeContactOpen, the tip slot
+//    therefore searches the struck ball only from the time the dome and the ball separate (first up-crossing of their gap); the
+//    flag clears once they are seen apart, or at a genuine later re-contact (a double hit).
 //  * Pair observers (jump-over, ball freeze-leave) of an event-mode ball against a partner inside an island are void (never
 //    emitted); the partner's return to event mode recomputes them. The island evaluates its members' own crossings (8.7).
 //  * An open event-mode tip contact (TipSlot::ContactBall != kNoBall, pending TipContactEnd at TipSlot::ContactEnd) whose tip
@@ -157,6 +164,9 @@ namespace rb::sim
 		bool StruckTouchedOther = false;    // struck ball touched a ball other than f or a rail
 		int OpenCueTipSegment = -1;         // index into Result.CueTips of the open piece
 		double ContactEnd = 0.0;            // (v1 addition) event mode: time of the pending TipContactEnd of ContactBall [s]
+		bool StrikeContactOpen = false;     // (integration round 2) the dome still touches / overlaps the struck ball since the strike:
+		                                    //   that interaction (incl. the slate reaction and the pinch) is StrikeCueBall's (MOT B.8.3),
+		                                    //   so the tip slot searches the struck ball only from their separation on
 	};
 
 	// Island bookkeeping (architecture 8.8).

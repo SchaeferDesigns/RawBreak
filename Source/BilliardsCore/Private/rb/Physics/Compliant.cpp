@@ -1544,10 +1544,13 @@ namespace rb
 			ApplyNormal(C, C.Normal * WarmN);
 			ApplyTangent(C, WarmT);
 		}
+		// The sweep's largest velocity change max(|dJ_n| / m_n, |dJ_t| / m_t) <= EpsV is tested as |dJ_n| <= EpsV m_n and
+		// |dJ_t|^2 <= (EpsV m_t)^2 per contact (integration round 2, WP-3 hot path: no division and no square root per contact and
+		// sweep; the rigid step dominates the Z-3 CPU gate A-ISL-2). The same test up to the rounding of the threshold products.
 		const double ConvergedSpeed = Tolerances.EpsV;
 		for (int Iteration = 0; Iteration < Settings.RigidIterations; ++Iteration)
 		{
-			double LargestChange = 0.0;
+			bool Converged = true;
 			for (int c = 0; c < ContactCount; ++c)
 			{
 				RigidContact& C = Contacts[c];
@@ -1557,7 +1560,7 @@ namespace rb
 				const double NewImpulse = Max(0.0, C.ImpulseN + (C.Target - Separation) * C.NormalMass);
 				const double Delta = NewImpulse - C.ImpulseN;
 				C.ImpulseN = NewImpulse;
-				LargestChange = Max(LargestChange, Abs(Delta) / C.NormalMass);
+				Converged = Converged && Abs(Delta) <= ConvergedSpeed * C.NormalMass;
 				if (Delta != 0.0)
 				{
 					const Vec3 Impulse = C.Normal * Delta;
@@ -1583,10 +1586,11 @@ namespace rb
 				}
 				const Vec3 DeltaT = NewT - C.ImpulseT;
 				C.ImpulseT = NewT;
-				LargestChange = Max(LargestChange, Length(DeltaT) / C.TangentMass);
+				const double TangentLimit = ConvergedSpeed * C.TangentMass;
+				Converged = Converged && LengthSquared(DeltaT) <= TangentLimit * TangentLimit;
 				ApplyTangent(C, DeltaT);
 			}
-			if (LargestChange <= ConvergedSpeed)
+			if (Converged)
 			{
 				break;
 			}

@@ -1264,14 +1264,16 @@ namespace rb::sim
 
 		// Plan distance [m] a cloth member can move from where it is before MemberObservers or MemberExit could report anything for
 		// it: the nearest line-crossing threshold (line +- LineCrossEps), drop-edge (capture) circle and side of the nose-line
-		// rectangle. 0 where the tests depend on more than the plan position: rail-top members, airborne members (jump-over) and
-		// pending initial-freeze bits (the other balls' positions).
+		// rectangle, and for pending initial rail freezes LeaveDistance minus the member's gap to each frozen rail feature (the plan
+		// gaps of MemberObservers are 1-Lipschitz in the plan position; integration round 2: a ball pressed along the rail, frozen to
+		// it at t = 0 like Z-3, ran both tests at every step - a fifth of the A-ISL-2 CPU). 0 where the tests depend on more than the
+		// plan position: rail-top members, airborne members (jump-over) and pending initial ball freezes (the other balls' positions).
 		double ExitClearance(const Workspace& Ws, const IslandBody& Body)
 		{
 			const TableGeometry& Table = TableOf(Ws);
 			const BallSlot& B = Ws.Balls[Body.Ball];
 			const NumericsConfig& N = Ws.Params.Numerics;
-			if (!Body.ClothSupport || Body.Position.z - Body.Radius > N.EpsZ || B.InitialFreezeRails != 0 || B.InitialFreezeBalls != 0)
+			if (!Body.ClothSupport || Body.Position.z - Body.Radius > N.EpsZ || B.InitialFreezeBalls != 0)
 			{
 				return 0.0;
 			}
@@ -1294,6 +1296,31 @@ namespace rb::sim
 				const double C = Line == static_cast<int>(TableLine::LongString) ? P.y : P.x;
 				Clear = Min(Clear, Abs(C - Lines[Line]) - N.LineCrossEps);
 			}
+			if (B.InitialFreezeRails != 0)
+			{
+				// The same gaps as MemberObservers' freeze-leave test.
+				const double Rc = ComputeCushionContact(Body.Radius, Table.Spec.CushionNoseHeight, Ws.Params.Cushion.NoseProfileRadius,
+					Ws.Params.Cushion.PooltoolCompat).HorizontalOffset;
+				for (int Rail = 0; Rail < kRailFeatureCount; ++Rail)
+				{
+					if (((B.InitialFreezeRails >> Rail) & 1u) == 0)
+					{
+						continue;
+					}
+					double Gap = kInfinity;
+					if (Rail < kCushionCount && Rail < Table.Noses.Size())
+					{
+						const NoseSegment& Nose = Table.Noses[Rail];
+						Gap = Dot(P - Nose.Start, Nose.InwardNormal) - Rc;
+					}
+					else if (Rail >= kCushionCount && Rail - kCushionCount < Table.JawArcs.Size())
+					{
+						const JawArc& Arc = Table.JawArcs[Rail - kCushionCount];
+						Gap = Length(P - Arc.Center) - (Arc.Radius + Rc);
+					}
+					Clear = Min(Clear, N.LeaveDistance - Gap);
+				}
+			}
 			return Clear > 1e-9 ? Clear - 1e-9 : 0.0; // NaN (a missing line) -> 0
 		}
 
@@ -1315,19 +1342,24 @@ namespace rb::sim
 				{
 					continue;
 				}
-				// A rail-top member settling on the cap while pressed by another member stays (a pile-up on the rail).
-				if (Kind == ExitKind::Cap)
+				// A rail-top member settling on the cap while pressed by another member stays (a pile-up on the rail). So does a cloth
+				// member reaching a drop-edge (capture) circle while another member still touches it (integration round 2): pocket
+				// states never join islands and island members have no contacts with pocket-state balls, so a ball released into the
+				// pocket at the speed it had one step into a collision (about zero) was passed through by the ball pushing it, and the
+				// next island met that overlap (an explosion to 40 m/s). Held until the pair has separated by LeaveDistance, it
+				// leaves with its post-collision velocity (over the flat cloth plane of the island for the fraction of a millisecond).
+				double NearestGap = kInfinity;
+				for (int j = 0; j < I.Solver.BodyCount(); ++j)
 				{
-					bool Touching = false;
-					for (int j = 0; j < I.Solver.BodyCount() && !Touching; ++j)
+					const IslandBody& Other = I.Solver.Body(j);
+					if (j != k)
 					{
-						const IslandBody& Other = I.Solver.Body(j);
-						Touching = j != k && Length(Other.Position - Body.Position) - (Other.Radius + Body.Radius) <= Ws.Params.Numerics.LeaveDistance;
+						NearestGap = Min(NearestGap, Length(Other.Position - Body.Position) - (Other.Radius + Body.Radius));
 					}
-					if (Touching)
-					{
-						continue;
-					}
+				}
+				if ((Kind == ExitKind::Cap || Kind == ExitKind::DropEdge || Kind == ExitKind::Capture) && NearestGap <= Ws.Params.Numerics.LeaveDistance)
+				{
+					continue;
 				}
 				const int Ball = Body.Ball;
 				IslandBody Out;
@@ -1344,11 +1376,12 @@ namespace rb::sim
 				case ExitKind::DropEdge:
 				{
 					// The center crossed the drop-edge circle within the step: the pivot starts on the circle (radial projection,
-					// at most v dt).
+					// at most v dt). A member held by a touching neighbour (above) may be deeper inside: it starts where it is when the
+					// projection would take it toward a remaining member (EnterPocketOverDropEdge accepts a center just inside).
 					const PocketGeometry& G = TableOf(Ws).Pockets[Where];
 					const Vec2 H = XY(S.Position) - G.CaptureCenter;
 					const double Rho = Length(H);
-					if (Rho > 0.0)
+					if (Rho > 0.0 && G.DropEdgeRadius - Rho < NearestGap - Ws.Params.Numerics.ContactTol)
 					{
 						const Vec2 OnCircle = G.CaptureCenter + H * (G.DropEdgeRadius / Rho);
 						S.Position.x = OnCircle.x;

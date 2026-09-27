@@ -339,12 +339,20 @@ RB_TEST(VAL_ROB15_EventCapTruncatesZenoChase)
 	}
 
 	// The Zeno detector alone back on (its defaults: 8 contacts of the pair within 10 ms): the 8th contact goes to an island.
+	// (Integration round 2: with the real WP-6b island and guard 3 still off, the rigid island's contacts bounce (e > 0 at every
+	// speed), the island exits and the topspin chain starts again, so the detector fires once per chain - never an impulse on
+	// the 8th contact, and ZenoGuard logged exactly once per trigger. The stub island of WP-6a swallowed the balls after the first.)
 	Guarded = P;
 	Guarded.Numerics.ZenoContactCount = NumericsConfig{}.ZenoContactCount;
 	ShotResult& G = ResultSlot(2);
 	RB_REQUIRE(Sim.Run(Setup(Guarded, 20000), G) == SimStatus::Ok);
-	RB_CHECK(G.Diagnostics.ZenoTriggers == 1);
-	RB_CHECK(Count(G, ShotEventType::ZenoGuard) == 1);
+	RB_CHECK(G.Diagnostics.ZenoTriggers >= 1);
+	RB_CHECK(Count(G, ShotEventType::ZenoGuard) == G.Diagnostics.ZenoTriggers);
+	// Every guard at its default (guard 3 back on): the micro-impact rule and the rigid island end the chain after one trigger.
+	ShotResult& D = ResultSlot(3);
+	RB_REQUIRE(Sim.Run(Setup(ValParams(), 20000), D) == SimStatus::Ok);
+	RB_CHECK(D.Diagnostics.ZenoTriggers <= 1);
+	RB_CHECK(Count(D, ShotEventType::ZenoGuard) == D.Diagnostics.ZenoTriggers);
 	const ShotEvent* Zeno = First(G, ShotEventType::ZenoGuard);
 	RB_REQUIRE(Zeno != nullptr);
 	int Before = 0;
