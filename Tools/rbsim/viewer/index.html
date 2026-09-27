@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rbsim viewer</title>
+<!--
+  rbsim viewer - plays an rbsim JSON result ("rbsim": 2) top-down for debugging before Unreal exists.
+  Owner: WP-7 (output, playback & tools). Self-contained: no external libraries, no network.
+  Usage: rbsim --speed 2 --ball 1:0.5,0 --geometry --dt 0.002 --out shot.json, then open this file in a browser and
+  load / drop shot.json. --geometry adds the exact nose outline, pockets and rail tops; --dt sets the sample spacing
+  (the viewer interpolates linearly between samples; every segment boundary is a sample).
+  Or serve the files (python -m http.server) and open index.html?src=<url of the JSON>.
+  Keys: space play/pause, left/right step one frame (shift: 1 ms), home/end, +/- speed, t trails, e events, c cue.
+  Mouse: wheel zooms at the pointer, drag pans, double-click resets the view, hover a ball for its state.
+-->
+<style>
+	:root {
+		--bg: #15171a;
+		--panel: #1e2126;
+		--panel-2: #262a30;
+		--text: #e6e8eb;
+		--muted: #9aa3ad;
+		--accent: #5fb3ff;
+		--border: #343a42;
+		--cloth: #1f6f58;
+		--cloth-edge: #17574a;
+		--rail: #4a3322;
+		--railtop: #5b3f2a;
+		--cushion: #245f4b;
+		--pocket: #0b0c0d;
+		--line: rgba(255, 255, 255, 0.28);
+		--warn: #ffb44d;
+		--bad: #ff6b6b;
+		--good: #6bd48f;
+	}
+	* { box-sizing: border-box; }
+	html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+	body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; }
+	header { grid-column: 1 / 3; display: flex; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
+	header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; letter-spacing: 0.02em; }
+	header .file { color: var(--muted); max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	#stage { position: relative; min-width: 0; min-height: 0; }
+	#table { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+	#table.dragging { cursor: grabbing; }
+	#drop { position: absolute; inset: 16px; border: 2px dashed var(--border); border-radius: 12px; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); pointer-events: none; }
+	#drop.hidden { display: none; }
+	#drop.over { border-color: var(--accent); color: var(--text); }
+	#tooltip { position: absolute; pointer-events: none; background: rgba(20, 22, 26, 0.94); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: 12px/1.35 ui-monospace, Consolas, monospace; white-space: pre; display: none; }
+	aside { grid-row: 2 / 4; grid-column: 2; border-left: 1px solid var(--border); background: var(--panel); overflow: auto; padding: 12px; }
+	aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
+	aside h2:first-child { margin-top: 0; }
+	.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font: 12px/1.45 ui-monospace, Consolas, monospace; }
+	.kv span:nth-child(odd) { color: var(--muted); }
+	.status-Ok { color: var(--good); }
+	.status-bad { color: var(--bad); }
+	#events { font: 12px/1.35 ui-monospace, Consolas, monospace; max-height: 42vh; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+	#events div { padding: 2px 6px; cursor: pointer; white-space: nowrap; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
+	#events div:hover { background: var(--panel-2); }
+	#events div.past { color: var(--muted); }
+	#events div.now { background: rgba(95, 179, 255, 0.18); color: var(--text); }
+	footer { grid-column: 1; padding: 8px 16px 12px; border-top: 1px solid var(--border); background: var(--panel); display: grid; gap: 6px; }
+	.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+	button, select, label.btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+	button:hover, select:hover, label.btn:hover { border-color: var(--accent); }
+	button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+	#time { font: 13px ui-monospace, Consolas, monospace; min-width: 17ch; }
+	#scrub { width: 100%; accent-color: var(--accent); }
+	#timeline { width: 100%; height: 22px; display: block; cursor: pointer; }
+	.toggles label { color: var(--muted); display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+	input[type=file] { display: none; }
+	.legend { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+	.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+	@media (max-width: 860px) {
+		body { grid-template-columns: 1fr; grid-template-rows: auto minmax(320px, 60vh) auto auto; height: auto; }
+		aside { grid-row: auto; grid-column: 1; border-left: 0; border-top: 1px solid var(--border); }
+		footer { grid-column: 1; }
+		header { grid-column: 1; }
+	}
+</style>
+</head>
+<body>
+<header>
+	<h1>rbsim viewer</h1>
+	<label class="btn" for="file">Open JSON</label>
+	<input id="file" type="file" accept=".json,application/json">
+	<button id="demo" title="A synthetic shot (no simulator needed)">Demo shot</button>
+	<span class="file" id="fileName">No file loaded</span>
+</header>
+
+<div id="stage">
+	<canvas id="table"></canvas>
+	<div id="drop">Drop an rbsim JSON file here<br>(rbsim ... --geometry --out shot.json)</div>
+	<div id="tooltip"></div>
+</div>
+
+<aside>
+	<h2>Shot</h2>
+	<div class="kv" id="summary"><span>status</span><span>-</span></div>
+	<h2>Balls at t</h2>
+	<div class="kv" id="ballsNow"></div>
+	<h2>Events</h2>
+	<div class="legend" id="legend"></div>
+	<div id="events"></div>
+</aside>
+
+<footer>
+	<div class="row">
+		<button id="play" title="Space">Play</button>
+		<button id="back" title="Left arrow">&#9664;</button>
+		<button id="fwd" title="Right arrow">&#9654;</button>
+		<select id="speed" title="Playback speed (+ / -)">
+			<option value="0.02">0.02x</option>
+			<option value="0.05">0.05x</option>
+			<option value="0.1">0.1x</option>
+			<option value="0.25">0.25x</option>
+			<option value="0.5">0.5x</option>
+			<option value="1" selected>1x</option>
+			<option value="2">2x</option>
+		</select>
+		<span id="time">t = 0.000 s</span>
+		<span class="row toggles">
+			<label><input type="checkbox" id="optTrails" checked> trails</label>
+			<label><input type="checkbox" id="optEvents" checked> events</label>
+			<label><input type="checkbox" id="optCue" checked> cue</label>
+			<label><input type="checkbox" id="optRails" checked> rail tops</label>
+			<label><input type="checkbox" id="optMarker" checked> orientation</label>
+		</span>
+	</div>
+	<canvas id="timeline" title="Event timeline (click to seek)"></canvas>
+	<input id="scrub" type="range" min="0" max="1" step="0.0001" value="0" aria-label="Time">
+</footer>
+
+<script>
+"use strict";
+
+const STATE_NAMES = ["Stationary", "Spinning", "Sliding", "Rolling", "Airborne", "PocketPivot", "PocketFall", "Pocketed", "OffTable"];
+const BALL_COLORS = ["#f5f2e8", "#f2c200", "#1f4fbf", "#d62a1e", "#5b2a86", "#f07a12", "#1d7a3a", "#7a1f1f", "#141414"];
+const EVENT_KINDS = {
+	BallBall: { color: "#ff6b6b", label: "ball-ball" },
+	BallCushion: { color: "#5fb3ff", label: "cushion" },
+	BallJaw: { color: "#9ad1ff", label: "jaw" },
+	BallRailTop: { color: "#c9a27e", label: "rail top" },
+	BallPocketEnter: { color: "#6bd48f", label: "pocket" },
+	BallPocketed: { color: "#6bd48f", label: "pocket" },
+	BallPocketRim: { color: "#6bd48f", label: "pocket" },
+	BallLiner: { color: "#6bd48f", label: "pocket" },
+	BallPocketExit: { color: "#6bd48f", label: "pocket" },
+	CueStrike: { color: "#ffb44d", label: "cue" },
+	TipRecontact: { color: "#ffb44d", label: "cue" },
+	TipContactBegin: { color: "#ffb44d", label: "cue" },
+	TipContactEnd: { color: "#ffb44d", label: "cue" },
+	BallSlate: { color: "#e0e0e0", label: "slate / air" },
+	BallAirborne: { color: "#e0e0e0", label: "slate / air" },
+	BallLand: { color: "#e0e0e0", label: "slate / air" },
+	IslandBegin: { color: "#c38bff", label: "island" },
+	IslandRigid: { color: "#c38bff", label: "island" },
+	IslandEnd: { color: "#c38bff", label: "island" },
+	BallOffTable: { color: "#ff6b6b", label: "off table" },
+	BallExternalContact: { color: "#ff6b6b", label: "off table" },
+};
+const OTHER_KIND = { color: "#6f7780", label: "transition / observer" };
+
+const canvas = document.getElementById("table");
+const ctx = canvas.getContext("2d");
+const timeline = document.getElementById("timeline");
+const tctx = timeline.getContext("2d");
+const scrub = document.getElementById("scrub");
+const tooltip = document.getElementById("tooltip");
+const $ = (id) => document.getElementById(id);
+
+let shot = null;       // normalised shot (see load())
+let t = 0;             // current time [s]
+let playing = false;
+let lastFrame = 0;
+let view = { zoom: 1, panX: 0, panY: 0 };
+let pointer = null;
+
+// ------------------------------------------------------------------------------------------------
+// Loading
+// ------------------------------------------------------------------------------------------------
+function load(json, name) {
+	if (!json || json.rbsim === undefined) {
+		alert("Not an rbsim result (missing \"rbsim\"). For rbsimInput dumps run: rbsim --in FILE --out result.json");
+		return;
+	}
+	const g = json.geometry || null;
+	const L = (g && g.length) || (json.input && json.input.length) || 2.54;
+	const W = (g && g.width) || (json.input && json.input.width) || L / 2;
+	const balls = (json.balls || []).map((b) => ({
+		id: b.id,
+		radius: b.radius || 0.028575,
+		samples: b.samples || [],
+		initial: b.initial,
+		q0: b.q0 || [1, 0, 0, 0],
+		final: b.final,
+		finalState: b.finalState,
+		pocket: b.pocket,
+		segments: b.segments,
+	}));
+	const stopFromSamples = Math.max(0, ...balls.map((b) => (b.samples.length ? b.samples[b.samples.length - 1][0] : 0)));
+	shot = {
+		name: name,
+		raw: json,
+		L: L,
+		W: W,
+		rail: (g && g.railWidthTotal) || 0.1778,
+		geometry: g,
+		balls: balls,
+		events: (json.events || []).slice().sort((a, b) => a.t - b.t),
+		cueTips: json.cueTips || [],
+		stop: Math.max(json.stopTime || 0, stopFromSamples),
+	};
+	t = 0;
+	playing = false;
+	view = { zoom: 1, panX: 0, panY: 0 };
+	$("fileName").textContent = name;
+	$("drop").classList.add("hidden");
+	scrub.max = String(Math.max(shot.stop, 1e-6));
+	scrub.step = String(Math.max(shot.stop / 20000, 1e-5));
+	buildSummary();
+	buildEventList();
+	buildLegend();
+	updatePlayButton();
+	draw();
+}
+
+function readFile(file) {
+	const reader = new FileReader();
+	reader.onload = () => {
+		try {
+			load(JSON.parse(reader.result), file.name);
+		} catch (e) {
+			alert("Cannot parse " + file.name + ": " + e.message);
+		}
+	};
+	reader.readAsText(file);
+}
+
+$("file").addEventListener("change", (e) => { if (e.target.files[0]) readFile(e.target.files[0]); });
+const stage = $("stage");
+stage.addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.remove("hidden"); $("drop").classList.add("over"); });
+stage.addEventListener("dragleave", () => { $("drop").classList.remove("over"); if (shot) $("drop").classList.add("hidden"); });
+stage.addEventListener("drop", (e) => {
+	e.preventDefault();
+	$("drop").classList.remove("over");
+	if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+});
+
+// ------------------------------------------------------------------------------------------------
+// Sampling (linear between samples; every segment boundary is a sample)
+// ------------------------------------------------------------------------------------------------
+function sampleIndex(s, time) {
+	let lo = 0, hi = s.length - 1;
+	if (time <= s[0][0]) return 0;
+	if (time >= s[hi][0]) return hi;
+	while (hi - lo > 1) {
+		const mid = (lo + hi) >> 1;
+		if (s[mid][0] <= time) lo = mid; else hi = mid;
+	}
+	return lo;
+}
+
+function ballAt(b, time) {
+	const s = b.samples;
+	if (!s.length) {
+		const r = b.initial ? b.initial.r : [0, 0, b.radius];
+		return { x: r[0], y: r[1], z: r[2], q: b.q0, state: b.initial ? STATE_NAMES.indexOf(b.initial.state) : 0, vx: 0, vy: 0 };
+	}
+	const i = sampleIndex(s, time);
+	const a = s[i];
+	const n = s[Math.min(i + 1, s.length - 1)];
+	const span = n[0] - a[0];
+	const f = span > 0 ? Math.min(1, Math.max(0, (time - a[0]) / span)) : 0;
+	const lerp = (k) => a[k] + (n[k] - a[k]) * f;
+	let q = [a[4], a[5], a[6], a[7]];
+	if (f > 0) {
+		const sign = a[4] * n[4] + a[5] * n[5] + a[6] * n[6] + a[7] * n[7] < 0 ? -1 : 1;
+		q = [0, 1, 2, 3].map((k) => a[4 + k] + (sign * n[4 + k] - a[4 + k]) * f);
+		const len = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+		q = q.map((c) => c / len);
+	}
+	return {
+		x: lerp(1), y: lerp(2), z: lerp(3), q: q, state: a[8],
+		vx: span > 0 ? (n[1] - a[1]) / span : 0, vy: span > 0 ? (n[2] - a[2]) / span : 0,
+	};
+}
+
+// Active rotation of v by q = (w, x, y, z).
+function rotate(q, v) {
+	const [w, x, y, z] = q;
+	const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+	return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)];
+}
+
+// Cue tip at time for a strike: rows [strike, t0, t1, x0, y0, z0, dx, dy, dz, speed0, decel, sampled, ex, ey, ez].
+function cueTipAt(strike, time) {
+	let first = null, piece = null;
+	for (const c of shot.cueTips) {
+		if (c[0] !== strike) continue;
+		if (!first) first = c;
+		if (c[1] <= time) piece = c;
+	}
+	if (!first) return null;
+	if (!piece) piece = first;
+	const d = [piece[6], piece[7], piece[8]];
+	if (piece[11] && piece.length >= 15) {
+		const dur = piece[2] - piece[1];
+		const f = dur > 0 ? Math.min(1, Math.max(0, (time - piece[1]) / dur)) : 0;
+		return { p: [0, 1, 2].map((k) => piece[3 + k] + (piece[12 + k] - piece[3 + k]) * f), d: d };
+	}
+	const v0 = piece[9], a = piece[10];
+	const stopTau = a > 0 ? v0 / a : 0;
+	let tau = Math.min(time, piece[2]) - piece[1];
+	tau = Math.max(0, Math.min(tau, stopTau));
+	const s = v0 * tau - 0.5 * a * tau * tau;
+	return { p: [piece[3] + d[0] * s, piece[4] + d[1] * s, piece[5] + d[2] * s], d: d };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Drawing
+// ------------------------------------------------------------------------------------------------
+let scale = 1, cx = 0, cy = 0;
+function sx(x) { return cx + x * scale; }
+function sy(y) { return cy - y * scale; }
+
+function resize() {
+	const dpr = window.devicePixelRatio || 1;
+	const r = canvas.getBoundingClientRect();
+	canvas.width = Math.max(1, Math.round(r.width * dpr));
+	canvas.height = Math.max(1, Math.round(r.height * dpr));
+	const tr = timeline.getBoundingClientRect();
+	timeline.width = Math.max(1, Math.round(tr.width * dpr));
+	timeline.height = Math.max(1, Math.round(tr.height * dpr));
+	draw();
+}
+
+function color(id) { return id >= 0 && id <= 15 ? BALL_COLORS[id <= 8 ? id : id - 8] : "#9aa3ad"; }
+
+function drawTable() {
+	const g = shot.geometry;
+	const hl = shot.L / 2, hw = shot.W / 2, rail = shot.rail;
+	// Rails and bed.
+	ctx.fillStyle = cssVar("--rail");
+	roundRect(sx(-hl - rail), sy(hw + rail), (shot.L + 2 * rail) * scale, (shot.W + 2 * rail) * scale, 0.03 * scale);
+	ctx.fill();
+	if (g && $("optRails").checked && g.railTops) {
+		for (const p of g.railTops) {
+			ctx.beginPath();
+			p.vertices.forEach((v, i) => (i ? ctx.lineTo(sx(v[0]), sy(v[1])) : ctx.moveTo(sx(v[0]), sy(v[1]))));
+			ctx.closePath();
+			ctx.fillStyle = p.kind === "cushionTop" ? cssVar("--cushion") : cssVar("--railtop");
+			ctx.fill();
+			ctx.strokeStyle = "rgba(0,0,0,0.25)";
+			ctx.lineWidth = 1;
+			ctx.stroke();
+		}
+	}
+	// Pocket holes (capture circles) under the cloth outline.
+	if (g && g.pockets) {
+		for (const p of g.pockets) {
+			ctx.beginPath();
+			ctx.arc(sx(p.captureCenter[0]), sy(p.captureCenter[1]), p.captureRadius * scale, 0, 2 * Math.PI);
+			ctx.fillStyle = cssVar("--pocket");
+			ctx.fill();
+		}
+	}
+	// Cloth: the nose outline (exact) or the nose rectangle.
+	ctx.beginPath();
+	if (g && g.noseOutline && g.noseOutline.length > 2) {
+		g.noseOutline.forEach((v, i) => (i ? ctx.lineTo(sx(v[0]), sy(v[1])) : ctx.moveTo(sx(v[0]), sy(v[1]))));
+		ctx.closePath();
+	} else {
+		ctx.rect(sx(-hl), sy(hw), shot.L * scale, shot.W * scale);
+	}
+	ctx.fillStyle = cssVar("--cloth");
+	ctx.fill();
+	ctx.strokeStyle = cssVar("--cloth-edge");
+	ctx.lineWidth = 2;
+	ctx.stroke();
+	if (g && g.pockets) {
+		for (const p of g.pockets) {
+			// Shelf and drop edge a_d (the pocket state machine's trigger circle), dashed.
+			ctx.beginPath();
+			ctx.arc(sx(p.captureCenter[0]), sy(p.captureCenter[1]), p.captureRadius * scale, 0, 2 * Math.PI);
+			ctx.fillStyle = "rgba(0,0,0,0.55)";
+			ctx.fill();
+			ctx.setLineDash([4, 4]);
+			ctx.beginPath();
+			ctx.arc(sx(p.captureCenter[0]), sy(p.captureCenter[1]), p.dropEdgeRadius * scale, 0, 2 * Math.PI);
+			ctx.strokeStyle = "rgba(255,255,255,0.18)";
+			ctx.lineWidth = 1;
+			ctx.stroke();
+			ctx.setLineDash([]);
+			ctx.fillStyle = "rgba(255,255,255,0.5)";
+			ctx.font = "11px system-ui";
+			ctx.textAlign = "center";
+			ctx.fillText("P" + p.id, sx(p.captureCenter[0]), sy(p.captureCenter[1]) + 4);
+		}
+	}
+	// Strings and spots.
+	const lm = g && g.landmarks;
+	const headX = lm ? lm.headStringX : -shot.L / 4, footX = lm ? lm.footStringX : shot.L / 4;
+	ctx.strokeStyle = cssVar("--line");
+	ctx.lineWidth = 1;
+	ctx.setLineDash([6, 6]);
+	line(headX, -hw, headX, hw);
+	ctx.setLineDash([2, 6]);
+	line(-hl, 0, hl, 0);
+	line(0, -hw, 0, hw);
+	ctx.setLineDash([]);
+	for (const x of [headX, 0, footX]) {
+		ctx.beginPath();
+		ctx.arc(sx(x), sy(0), 2.5, 0, 2 * Math.PI);
+		ctx.fillStyle = "rgba(255,255,255,0.55)";
+		ctx.fill();
+	}
+	if (g && g.sights) {
+		ctx.fillStyle = "#e9e1c8";
+		for (const s of g.sights) {
+			const x = sx(s[0]), y = sy(s[1]), r = Math.max(2, 0.006 * scale);
+			ctx.beginPath();
+			ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y);
+			ctx.closePath();
+			ctx.fill();
+		}
+	}
+}
+
+function drawTrails() {
+	for (const b of shot.balls) {
+		const s = b.samples;
+		if (s.length < 2) continue;
+		ctx.beginPath();
+		let started = false;
+		for (const row of s) {
+			if (row[0] > t) break;
+			if (row[8] >= 7) break; // terminal
+			if (!started) { ctx.moveTo(sx(row[1]), sy(row[2])); started = true; } else ctx.lineTo(sx(row[1]), sy(row[2]));
+		}
+		const now = ballAt(b, t);
+		if (started && now.state < 7) ctx.lineTo(sx(now.x), sy(now.y));
+		ctx.strokeStyle = b.id === 0 ? "rgba(255,255,255,0.55)" : hexA(color(b.id), 0.6);
+		ctx.lineWidth = 1.5;
+		ctx.stroke();
+	}
+}
+
+function drawBalls() {
+	for (const b of shot.balls) {
+		const s = ballAt(b, t);
+		const r = b.radius * scale;
+		const x = sx(s.x), y = sy(s.y);
+		const terminal = s.state >= 7;
+		ctx.globalAlpha = terminal ? 0.35 : 1;
+		if (s.state === 4 || s.state === 6 || s.state === 5) {
+			// Flight / in the pocket: shadow at the cloth, ball drawn offset by its height.
+			ctx.beginPath();
+			ctx.arc(x, y, r, 0, 2 * Math.PI);
+			ctx.fillStyle = "rgba(0,0,0,0.35)";
+			ctx.fill();
+		}
+		const lift = s.state === 4 ? Math.max(0, s.z - b.radius) * scale * 0.6 : 0;
+		const bx = x - lift, by = y - lift;
+		ctx.beginPath();
+		ctx.arc(bx, by, r, 0, 2 * Math.PI);
+		const striped = b.id >= 9 && b.id <= 15;
+		ctx.fillStyle = striped ? "#f5f2e8" : color(b.id);
+		ctx.fill();
+		if (striped) {
+			ctx.save();
+			ctx.beginPath();
+			ctx.arc(bx, by, r, 0, 2 * Math.PI);
+			ctx.clip();
+			ctx.fillStyle = color(b.id);
+			ctx.fillRect(bx - r, by - r * 0.55, 2 * r, r * 1.1);
+			ctx.restore();
+		}
+		ctx.lineWidth = 1;
+		ctx.strokeStyle = "rgba(0,0,0,0.6)";
+		ctx.stroke();
+		// Orientation: the body-frame pole (0, 0, R) of the initial orientation, seen from above.
+		if ($("optMarker").checked && r > 4) {
+			const p = rotate(s.q, [0, 0, 1]);
+			ctx.beginPath();
+			ctx.arc(bx + p[0] * r * 0.72, by - p[1] * r * 0.72, Math.max(1.5, r * 0.16), 0, 2 * Math.PI);
+			if (p[2] >= 0) { ctx.fillStyle = b.id === 8 ? "#f5f2e8" : "#15171a"; ctx.fill(); }
+			else { ctx.strokeStyle = b.id === 8 ? "#f5f2e8" : "#15171a"; ctx.stroke(); }
+		}
+		if (b.id !== 0 && r > 6) {
+			ctx.fillStyle = "#f5f2e8";
+			ctx.beginPath();
+			ctx.arc(bx, by, r * 0.42, 0, 2 * Math.PI);
+			ctx.fill();
+			ctx.fillStyle = "#111";
+			ctx.font = "600 " + Math.max(8, Math.round(r * 0.55)) + "px system-ui";
+			ctx.textAlign = "center";
+			ctx.textBaseline = "middle";
+			ctx.fillText(String(b.id), bx, by + 0.5);
+			ctx.textBaseline = "alphabetic";
+		}
+		ctx.globalAlpha = 1;
+	}
+}
+
+function drawCue() {
+	const strikes = new Set(shot.cueTips.map((c) => c[0]));
+	for (const k of strikes) {
+		const tip = cueTipAt(k, t);
+		if (!tip) continue;
+		const len = 1.4732, d = tip.d;
+		const h = Math.hypot(d[0], d[1]) || 1;
+		const bx = tip.p[0] - (d[0] / h) * len * h, by = tip.p[1] - (d[1] / h) * len * h;
+		ctx.lineCap = "round";
+		ctx.strokeStyle = "#d9c49a";
+		ctx.lineWidth = Math.max(2, 0.0127 * scale);
+		line(tip.p[0], tip.p[1], (tip.p[0] + bx) / 2, (tip.p[1] + by) / 2);
+		ctx.strokeStyle = "#3a2618";
+		ctx.lineWidth = Math.max(3, 0.028 * scale);
+		line((tip.p[0] + bx) / 2, (tip.p[1] + by) / 2, bx, by);
+		ctx.beginPath();
+		ctx.arc(sx(tip.p[0]), sy(tip.p[1]), Math.max(2, 0.0064 * scale), 0, 2 * Math.PI);
+		ctx.fillStyle = "#2f6db5";
+		ctx.fill();
+		ctx.lineCap = "butt";
+	}
+}
+
+function drawEvents() {
+	const span = 0.25; // [s] an event marker fades out over this time
+	for (const e of shot.events) {
+		if (e.t > t) break;
+		if (t - e.t > span || !e.pre) continue;
+		const kind = EVENT_KINDS[e.type];
+		if (!kind || e.type === "MotionTransition") continue;
+		let p = e.pre[0].r;
+		if (e.type === "BallBall" && e.pre[1]) {
+			const q = e.pre[1].r;
+			p = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+		}
+		const age = (t - e.t) / span;
+		ctx.globalAlpha = 1 - age;
+		ctx.beginPath();
+		ctx.arc(sx(p[0]), sy(p[1]), 5 + 14 * age, 0, 2 * Math.PI);
+		ctx.strokeStyle = kind.color;
+		ctx.lineWidth = 2;
+		ctx.stroke();
+		ctx.globalAlpha = 1;
+	}
+}
+
+function drawTimeline() {
+	const w = timeline.width, h = timeline.height;
+	tctx.clearRect(0, 0, w, h);
+	tctx.fillStyle = cssVar("--panel-2");
+	tctx.fillRect(0, 0, w, h);
+	if (!shot || shot.stop <= 0) return;
+	for (const e of shot.events) {
+		const k = EVENT_KINDS[e.type] || OTHER_KIND;
+		const x = Math.round((e.t / shot.stop) * (w - 1));
+		tctx.fillStyle = k.color;
+		const tall = k === OTHER_KIND ? 0.35 : 0.8;
+		tctx.fillRect(x, h * (1 - tall), Math.max(1, window.devicePixelRatio || 1), h * tall);
+	}
+	const x = (t / shot.stop) * (w - 1);
+	tctx.fillStyle = cssVar("--accent");
+	tctx.fillRect(x - 1, 0, 2 * (window.devicePixelRatio || 1), h);
+}
+
+function draw() {
+	const dpr = window.devicePixelRatio || 1;
+	ctx.setTransform(1, 0, 0, 1, 0, 0);
+	ctx.fillStyle = cssVar("--bg");
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	drawTimeline();
+	if (!shot) return;
+	const m = 24 * dpr;
+	const base = Math.min((canvas.width - 2 * m) / (shot.L + 2 * shot.rail), (canvas.height - 2 * m) / (shot.W + 2 * shot.rail));
+	scale = base * view.zoom;
+	cx = canvas.width / 2 + view.panX * dpr;
+	cy = canvas.height / 2 + view.panY * dpr;
+	drawTable();
+	if ($("optTrails").checked) drawTrails();
+	if ($("optEvents").checked) drawEvents();
+	drawBalls();
+	if ($("optCue").checked) drawCue();
+	$("time").textContent = "t = " + t.toFixed(3) + " s / " + shot.stop.toFixed(3);
+	scrub.value = String(t);
+	updateBallsNow();
+	highlightEvents();
+	if (pointer) updateTooltip();
+}
+
+// ------------------------------------------------------------------------------------------------
+// Panels
+// ------------------------------------------------------------------------------------------------
+function kv(el, pairs) {
+	el.innerHTML = "";
+	for (const [k, v, cls] of pairs) {
+		const a = document.createElement("span");
+		a.textContent = k;
+		const b = document.createElement("span");
+		b.textContent = v;
+		if (cls) b.className = cls;
+		el.append(a, b);
+	}
+}
+
+function buildSummary() {
+	const j = shot.raw;
+	const d = j.diagnostics || {};
+	const pairs = [
+		["status", j.status || "?", j.status === "Ok" ? "status-Ok" : "status-bad"],
+		["table", (j.input && j.input.table) || "?"],
+		["stop time", (j.stopTime || 0).toFixed(4) + " s"],
+		["events", String((j.events || []).length) + " (" + (d.eventsProcessed || 0) + " processed)"],
+		["islands", String(d.islands || 0) + " / " + (d.islandSteps || 0) + " steps"],
+	];
+	if (d.tiltRefreshes) pairs.push(["tilt refreshes", String(d.tiltRefreshes)]);
+	if (d.missedEvents) pairs.push(["missed events", String(d.missedEvents), "status-bad"]);
+	if (d.overlapWarnings) pairs.push(["overlaps", String(d.overlapWarnings), "status-bad"]);
+	for (const s of j.strikeResults || []) {
+		pairs.push(["strike ball " + s.ball, s.error + (s.miscue ? " MISCUE" : "") + ", J " + Number(s.impulse).toFixed(3) + " N s"]);
+	}
+	if (j.record) {
+		pairs.push(["record", j.record.events + " events" + (j.record.truncated ? ", TRUNCATED" : ""), j.record.truncated ? "status-bad" : ""]);
+		const f = j.record.facts;
+		if (f) {
+			pairs.push(["first contact", f.earliestContact >= 0 ? "ball " + f.earliestContact + " @ " + Number(f.firstContactTime).toFixed(4) : "none"]);
+			pairs.push(["pocketed", (f.pocketed || []).map((p) => p[0] + "->P" + p[1]).join(" ") || "none"]);
+			const flags = ["doubleHit", "pushShot", "scoop", "miscue", "cueBallPocketed", "cueBallOffTable"].filter((k) => f[k]);
+			pairs.push(["flags", flags.join(" ") || "none", flags.length ? "status-bad" : ""]);
+		}
+	}
+	if (!shot.balls.some((b) => b.samples.length)) pairs.push(["note", "no samples (--no-trajectories or no simulation)", "status-bad"]);
+	kv($("summary"), pairs);
+}
+
+function updateBallsNow() {
+	const pairs = [];
+	for (const b of shot.balls) {
+		const s = ballAt(b, t);
+		const v = Math.hypot(s.vx, s.vy);
+		pairs.push([String(b.id), (STATE_NAMES[s.state] || "?").padEnd(11) + " " + v.toFixed(3) + " m/s"]);
+	}
+	kv($("ballsNow"), pairs);
+}
+
+function describe(e) {
+	let s = e.t.toFixed(5) + "  " + e.type + "  " + e.a;
+	if (e.b >= 0) s += "-" + e.b;
+	if (e.type === "MotionTransition" || e.type === "TiltRefresh") s += "  " + e.from + "->" + e.to;
+	else if (e.vn) s += "  vn " + Number(e.vn).toFixed(3);
+	if (e.feature !== undefined && e.feature !== 255 && e.type !== "BallBall") s += "  f" + e.feature;
+	return s;
+}
+
+function buildEventList() {
+	const el = $("events");
+	el.innerHTML = "";
+	shot.events.forEach((e, i) => {
+		const d = document.createElement("div");
+		d.textContent = describe(e);
+		d.dataset.i = String(i);
+		const k = EVENT_KINDS[e.type] || OTHER_KIND;
+		d.style.borderLeft = "3px solid " + k.color;
+		d.addEventListener("click", () => { t = e.t; playing = false; updatePlayButton(); draw(); });
+		el.append(d);
+	});
+}
+
+let lastHighlight = -1;
+function highlightEvents() {
+	const el = $("events");
+	let idx = -1;
+	for (let i = 0; i < shot.events.length && shot.events[i].t <= t; ++i) idx = i;
+	if (idx === lastHighlight) return;
+	lastHighlight = idx;
+	for (const d of el.children) {
+		const i = Number(d.dataset.i);
+		d.className = i === idx ? "now" : i < idx ? "past" : "";
+	}
+	const now = el.children[idx];
+	if (now && playing) now.scrollIntoView({ block: "nearest" });
+}
+
+function buildLegend() {
+	const seen = new Map();
+	for (const k of Object.values(EVENT_KINDS).concat([OTHER_KIND])) if (!seen.has(k.label)) seen.set(k.label, k.color);
+	$("legend").innerHTML = "";
+	for (const [label, c] of seen) {
+		const s = document.createElement("span");
+		s.innerHTML = '<i style="background:' + c + '"></i>' + label;
+		$("legend").append(s);
+	}
+}
+
+function updateTooltip() {
+	const dpr = window.devicePixelRatio || 1;
+	const px = pointer.x * dpr, py = pointer.y * dpr;
+	let hit = null;
+	for (const b of shot.balls) {
+		const s = ballAt(b, t);
+		if (Math.hypot(sx(s.x) - px, sy(s.y) - py) <= Math.max(b.radius * scale, 6)) hit = { b, s };
+	}
+	if (!hit) { tooltip.style.display = "none"; return; }
+	const { b, s } = hit;
+	tooltip.textContent = "ball " + b.id + "  " + (STATE_NAMES[s.state] || "?") +
+		"\nx " + s.x.toFixed(5) + "  y " + s.y.toFixed(5) + "  z " + s.z.toFixed(5) +
+		"\nv " + Math.hypot(s.vx, s.vy).toFixed(4) + " m/s" +
+		"\nq " + s.q.map((c) => c.toFixed(4)).join(" ") +
+		(b.final ? "\nfinal " + b.final + (b.final === "Pocketed" ? " P" + b.pocket : "") : "");
+	tooltip.style.display = "block";
+	tooltip.style.left = pointer.x + 14 + "px";
+	tooltip.style.top = pointer.y + 14 + "px";
+}
+
+// ------------------------------------------------------------------------------------------------
+// Controls
+// ------------------------------------------------------------------------------------------------
+function updatePlayButton() { $("play").textContent = playing ? "Pause" : "Play"; }
+
+function tick(now) {
+	if (playing && shot) {
+		const dt = Math.min(0.1, (now - lastFrame) / 1000);
+		t += dt * Number($("speed").value);
+		if (t >= shot.stop) { t = shot.stop; playing = false; updatePlayButton(); }
+		draw();
+	}
+	lastFrame = now;
+	requestAnimationFrame(tick);
+}
+
+function step(seconds) {
+	if (!shot) return;
+	playing = false;
+	updatePlayButton();
+	t = Math.min(shot.stop, Math.max(0, t + seconds));
+	draw();
+}
+
+$("play").addEventListener("click", () => {
+	if (!shot) return;
+	if (t >= shot.stop) t = 0;
+	playing = !playing;
+	updatePlayButton();
+});
+$("back").addEventListener("click", () => step(-1 / 60));
+$("fwd").addEventListener("click", () => step(1 / 60));
+scrub.addEventListener("input", () => { t = Number(scrub.value); playing = false; updatePlayButton(); draw(); });
+for (const id of ["optTrails", "optEvents", "optCue", "optRails", "optMarker"]) $(id).addEventListener("change", draw);
+timeline.addEventListener("click", (e) => {
+	if (!shot) return;
+	const r = timeline.getBoundingClientRect();
+	t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * shot.stop;
+	playing = false;
+	updatePlayButton();
+	draw();
+});
+
+document.addEventListener("keydown", (e) => {
+	if (e.target.tagName === "SELECT" || (e.target.tagName === "INPUT" && e.target.type !== "range" && e.target.type !== "checkbox")) return;
+	const sel = $("speed");
+	switch (e.key) {
+		case " ": e.preventDefault(); $("play").click(); break;
+		case "ArrowLeft": e.preventDefault(); step(e.shiftKey ? -0.001 : -1 / 60); break;
+		case "ArrowRight": e.preventDefault(); step(e.shiftKey ? 0.001 : 1 / 60); break;
+		case "Home": step(-1e9); break;
+		case "End": step(1e9); break;
+		case "+": case "=": sel.selectedIndex = Math.min(sel.options.length - 1, sel.selectedIndex + 1); break;
+		case "-": sel.selectedIndex = Math.max(0, sel.selectedIndex - 1); break;
+		case "t": $("optTrails").click(); break;
+		case "e": $("optEvents").click(); break;
+		case "c": $("optCue").click(); break;
+	}
+});
+
+let drag = null;
+canvas.addEventListener("mousedown", (e) => { drag = { x: e.clientX, y: e.clientY, px: view.panX, py: view.panY }; canvas.classList.add("dragging"); });
+window.addEventListener("mouseup", () => { drag = null; canvas.classList.remove("dragging"); });
+canvas.addEventListener("mousemove", (e) => {
+	const r = canvas.getBoundingClientRect();
+	pointer = { x: e.clientX - r.left, y: e.clientY - r.top };
+	if (drag) { view.panX = drag.px + (e.clientX - drag.x); view.panY = drag.py + (e.clientY - drag.y); }
+	if (shot) draw();
+});
+canvas.addEventListener("mouseleave", () => { pointer = null; tooltip.style.display = "none"; });
+canvas.addEventListener("dblclick", () => { view = { zoom: 1, panX: 0, panY: 0 }; draw(); });
+canvas.addEventListener("wheel", (e) => {
+	if (!shot) return;
+	e.preventDefault();
+	const r = canvas.getBoundingClientRect();
+	const mx = e.clientX - r.left - r.width / 2, my = e.clientY - r.top - r.height / 2;
+	const factor = Math.exp(-e.deltaY * 0.0015);
+	const zoom = Math.min(60, Math.max(0.5, view.zoom * factor));
+	const k = zoom / view.zoom;
+	view.panX = mx - (mx - view.panX) * k;
+	view.panY = my - (my - view.panY) * k;
+	view.zoom = zoom;
+	draw();
+}, { passive: false });
+
+// ------------------------------------------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------------------------------------------
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function line(x0, y0, x1, y1) { ctx.beginPath(); ctx.moveTo(sx(x0), sy(y0)); ctx.lineTo(sx(x1), sy(y1)); ctx.stroke(); }
+function roundRect(x, y, w, h, r) {
+	ctx.beginPath();
+	ctx.moveTo(x + r, y);
+	ctx.arcTo(x + w, y, x + w, y + h, r);
+	ctx.arcTo(x + w, y + h, x, y + h, r);
+	ctx.arcTo(x, y + h, x, y, r);
+	ctx.arcTo(x, y, x + w, y, r);
+	ctx.closePath();
+}
+function hexA(hex, a) {
+	const n = parseInt(hex.slice(1), 16);
+	return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
+}
+
+// ------------------------------------------------------------------------------------------------
+// Demo: a synthetic stun-follow shot on a 9-ft table (closed-form sliding / rolling, no collisions solved), so the
+// viewer can be tried without the simulator. Not physics output.
+// ------------------------------------------------------------------------------------------------
+function demoShot() {
+	const R = 0.028575, g = 9.80665, muR = 0.01, L = 2.54, W = 1.27, a = muR * g;
+	const qmul = (p, q) => [
+		p[0] * q[0] - p[1] * q[1] - p[2] * q[2] - p[3] * q[3],
+		p[0] * q[1] + p[1] * q[0] + p[2] * q[3] - p[3] * q[2],
+		p[0] * q[2] - p[1] * q[3] + p[2] * q[0] + p[3] * q[1],
+		p[0] * q[3] + p[1] * q[2] - p[2] * q[1] + p[3] * q[0],
+	];
+	// A rolling ball from p along unit dir with speed v0 at t0, for at most maxDist (then it stops there, "event").
+	function roll(p, dir, v0, t0, q0, maxDist) {
+		const stopDist = (v0 * v0) / (2 * a);
+		const dist = Math.min(stopDist, maxDist);
+		const tEnd = (v0 - Math.sqrt(Math.max(0, v0 * v0 - 2 * a * dist))) / a;
+		const samples = [];
+		for (let k = 0; k <= 300; ++k) {
+			const tau = (tEnd * k) / 300;
+			const s = v0 * tau - 0.5 * a * tau * tau;
+			const h = Math.sin(s / R / 2);
+			const q = qmul([Math.cos(s / R / 2), -dir[1] * h, dir[0] * h, 0], q0);
+			samples.push([t0 + tau, p[0] + dir[0] * s, p[1] + dir[1] * s, R, q[0], q[1], q[2], q[3], k < 300 || dist < stopDist ? 3 : 0]);
+		}
+		return { samples, tEnd: t0 + tEnd, vEnd: v0 - a * tEnd, end: [p[0] + dir[0] * dist, p[1] + dir[1] * dist], q: samples[samples.length - 1].slice(4, 8) };
+	}
+	const norm = (v) => { const n = Math.hypot(v[0], v[1]); return [v[0] / n, v[1] / n]; };
+	const cb0 = [-0.635, 0], ob0 = [0.3, 0.22], pocket = [L / 2, W / 2];
+	const u = norm([pocket[0] - ob0[0], pocket[1] - ob0[1]]);          // object-ball line into P3
+	const ghost = [ob0[0] - 2 * R * u[0], ob0[1] - 2 * R * u[1]];      // cue-ball center at contact
+	const d = norm([ghost[0] - cb0[0], ghost[1] - cb0[1]]);
+	const first = roll(cb0, d, 1.6, 0, [1, 0, 0, 0], Math.hypot(ghost[0] - cb0[0], ghost[1] - cb0[1]));
+	const cosCut = d[0] * u[0] + d[1] * u[1];
+	const tangent = norm([d[0] - cosCut * u[0], d[1] - cosCut * u[1]]); // 90-degree rule (stun-ish demo)
+	const cbAfter = roll(first.end, tangent, first.vEnd * Math.sqrt(1 - cosCut * cosCut), first.tEnd, first.q, 9);
+	const obRun = roll(ob0, u, first.vEnd * cosCut, first.tEnd, [1, 0, 0, 0], Math.hypot(pocket[0] - ob0[0], pocket[1] - ob0[1]) - 0.06);
+	const stop = Math.max(cbAfter.tEnd, obRun.tEnd + 0.05);
+	const obSamples = [[0, ob0[0], ob0[1], R, 1, 0, 0, 0, 0]].concat(obRun.samples);
+	obSamples.push([obRun.tEnd + 0.05, pocket[0] + 0.02, pocket[1] + 0.02, -R].concat(obRun.q, [7]));
+	const cbSamples = first.samples.concat(cbAfter.samples.slice(1));
+	const balls = [
+		{ id: 0, radius: R, samples: cbSamples, final: "OnTable", initial: { r: [cb0[0], cb0[1], R], state: "Stationary" } },
+		{ id: 1, radius: R, samples: obSamples, final: "Pocketed", pocket: 3, initial: { r: [ob0[0], ob0[1], R], state: "Stationary" } },
+		{ id: 9, radius: R, samples: [[0, 0.8, -0.35, R, 1, 0, 0, 0, 0]], final: "OnTable", initial: { r: [0.8, -0.35, R], state: "Stationary" } },
+	];
+	for (const b of balls) {
+		const lastRow = b.samples[b.samples.length - 1];
+		if (lastRow[0] < stop) b.samples.push([stop].concat(lastRow.slice(1)));
+	}
+	const pre = (r0, r1) => [{ r: [r0[0], r0[1], R] }, { r: r1 ? [r1[0], r1[1], R] : [0, 0, 0] }];
+	const events = [
+		{ t: 0, type: "CueStrike", a: 0, b: -1, vn: 1.9, pre: pre(cb0) },
+		{ t: first.tEnd, type: "BallBall", a: 0, b: 1, vn: first.vEnd * cosCut, pre: pre(first.end, ob0) },
+		{ t: obRun.tEnd, type: "BallPocketEnter", a: 1, b: -1, feature: 3, pre: pre(obRun.end) },
+		{ t: obRun.tEnd + 0.05, type: "BallPocketed", a: 1, b: -1, feature: 3, pre: pre(obRun.end) },
+		{ t: cbAfter.tEnd, type: "MotionTransition", a: 0, b: -1, from: "Rolling", to: "Stationary" },
+	];
+	const tip0 = [cb0[0] - d[0] * (R + 0.0106), cb0[1] - d[1] * (R + 0.0106), R];
+	return {
+		rbsim: 2, status: "Ok", stopTime: stop, input: { table: "synthetic demo, 9-ft (no geometry, not physics output)", length: L, width: W },
+		diagnostics: {}, events: events.sort((x, y) => x.t - y.t), balls: balls,
+		cueTips: [[0, 0, 0.12, tip0[0], tip0[1], tip0[2], d[0], d[1], 0, 1.0, 1 / 0.24, 0, 0, 0, 0]],
+	};
+}
+$("demo").addEventListener("click", () => load(demoShot(), "synthetic demo"));
+
+// ?src=URL loads a result served over HTTP (e.g. python -m http.server in the repo root, then
+// http://localhost:8000/Tools/rbsim/viewer/index.html?src=/shot.json).
+const src = new URLSearchParams(location.search).get("src");
+if (src) {
+	fetch(src)
+		.then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+		.then((j) => load(j, src))
+		.catch((e) => alert("Cannot load " + src + ": " + e.message));
+}
+
+window.addEventListener("resize", resize);
+resize();
+requestAnimationFrame((now) => { lastFrame = now; tick(now); });
+</script>
+</body>
+</html>

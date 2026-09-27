@@ -142,6 +142,16 @@ namespace rbsim
 		Out.append(Buf);
 	}
 
+	void JsonWriter::Real(double Value)
+	{
+		if (std::isfinite(Value))
+		{
+			Number(Value);
+			return;
+		}
+		String(std::isnan(Value) ? "NaN" : (Value > 0.0 ? "Infinity" : "-Infinity"));
+	}
+
 	void JsonWriter::Integer(std::int64_t Value)
 	{
 		BeforeValue();
@@ -169,6 +179,18 @@ namespace rbsim
 		for (int i = 0; i < Count; ++i)
 		{
 			Number(Values[i]);
+		}
+		EndArray();
+		--InlineDepth;
+	}
+
+	void JsonWriter::RealArray(const double* Values, int Count)
+	{
+		BeginArray();
+		++InlineDepth;
+		for (int i = 0; i < Count; ++i)
+		{
+			Real(Values[i]);
 		}
 		EndArray();
 		--InlineDepth;
