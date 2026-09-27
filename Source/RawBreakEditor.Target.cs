@@ -7,6 +7,6 @@ public class RawBreakEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
-		ExtraModuleNames.AddRange(new string[] { "RawBreak", "BilliardsCore" });
+		ExtraModuleNames.AddRange(new string[] { "RawBreak", "BilliardsCore", "RawBreakShaders", "RawBreakEditor" });
 	}
 }
