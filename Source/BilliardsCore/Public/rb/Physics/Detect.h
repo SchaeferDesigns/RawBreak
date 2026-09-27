@@ -105,6 +105,10 @@ namespace rb
 
 	// ---------------------------------------------------------------------------------------------
 	// Pocket elements (5.3). Facing on the shelf: center-to-plan-line distance s_f (FacingContactOffset).
+	// Both facing-face predictors close the junction with the jaw arc (prior-art 5.7): the face's contact surface lies
+	// s_f - R_c = 0.06 mm (on the cloth; up to 0.6 mm at the facing's top) beyond the jaw's edge at the tangent point
+	// (collisions 5.3 "the small mismatch at the arc ends"), so entering the facing's range (s rising through 0) within
+	// its contact offset and approaching is the contact.
 	// ---------------------------------------------------------------------------------------------
 	RB_API ContactPrediction PredictFacingOnShelf(const MotionSegment& Seg, double Radius, const Facing& Face, double ContactOffset, double TimeLimit,
 		const NumericsConfig& Numerics);
@@ -147,13 +151,29 @@ namespace rb
 		const NumericsConfig& Numerics);
 	// Convex edges of a rail-top polygon hit by an airborne ball: straight edges of kind CushionBack /
 	// OuterEdge / Facing as the airborne nose (quartic), valid beyond the edge's line in the plane (outward of this
-	// polygon); the pocket-cut rim (circle r_p at the plane height of CutCenter, = RailTopZ on the cap) as a circle contact
-	// (degree 8, same solver as the rim torus), valid for centers inside the circle and above it whose rim point lies on
-	// this polygon. Edge = straight edge index, or kCutRimEdge for the cut rim. Seam and Nose edges never yield a
-	// contact (no physical edge; the cushion nose is PredictNoseAirborne).
+	// polygon) and only where the edge exists: the part inside the cut disc is over the hole and is no edge (the surface is
+	// the polygon MINUS the disc), and where the edge meets the cut circle it ends in a convex corner (sphere contact
+	// |p - J| = R, same event); the pocket-cut rim: on a flat polygon (the cap) the cut circle r_p about CutCenter at the
+	// plane height as a circle contact (degree 8, same solver as the rim torus), valid for centers inside the circle and
+	// above it whose rim point lies on this polygon; on a sloped cushion top the true rim (the plan circle lifted onto the
+	// plane) followed by chords at most 4 deg apart (0.04 mm inside it, toward the hole), each a straight tube valid where
+	// the center's foot on the plane lies over the cut and the center is above the plane. Edge = straight edge index, or
+	// kCutRimEdge for the cut rim. Seam and Nose edges never yield a contact (no physical edge; the cushion nose is
+	// PredictNoseAirborne), nor does an edge entirely over the cut.
 	inline constexpr int kCutRimEdge = 0xFE;
 	RB_API ContactPrediction PredictRailTopEdge(const MotionSegment& Seg, double Radius, const RailTopPolygon& Polygon, int Edge, double TimeLimit,
 		const NumericsConfig& Numerics);
+	// The same for polygon Polygon of Table, which also knows the jaws (used by PredictTableEvent): a Facing edge starts
+	// where its jaw's rounding ends (JawArc::TangentOnFacing), not at the polygon's virtual jaw point, a corner that sticks
+	// out r_j (1 / sin(C/2) - 1) beyond the rounded jaw (0.2-1.1 mm on the WPA presets, 2.7 mm at TABLE_7FT_78's side
+	// pockets) where the jaw arc is the edge; the new end is a corner like the one at the cut.
+	RB_API ContactPrediction PredictRailTopEdge(const MotionSegment& Seg, double Radius, const TableGeometry& Table, int Polygon, int Edge, double TimeLimit,
+		const NumericsConfig& Numerics);
+	// The physical part of a straight rail-top edge of Table (for island EdgeLine features, architecture 8.8): the pieces
+	// of edge Edge of polygon Polygon outside the cut disc and the jaw rounding, as 3D segments on the polygon's plane in
+	// edge order (From[k] -> To[k]). Returns 0 (not a physical straight edge, or nothing of it left), 1, or 2 (the disc cuts
+	// a chord out of the middle).
+	RB_API int RailTopEdgePieces(const TableGeometry& Table, int Polygon, int Edge, Vec3 From[2], Vec3 To[2]);
 	// A ball rolling / sliding ON the flat rail cap (Seg.SupportZ = RailTopZ): first time its CENTER leaves
 	// the polygon across a straight edge or enters the cut disc. EdgeOut = edge index (see
 	// RailTopPolygon::Edges for what lies beyond; Seam = continue on the neighbouring polygon) or kCutRimEdge; -1 if none.
@@ -252,9 +272,9 @@ namespace rb
 	//    or capture circles (CaptureCircle);
 	//  * surface state on the flat rail cap: SupportExit of the current polygon, OuterBoundary;
 	//  * Airborne: airborne nose / jaw-arc / facing face / facing top edge variants, rail-top planes and
-	//    rail-top edges, OuterBoundary, LampApex, and for EVERY pocket whose a_d cylinder the swept bounds
-	//    reach: the rim torus and the liner / back wall (height rules of PredictLinerWall). NOT the
-	//    landing (end slot);
+	//    rail-top edges (the table-aware PredictRailTopEdge: physical pieces only), OuterBoundary, LampApex, and for EVERY
+	//    pocket whose a_d cylinder the swept bounds reach: the rim torus and the liner / back wall (height rules of
+	//    PredictLinerWall). NOT the landing (end slot);
 	//  * PocketPivot (Seg = PivotDetectionProxy): facing faces and top edges and jaw arcs of Context.Pocket
 	//    (airborne predictors); other balls are pair slots;
 	//  * PocketFall: facings, arcs, liner, rim torus, capture depth, pocket exit of Context.Pocket, and the rail-top planes,
@@ -263,14 +283,16 @@ namespace rb
 	//  * Stationary / Spinning (no translation), Pocketed, OffTable: nothing.
 	// Contact distances on the cloth come from WP-2's ComputeCushionContact (R_c) and FacingContactOffset (s_f), so the
 	// single geometry source also fixes the contact offsets. TimeLimit prunes: after a candidate is found, later features
-	// are searched only up to its time (3.2 t_best).
+	// are searched only up to its time (3.2 t_best), and the swept bounds shrink to that window (cheap features first,
+	// degree-8 ones last; the result is the exhaustive earliest event, Integ_Detect_DispatcherCullingMatchesExhaustive...).
 	RB_API FeaturePrediction PredictTableEvent(const MotionSegment& Seg, const BallSpec& Spec, const BallTableContext& Context, const TableGeometry& Table,
 		const EnvironmentSpec& Environment, const DetectOptions& Options, double Gravity, double TimeLimit, const NumericsConfig& Numerics);
 
 	// Island feature joining (architecture 8.8): every table element whose bounds intersect Region
 	// (the island bodies' reach over the next steps), in (Kind, Index, SubIndex) order: present noses, jaw arcs, facing
 	// faces, facing top edges, drop-edge circles (GeometricLevelA; member exits) or capture circles (CaptureCircle), rail-top
-	// planes, and the physical rail-top edges (CushionBack / OuterEdge / Facing, cut rims). Pocket interiors (liner, rim
+	// planes, and the physical rail-top edges (CushionBack / OuterEdge / Facing, cut rims; a straight edge entirely over its
+	// polygon's cut disc is skipped, a partly cut one exists only as RailTopEdgePieces). Pocket interiors (liner, rim
 	// torus) are not island features (Level B). Returns the count written (<= Capacity); sets Overflow if more exist.
 	RB_API int QueryTableFeatures(const Aabb3& Region, const TableGeometry& Table, const DetectOptions& Options, TableFeatureRef* Out, int Capacity,
 		bool& Overflow);

@@ -141,6 +141,42 @@ namespace
 		return rb::kInfinity;
 	}
 
+	// The facing's junction with its jaw (Detect.h): the first time the center's coordinate along the facing rises through
+	// 0 while the gap lies within the step [-Band, 1 nm] and decreases (sampled, then bisected on the coordinate).
+	template <class CoordFn, class GapFn, class ValidFn>
+	double SampledJunctionEntry(const CoordFn& Along, const GapFn& Gap, const ValidFn& Valid, double Band, double TauMax, int N)
+	{
+		double Prev = Along(0.0);
+		double PrevTau = 0.0;
+		for (int i = 1; i <= N; ++i)
+		{
+			const double Tau = TauMax * static_cast<double>(i) / static_cast<double>(N);
+			const double S = Along(Tau);
+			if (Prev < 0.0 && S >= 0.0)
+			{
+				double Lo = PrevTau;
+				double Hi = Tau;
+				for (int k = 0; k < 200; ++k)
+				{
+					const double Mid = 0.5 * (Lo + Hi);
+					if (Mid <= Lo || Mid >= Hi)
+					{
+						break;
+					}
+					(Along(Mid) >= 0.0 ? Hi : Lo) = Mid;
+				}
+				const double G = Gap(Hi);
+				if (G <= 1e-9 && G >= -Band && Gap(Hi + 1e-7) < G && Valid(Hi))
+				{
+					return Hi;
+				}
+			}
+			Prev = S;
+			PrevTau = Tau;
+		}
+		return rb::kInfinity;
+	}
+
 	struct Agreement
 	{
 		const char* Name = "";
@@ -154,20 +190,22 @@ namespace
 	// One case: the predictor against the sampled reference (times to 1e-9 s). Starts within 1 um of the boundary are
 	// skipped (the start rules have their own tests). A disagreement is re-sampled 100x denser first (a short dip between
 	// samples); what remains must be a graze, else it is a mismatch.
+	// Extra = an event of the feature that is not a crossing of the gap (the facing's junction entry), +inf if none.
 	template <class GapFn, class ValidFn>
-	void CompareWithSampling(Agreement& A, const ContactPrediction& P, double T0, const GapFn& Gap, const ValidFn& Valid, double TauMax)
+	void CompareWithSampling(Agreement& A, const ContactPrediction& P, double T0, const GapFn& Gap, const ValidFn& Valid, double TauMax,
+		double Extra = rb::kInfinity)
 	{
 		if (!(Gap(0.0) >= 1e-6))
 		{
 			return;
 		}
 		++A.Cases;
-		double Ref = SampledFirstCrossing(Gap, Valid, TauMax, 4000);
+		double Ref = rb::Min(SampledFirstCrossing(Gap, Valid, TauMax, 4000), Extra);
 		const double Local = P.Found ? P.Time - T0 : rb::kInfinity;
 		const auto Agrees = [&](double R) { return (R < rb::kInfinity) == P.Found && (!P.Found || rb::Abs(R - Local) <= 1e-9); };
 		if (!Agrees(Ref))
 		{
-			Ref = SampledFirstCrossing(Gap, Valid, TauMax, 400000);
+			Ref = rb::Min(SampledFirstCrossing(Gap, Valid, TauMax, 400000), Extra);
 		}
 		if (Agrees(Ref))
 		{
@@ -460,6 +498,7 @@ RB_TEST(Detect_Review_ClothPredictorsAgreeWithBruteForceSampling)
 	}
 	const rb::Facing Face = MakeFacing({0.0, 0.7}, {0.1, 0.7}, {0.0, -1.0});
 	const double Sf = (kR - (kNoseH - kR) * std::sin(Face.Backdraft)) / std::cos(Face.Backdraft);
+	const double Band = Sf - NoseContactOffset() + 1e-6; // the junction step s_f - R_c
 	for (int i = 0; i < kCasesPerPredictor; ++i)
 	{
 		const Vec3 P{Rng.NextUniform(-0.3, 0.4), Rng.NextUniform(0.4, 0.7 - Sf - 1e-5), kR};
@@ -470,7 +509,8 @@ RB_TEST(Detect_Review_ClothPredictorsAgreeWithBruteForceSampling)
 			const double X = rb::PositionAt(S, Tau).x;
 			return X >= -1e-9 && X <= 0.1 + 1e-9;
 		};
-		CompareWithSampling(AF, rb::PredictFacingOnShelf(S, kR, Face, Sf, rb::kInfinity, Numerics()), S.T0, Gap, Valid, S.TauEnd);
+		const double Entry = SampledJunctionEntry([&](double Tau) { return rb::PositionAt(S, Tau).x; }, Gap, [](double) { return true; }, Band, S.TauEnd, 4000);
+		CompareWithSampling(AF, rb::PredictFacingOnShelf(S, kR, Face, Sf, rb::kInfinity, Numerics()), S.T0, Gap, Valid, S.TauEnd, Entry);
 	}
 	CheckAgreement(AN);
 	CheckAgreement(AJ);
@@ -519,6 +559,7 @@ RB_TEST(Detect_Review_FlightPredictorsAgreeWithBruteForceSampling)
 	}
 	const rb::Facing Face = MakeFacing({0.0, 0.7}, {0.1, 0.7}, {0.0, -1.0});
 	const Vec3 N{0.0, -std::cos(Face.Backdraft), -std::sin(Face.Backdraft)};
+	const double Band = (kR - (kNoseH - kR) * std::sin(Face.Backdraft)) / std::cos(Face.Backdraft) - NoseContactOffset() + 1e-6; // s_f - R_c
 	for (int i = 0; i < kCasesPerPredictor; ++i)
 	{
 		const Vec3 P{Rng.NextUniform(-0.2, 0.3), Rng.NextUniform(0.5, 0.69), Rng.NextUniform(0.0, 0.12)};
@@ -530,7 +571,13 @@ RB_TEST(Detect_Review_FlightPredictorsAgreeWithBruteForceSampling)
 			const double ContactZ = X.z - kR * N.z;
 			return X.x >= -1e-9 && X.x <= 0.1 + 1e-9 && ContactZ >= -1e-9 && ContactZ <= kNoseH + 1e-9;
 		};
-		CompareWithSampling(AF, rb::PredictFacingAirborne(S, kR, Face, rb::kInfinity, Numerics()), S.T0, Gap, Valid, S.TauEnd);
+		const auto OnFace = [&](double Tau)
+		{
+			const double ContactZ = rb::PositionAt(S, Tau).z - kR * N.z;
+			return ContactZ >= -1e-9 && ContactZ <= kNoseH + 1e-9;
+		};
+		const double Entry = SampledJunctionEntry([&](double Tau) { return rb::PositionAt(S, Tau).x; }, Gap, OnFace, Band, S.TauEnd, 4000);
+		CompareWithSampling(AF, rb::PredictFacingAirborne(S, kR, Face, rb::kInfinity, Numerics()), S.T0, Gap, Valid, S.TauEnd, Entry);
 		const auto EdgeGap = [&](double Tau)
 		{
 			const Vec3 X = rb::PositionAt(S, Tau);

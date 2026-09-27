@@ -328,6 +328,87 @@ namespace rb
 		// Earlier of two predictions (ties keep A).
 		bool Earlier(const ContactPrediction& A, const ContactPrediction& B) { return A.Found && (!B.Found || A.Time < B.Time); }
 
+		// Real roots of a t^2 + b t + c in (0, TauMax] where the quadratic RISES through zero (2 a t + b > 0), ascending
+		// (stable closed form, pitfall 18). Returns the count (<= 2).
+		int RisingRoots(double a, double b, double c, double TauMax, double Out[2])
+		{
+			double Roots[2];
+			int Num = 0;
+			if (a == 0.0)
+			{
+				if (b != 0.0)
+				{
+					Roots[Num++] = -c / b;
+				}
+			}
+			else
+			{
+				const double Disc = b * b - 4.0 * a * c;
+				if (Disc > 0.0)
+				{
+					const double q = -0.5 * (b + SignNonZero(b) * Sqrt(Disc));
+					const double R0 = q / a;
+					const double R1 = q != 0.0 ? c / q : R0;
+					Roots[Num++] = Min(R0, R1);
+					Roots[Num++] = Max(R0, R1);
+				}
+			}
+			int Count = 0;
+			for (int i = 0; i < Num; ++i)
+			{
+				const double T = Roots[i];
+				if (T > 0.0 && T <= TauMax && 2.0 * a * T + b > 0.0)
+				{
+					Out[Count++] = T;
+				}
+			}
+			return Count;
+		}
+
+		// Junction of a facing with its jaw arc (the facing's START, s = 0). The spec models the jaw as the edge at h
+		// (contact R_c + r_j from its center on the cloth) and the facing as the undercut plane (s_f from its plan line), so
+		// at the tangent point the facing's contact surface lies s_f - R_c = 0.06 mm (on the cloth; up to 0.6 mm for a ball
+		// at the facing's top) beyond the jaw's (collisions 5.3: "the small mismatch at the arc ends"). A ball passing the
+		// junction inside that step enters the facing's range already within its contact offset, with no crossing, and ran
+		// into the facing unchecked. The chain must be watertight (prior-art 5.7): entering the range (s rising through 0)
+		// within the step (-Band <= F <= ContactTol) and approaching is the contact. Deeper entries are not junction
+		// crossings (the jaw is in the way; only a corrupt state gets there).
+		template <class ValidFn>
+		ContactPrediction FacingStartEntry(const VecQuad& Q, const Vec3& Dir, const Polynomial& F, double Band, double TauMax, double StartTime,
+			const NumericsConfig& N, const ValidFn& Valid)
+		{
+			ContactPrediction Out;
+			if (!(TauMax > 0.0) || !IsFinite(StartTime))
+			{
+				return Out;
+			}
+			double Entries[2];
+			const int Count = RisingRoots(Dot(Dir, Q.A), Dot(Dir, Q.B), Dot(Dir, Q.C), TauMax, Entries);
+			const Polynomial DF = F.Derivative();
+			for (int i = 0; i < Count; ++i)
+			{
+				const double Tau = Entries[i];
+				const double Gap = F.Eval(Tau);
+				if (Gap <= N.ContactTol && Gap >= -Band && DF.Eval(Tau) < -N.ApproachSpeedTol && Valid(Tau))
+				{
+					Out.Found = true;
+					Out.Time = StartTime + Tau;
+					return Out;
+				}
+			}
+			return Out;
+		}
+
+		// Width of that step for a ball of radius R on the cloth, s_f - R_c (plus 1 um): the face's contact offset
+		// (R - (h - R) sin beta) / cos beta against the jaw edge's sqrt(R^2 - (h - R)^2) (collisions 4.1, 5.3).
+		double FacingJunctionBand(double Radius, const Facing& Face)
+		{
+			const double Rise = Face.TopHeight - Radius;
+			const double Sf = (Radius - Rise * Sin(Face.Backdraft)) / Cos(Face.Backdraft);
+			const double Rc = Sqrt(Max(Radius * Radius - Rise * Rise, 0.0));
+			return Max(Sf - Rc, 0.0) + 1e-6;
+		}
+
 		// =========================================================================================
 		// Shared geometry of the pocket and edge predictors
 		// =========================================================================================
@@ -350,23 +431,124 @@ namespace rb
 			return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, {2.0 * Radius, true}, N, Valid);
 		}
 
-		// Degree-8 contact of a ball with a horizontal circle (center C, radius Major, height Zc) thickened by the tube radius
-		// Minor: Q^2 - 4 Major^2 rho^2 = 0 with Q = rho^2 + Major^2 + (z - Zc)^2 - (R + Minor)^2 (collisions 5.3), = (distance to
-		// the circle^2 - (R + Minor)^2) * (distance to the antipodal circle point^2 - (R + Minor)^2). The second factor is > 0
-		// whenever Major > R + Minor (rim torus, cut rim); for a small circle (jaw edge, Major = r_j < R) it can vanish deep
-		// inside, so such callers also require Q > 0 (the root of the NEAR factor, collisions 5.3). Valid(tau) decides which
-		// part of the tube exists.
+		// A rail-top plane that is not horizontal (a sloped cushion top).
+		bool IsTilted(const RailTopPolygon& Poly) { return Poly.PlaneNormal.x != 0.0 || Poly.PlaneNormal.y != 0.0; }
+
+		// Pocket-cut rim of a SLOPED polygon: the vertical cut cylinder r_p meets the plane in the plan circle lifted onto the
+		// plane (an ellipse in 3D). Its arcs over the polygon are followed by chords between exact rim points, at most
+		// kRimChordAngle apart: they lie inside the true rim (toward the hole) by at most r_p (1 - cos(kRimChordAngle / 2)),
+		// 0.04 mm, so they are conservative, and seen from the hole their joints are recessed (no gap between chords). Their
+		// ends are the exact points where the rim meets the polygon's edges: the cap's rim circle at the cushion back and the
+		// corners of the clipped straight edges (the Facing edge at the cut).
+		constexpr double kRimChordAngle = 4.0 * kDegToRad;
+
+		// Calls Chord(P0, P1) for every chord of the rim arcs of Poly (sloped, with a cut) that lie over the polygon, in CCW
+		// order of the plan angle about the cut center; returns the number of chords.
+		template <class ChordFn>
+		int ForEachRimChord(const RailTopPolygon& Poly, const ChordFn& Chord)
+		{
+			const Vec2 C = Poly.CutCenter;
+			const double Rp = Poly.CutRadius;
+			if (!(Rp > 0.0) || Poly.VertexCount < 3)
+			{
+				return 0;
+			}
+			// Plan angles where the circle crosses the polygon's edges.
+			double Angles[2 * kMaxRailTopVertices];
+			int Num = 0;
+			for (int i = 0; i < Poly.VertexCount; ++i)
+			{
+				const Vec2& V0 = Poly.Vertices[i];
+				const Vec2 E = Poly.Vertices[(i + 1) % Poly.VertexCount] - V0;
+				const Vec2 W = V0 - C;
+				const double a = LengthSquared(E);
+				const double b = 2.0 * Dot(E, W);
+				const double c = LengthSquared(W) - Rp * Rp;
+				const double Disc = b * b - 4.0 * a * c;
+				if (!(a > 0.0) || !(Disc >= 0.0))
+				{
+					continue;
+				}
+				const double q = -0.5 * (b + SignNonZero(b) * Sqrt(Disc));
+				const double T[2] = {q / a, q != 0.0 ? c / q : q / a};
+				for (int k = 0; k < 2; ++k)
+				{
+					if (T[k] >= 0.0 && T[k] <= 1.0)
+					{
+						const Vec2 P = V0 + E * T[k] - C;
+						Angles[Num++] = Atan2(P.y, P.x);
+					}
+				}
+			}
+			for (int i = 1; i < Num; ++i)
+			{
+				const double Key = Angles[i];
+				int j = i - 1;
+				while (j >= 0 && Angles[j] > Key)
+				{
+					Angles[j + 1] = Angles[j];
+					--j;
+				}
+				Angles[j + 1] = Key;
+			}
+			const auto Lift = [&](double Phi)
+			{
+				const Vec2 P = C + Vec2{Cos(Phi), Sin(Phi)} * Rp;
+				return ToVec3(P, PlaneHeight(Poly, P));
+			};
+			const auto Arc = [&](double From, double To)
+			{
+				const int Pieces = static_cast<int>(Floor((To - From) / kRimChordAngle)) + 1;
+				Vec3 P0 = Lift(From);
+				for (int j = 1; j <= Pieces; ++j)
+				{
+					const Vec3 P1 = j == Pieces ? Lift(To) : Lift(From + (To - From) * (static_cast<double>(j) / static_cast<double>(Pieces)));
+					Chord(P0, P1);
+					P0 = P1;
+				}
+				return Pieces;
+			};
+			if (Num == 0)
+			{
+				// The circle misses the edges: entirely over the polygon (one closed rim) or not at all.
+				return InsidePolygon(Poly, C + Vec2{Rp, 0.0}, 0.0) ? Arc(-kPi, kPi) : 0;
+			}
+			int Count = 0;
+			for (int k = 0; k < Num; ++k)
+			{
+				const double From = Angles[k];
+				const double To = k + 1 < Num ? Angles[k + 1] : Angles[0] + kTwoPi;
+				if (!(To - From > 1e-12))
+				{
+					continue;
+				}
+				const double Mid = 0.5 * (From + To);
+				if (InsidePolygon(Poly, C + Vec2{Cos(Mid), Sin(Mid)} * Rp, 0.0))
+				{
+					Count += Arc(From, To);
+				}
+			}
+			return Count;
+		}
+
+		// Degree-8 contact of a ball with a circle of radius Major about the origin in the plane w = 0 of the LOCAL segment
+		// (components (u, v, w); for a horizontal circle simply the segment relative to the circle's center), thickened by the
+		// tube radius Minor: Q^2 - 4 Major^2 rho^2 = 0 with rho^2 = u^2 + v^2, Q = rho^2 + Major^2 + w^2 - (R + Minor)^2
+		// (collisions 5.3), = (distance to the circle^2 - (R + Minor)^2) * (distance to the antipodal circle point^2 -
+		// (R + Minor)^2). The second factor is > 0 whenever Major > R + Minor (rim torus, cut rim); for a small circle (jaw
+		// edge, Major = r_j < R) it can vanish deep inside, so such callers also require Q > 0 (the root of the NEAR factor,
+		// collisions 5.3). Valid(tau) decides which part of the tube exists.
 		template <class ValidFn>
-		ContactPrediction CircleTubeContact(const MotionSegment& Seg, double Radius, const Vec2& C, double Major, double Minor, double Zc, double TimeLimit,
+		ContactPrediction CircleTubeContact(const MotionSegment& Seg, const VecQuad& Local, double Radius, double Major, double Minor, double TimeLimit,
 			const NumericsConfig& N, const ValidFn& Valid)
 		{
-			const VecQuad Qh = PlanOf(Relative(Seg, ToVec3(C, 0.0)));
+			const VecQuad Qh = PlanOf(Local);
 			const Polynomial Rho2 = SquaredNorm(Qh);
 			Polynomial Zq;
 			Zq.Degree = 2;
-			Zq.c[0] = Seg.Pos0.z - Zc;
-			Zq.c[1] = Seg.Vel0.z;
-			Zq.c[2] = Seg.Accel2.z;
+			Zq.c[0] = Local.C.z;
+			Zq.c[1] = Local.B.z;
+			Zq.c[2] = Local.A.z;
 			const double Reach = Radius + Minor;
 			Polynomial Q = Multiply(Zq, Zq);
 			for (int i = 0; i <= 4; ++i)
@@ -389,7 +571,38 @@ namespace rb
 			const double SecondMin = 4.0 * Major * Max(Major - Reach, 0.25 * Major);
 			const double SecondMax = 4.0 * Major * (Major + Reach);
 			const CrossingSpec Spec{2.0 * Reach * Clamp(Second0, SecondMin, SecondMax), true};
-			return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, Spec, N, Valid);
+			// Polish on the exact near-circle distance g = (rho - Major)^2 + w^2 - Reach^2 (not on the degree-8 product, whose
+			// coefficients carry the rounding of two squarings: a glancing contact otherwise moved by 1e-11 s with the window).
+			// Newton steps stay inside the monotone bracket of the isolated root.
+			const auto Polish = [&](double Tau, double Lo, double Hi)
+			{
+				double X = Tau;
+				for (int k = 0; k < 3; ++k)
+				{
+					const Vec3 P = At(Local, X);
+					const Vec3 V = VelocityOf(Local, X);
+					const double Rho = Sqrt(P.x * P.x + P.y * P.y);
+					if (!(Rho > 0.0))
+					{
+						break;
+					}
+					const double DRho = (P.x * V.x + P.y * V.y) / Rho;
+					const double G = (Rho - Major) * (Rho - Major) + P.z * P.z - Reach * Reach;
+					const double DG = 2.0 * (Rho - Major) * DRho + 2.0 * P.z * V.z;
+					if (!(DG < 0.0))
+					{
+						break;
+					}
+					const double Next = X - G / DG;
+					if (!(Next >= Lo && Next <= Hi) || Next == X)
+					{
+						break;
+					}
+					X = Next;
+				}
+				return X;
+			};
+			return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, Spec, N, Valid, Polish);
 		}
 
 		// =========================================================================================
@@ -418,6 +631,14 @@ namespace rb
 				{Pocket.CaptureCenter.x + Rr, Pocket.CaptureCenter.y + Rr, Pocket.WallTopZ + Pad}};
 		}
 
+		// The rounded rim: the tube r_d about the a_d circle at z = -r_d.
+		Aabb3 TorusBox(const PocketGeometry& Pocket, double Pad)
+		{
+			const double Rr = Pocket.DropEdgeRadius + Pocket.DropRadius + Pad;
+			return {{Pocket.CaptureCenter.x - Rr, Pocket.CaptureCenter.y - Rr, -2.0 * Pocket.DropRadius - Pad},
+				{Pocket.CaptureCenter.x + Rr, Pocket.CaptureCenter.y + Rr, Pad}};
+		}
+
 		Aabb3 PolygonBox(const RailTopPolygon& Poly, double Pad)
 		{
 			Aabb3 Box{{kInfinity, kInfinity, kInfinity}, {-kInfinity, -kInfinity, -kInfinity}};
@@ -433,13 +654,175 @@ namespace rb
 
 		bool IsPhysicalRailTopEdge(RailEdgeKind Kind) { return Kind == RailEdgeKind::CushionBack || Kind == RailEdgeKind::OuterEdge || Kind == RailEdgeKind::Facing; }
 
+		// A straight rail-top edge as it physically exists: the line E0 + D s (s in [0, L], on the polygon's plane) and its
+		// physical pieces [A[k], B[k]] (ascending, at most 2). The rail top exists over the polygon MINUS the cut disc
+		// (TableGeometry.h), so the chord of the edge over the disc is no edge: on the 9FT_PRO corner surrounds the cap's
+		// Facing edge lies entirely over the hole, and the cushion-back ridge ends where it meets the cut. With the table, a
+		// Facing edge also starts where its jaw's rounding ends (JawArc::TangentOnFacing): the polygon runs it to the virtual
+		// jaw point, a corner that sticks out r_j (1 / sin(C/2) - 1) beyond the rounded jaw (0.2-1.1 mm on the WPA presets,
+		// 2.7 mm at TABLE_7FT_78's side pockets), where the jaw arc is the edge. A clipped end is a convex corner of the rail
+		// top (sphere contact |p - J| = R).
+		struct RailEdgeLine
+		{
+			Vec3 E0;
+			Vec3 D;
+			double L = 0.0;
+			int Count = 0;
+			double A[2] = {0.0, 0.0};
+			double B[2] = {0.0, 0.0};
+		};
+
+		// The jaw arc of the polygon's pocket whose virtual point is Vertex (the end of a Facing edge next to a Nose edge).
+		const JawArc* JawAtVirtualPoint(const TableGeometry& Table, const RailTopPolygon& Poly, const Vec2& Vertex)
+		{
+			const int Pocket = static_cast<int>(Poly.Pocket);
+			if (Poly.Pocket == PocketId::None)
+			{
+				return nullptr;
+			}
+			for (int Side = 0; Side < 2; ++Side)
+			{
+				const int Index = 2 * Pocket + Side;
+				if (Index < Table.JawArcs.Size())
+				{
+					const JawArc& J = Table.JawArcs[Index];
+					if (J.Radius > 0.0 && LengthSquared(J.VirtualPoint - Vertex) <= 1e-18)
+					{
+						return &J;
+					}
+				}
+			}
+			return nullptr;
+		}
+
+		// False when Edge is not a physical straight edge (Seam, Nose, degenerate). Count = 0 when nothing of it remains.
+		bool MakeRailEdgeLine(const RailTopPolygon& Poly, int Edge, const TableGeometry* Table, RailEdgeLine& Out)
+		{
+			if (Edge < 0 || Edge >= Poly.VertexCount || !IsPhysicalRailTopEdge(Poly.Edges[Edge]))
+			{
+				return false;
+			}
+			const int N = Poly.VertexCount;
+			const Vec2& V0 = Poly.Vertices[Edge];
+			const Vec2& V1 = Poly.Vertices[(Edge + 1) % N];
+			Out.E0 = ToVec3(V0, PlaneHeight(Poly, V0));
+			const Vec3 E1 = ToVec3(V1, PlaneHeight(Poly, V1));
+			Out.L = Length(E1 - Out.E0);
+			if (!(Out.L > 0.0))
+			{
+				return false;
+			}
+			Out.D = (E1 - Out.E0) / Out.L;
+			const Vec2 Dh = XY(Out.D);
+			const double Dh2 = LengthSquared(Dh);
+			if (!(Dh2 > 0.0))
+			{
+				return false;
+			}
+			// Parameter of a plan point on the edge line.
+			const auto ParamOf = [&](const Vec2& P) { return Dot(Dh, P - V0) / Dh2; };
+
+			double Lo = 0.0;
+			double Hi = Out.L;
+			if (Table != nullptr && Poly.Edges[Edge] == RailEdgeKind::Facing)
+			{
+				if (Poly.Edges[(Edge + N - 1) % N] == RailEdgeKind::Nose)
+				{
+					if (const JawArc* J = JawAtVirtualPoint(*Table, Poly, V0))
+					{
+						Lo = Clamp(ParamOf(J->TangentOnFacing), 0.0, Out.L);
+					}
+				}
+				if (Poly.Edges[(Edge + 1) % N] == RailEdgeKind::Nose)
+				{
+					if (const JawArc* J = JawAtVirtualPoint(*Table, Poly, V1))
+					{
+						Hi = Clamp(ParamOf(J->TangentOnFacing), 0.0, Out.L);
+					}
+				}
+			}
+			Out.Count = 0;
+			if (!(Lo < Hi))
+			{
+				return true; // nothing left
+			}
+			double C0 = 1.0; // chord over the cut disc (empty: C0 > C1)
+			double C1 = 0.0;
+			if (Poly.HasCut && Poly.CutRadius > 0.0)
+			{
+				// |XY(E0) + XY(D) s - C|^2 = r^2 (stable quadratic).
+				const Vec2 W = V0 - Poly.CutCenter;
+				const double b = 2.0 * Dot(Dh, W);
+				const double c = LengthSquared(W) - Poly.CutRadius * Poly.CutRadius;
+				const double Disc = b * b - 4.0 * Dh2 * c;
+				if (Disc > 0.0)
+				{
+					const double q = -0.5 * (b + SignNonZero(b) * Sqrt(Disc));
+					const double R0 = q / Dh2;
+					const double R1 = q != 0.0 ? c / q : R0;
+					C0 = Min(R0, R1);
+					C1 = Max(R0, R1);
+				}
+			}
+			if (!(C0 < C1) || C1 <= Lo || C0 >= Hi)
+			{
+				Out.A[0] = Lo;
+				Out.B[0] = Hi;
+				Out.Count = 1;
+				return true;
+			}
+			if (C0 > Lo)
+			{
+				Out.A[Out.Count] = Lo;
+				Out.B[Out.Count] = C0;
+				++Out.Count;
+			}
+			if (C1 < Hi)
+			{
+				Out.A[Out.Count] = C1;
+				Out.B[Out.Count] = Hi;
+				++Out.Count;
+			}
+			return true;
+		}
+
+		bool IsOnRailEdge(const RailEdgeLine& E, double s, double Slack)
+		{
+			for (int k = 0; k < E.Count; ++k)
+			{
+				if (s >= E.A[k] - Slack && s <= E.B[k] + Slack)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// Parameter of the physical edge point nearest to the center's projection s (clamped into the nearest piece).
+		double NearestOnRailEdge(const RailEdgeLine& E, double s)
+		{
+			double Best = E.Count > 0 ? Clamp(s, E.A[0], E.B[0]) : s;
+			for (int k = 1; k < E.Count; ++k)
+			{
+				const double S = Clamp(s, E.A[k], E.B[k]);
+				if (Abs(S - s) < Abs(Best - s))
+				{
+					Best = S;
+				}
+			}
+			return Best;
+		}
+
 		Aabb3 RailTopEdgeBox(const RailTopPolygon& Poly, int Edge, double Pad)
 		{
 			if (Edge == kCutRimEdge)
 			{
-				const double Z = PlaneHeight(Poly, Poly.CutCenter);
+				// Horizontal on a flat polygon; on a sloped one the rim lies on the plane, within the polygon's heights.
+				const Aabb3 Box = PolygonBox(Poly, 0.0);
+				const double ZLo = IsTilted(Poly) ? Box.Lo.z : PlaneHeight(Poly, Poly.CutCenter);
+				const double ZHi = IsTilted(Poly) ? Box.Hi.z : ZLo;
 				const double Rr = Poly.CutRadius + Pad;
-				return {{Poly.CutCenter.x - Rr, Poly.CutCenter.y - Rr, Z - Pad}, {Poly.CutCenter.x + Rr, Poly.CutCenter.y + Rr, Z + Pad}};
+				return {{Poly.CutCenter.x - Rr, Poly.CutCenter.y - Rr, ZLo - Pad}, {Poly.CutCenter.x + Rr, Poly.CutCenter.y + Rr, ZHi + Pad}};
 			}
 			const Vec2& V0 = Poly.Vertices[Edge];
 			const Vec2& V1 = Poly.Vertices[(Edge + 1) % Poly.VertexCount];
@@ -668,13 +1051,13 @@ namespace rb
 			// Q > 0: the root of the near factor (distance to the nearest circle point = R), never of the antipodal one.
 			return Rho2 > 0.0 && Rho2 + Rj2 + W.z * W.z - R2 > 0.0 && InAngularRange(Dir, Arc.AngleFrom, Arc.AngleSweep, AngleSlack);
 		};
-		return CircleTubeContact(Seg, Radius, Arc.Center, Arc.Radius, 0.0, Arc.Height, TimeLimit, Numerics, Valid);
+		return CircleTubeContact(Seg, Q, Radius, Arc.Radius, 0.0, TimeLimit, Numerics, Valid);
 	}
 
 	// =============================================================================================
 	// Pocket elements (5.3)
 	// =============================================================================================
-	ContactPrediction PredictFacingOnShelf(const MotionSegment& Seg, double /*Radius*/, const Facing& Face, double ContactOffset, double TimeLimit,
+	ContactPrediction PredictFacingOnShelf(const MotionSegment& Seg, double Radius, const Facing& Face, double ContactOffset, double TimeLimit,
 		const NumericsConfig& Numerics)
 	{
 		const Vec3 Normal = ToVec3(Face.PocketNormal);
@@ -689,7 +1072,10 @@ namespace rb
 			const double s = Dot(Dir, At(Q, Tau));
 			return s >= -Slack && s <= L + Slack;
 		};
-		return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, {1.0, true}, Numerics, Valid);
+		const double TauMax = LocalWindow(Seg, TimeLimit);
+		const ContactPrediction Crossing = FirstCrossing(F, TauMax, Seg.T0, {1.0, true}, Numerics, Valid);
+		const ContactPrediction Entry = FacingStartEntry(Q, Dir, F, FacingJunctionBand(Radius, Face), TauMax, Seg.T0, Numerics, [](double) { return true; });
+		return Earlier(Entry, Crossing) ? Entry : Crossing;
 	}
 
 	ContactPrediction PredictFacingAirborne(const MotionSegment& Seg, double Radius, const Facing& Face, double TimeLimit, const NumericsConfig& Numerics)
@@ -711,7 +1097,15 @@ namespace rb
 			const double ContactZ = W.z + H - Radius * Normal.z; // contact point = center - R n
 			return s >= -Slack && s <= L + Slack && ContactZ >= -Slack && ContactZ <= H + Slack;
 		};
-		return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, {1.0, true}, Numerics, Valid);
+		const double TauMax = LocalWindow(Seg, TimeLimit);
+		const ContactPrediction Crossing = FirstCrossing(F, TauMax, Seg.T0, {1.0, true}, Numerics, Valid);
+		const auto OnFace = [&](double Tau)
+		{
+			const double ContactZ = At(Q, Tau).z + H - Radius * Normal.z;
+			return ContactZ >= -Slack && ContactZ <= H + Slack;
+		};
+		const ContactPrediction Entry = FacingStartEntry(Q, Dir, F, FacingJunctionBand(Radius, Face), TauMax, Seg.T0, Numerics, OnFace);
+		return Earlier(Entry, Crossing) ? Entry : Crossing;
 	}
 
 	ContactPrediction PredictFacingTopEdge(const MotionSegment& Seg, double Radius, const Facing& Face, double TimeLimit, const NumericsConfig& Numerics)
@@ -775,7 +1169,7 @@ namespace rb
 			const Vec2 H = XY(W);
 			return InAngularRange(H, Pocket.FrontArcFrom, Pocket.FrontArcSweep, AngleSlack) && LengthSquared(H) <= Square(Ad + Slack) && W.z >= -Rd - Slack;
 		};
-		return CircleTubeContact(Seg, Radius, Pocket.CaptureCenter, Ad, Rd, -Rd, TimeLimit, Numerics, Valid);
+		return CircleTubeContact(Seg, Relative(Seg, ToVec3(Pocket.CaptureCenter, -Rd)), Radius, Ad, Rd, TimeLimit, Numerics, Valid);
 	}
 
 	ContactPrediction PredictCaptureCircle(const MotionSegment& Seg, const PocketGeometry& Pocket, double TimeLimit, const NumericsConfig& Numerics)
@@ -882,6 +1276,66 @@ namespace rb
 		return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, {1.0, true}, Numerics, Valid);
 	}
 
+	namespace
+	{
+		// A straight rail-top edge (RailEdgeLine: its physical pieces): the airborne-nose tube around the line (4.10), valid
+		// beyond the edge's line in the plane (outward of this polygon) over a piece, and a sphere |p - J| = R at every end J
+		// of a piece that is not a polygon vertex (a convex corner where the edge meets the cut or the jaw rounding), valid
+		// for centers whose projection lies beyond J (up to the middle of a gap). Wherever another feature is nearer than J
+		// (the rim, the jaw arc, the plane), that one is reached first, so the loose validity cannot report a false contact.
+		ContactPrediction StraightRailEdgeContact(const MotionSegment& Seg, double Radius, const RailTopPolygon& Polygon, int Edge, const TableGeometry* Table,
+			double TimeLimit, const NumericsConfig& Numerics)
+		{
+			RailEdgeLine E;
+			if (!MakeRailEdgeLine(Polygon, Edge, Table, E) || E.Count == 0)
+			{
+				return {}; // Seam: no physical edge; Nose: the cushion nose line (PredictNoseAirborne); or nothing left of it
+			}
+			const double Slack = Numerics.SegmentParamSlack;
+			// Outward in-plane normal of the edge (the polygon is CCW seen from above, its normal points up): beyond this
+			// edge's line the edge is this polygon's closest feature.
+			const Vec3 Outward = Cross(E.D, Polygon.PlaneNormal);
+			const VecQuad Q0 = Relative(Seg, E.E0);
+			const double TauMax = LocalWindow(Seg, TimeLimit);
+			Polynomial F = SquaredNorm(RejectFrom(Q0, E.D));
+			F.c[0] -= Radius * Radius;
+			const auto ValidLine = [&](double Tau)
+			{
+				const Vec3 W = At(Q0, Tau);
+				return Dot(Outward, W) >= 0.0 && IsOnRailEdge(E, Dot(E.D, W), Slack);
+			};
+			ContactPrediction Best = FirstCrossing(F, TauMax, Seg.T0, {2.0 * Radius, true}, Numerics, ValidLine);
+			for (int k = 0; k < E.Count; ++k)
+			{
+				for (int End = 0; End < 2; ++End)
+				{
+					const double SJ = End == 0 ? E.A[k] : E.B[k];
+					if (End == 0 ? !(SJ > 0.0) : !(SJ < E.L))
+					{
+						continue; // a polygon vertex: the neighbouring edge / feature continues there
+					}
+					// Beyond J up to the middle of the gap to the neighbouring piece (unbounded toward a clipped polygon end).
+					const double Lo = End == 0 ? (k > 0 ? 0.5 * (E.B[k - 1] + SJ) : -kInfinity) : SJ;
+					const double Hi = End == 0 ? SJ : (k + 1 < E.Count ? 0.5 * (SJ + E.A[k + 1]) : kInfinity);
+					const Vec3 J = E.E0 + E.D * SJ;
+					Polynomial G = SquaredNorm(Relative(Seg, J));
+					G.c[0] -= Radius * Radius;
+					const auto ValidCorner = [&](double Tau)
+					{
+						const double s = Dot(E.D, At(Q0, Tau));
+						return s >= Lo && s <= Hi;
+					};
+					const ContactPrediction P = FirstCrossing(G, TauMax, Seg.T0, {2.0 * Radius, true}, Numerics, ValidCorner);
+					if (Earlier(P, Best))
+					{
+						Best = P;
+					}
+				}
+			}
+			return Best;
+		}
+	}
+
 	ContactPrediction PredictRailTopEdge(const MotionSegment& Seg, double Radius, const RailTopPolygon& Polygon, int Edge, double TimeLimit,
 		const NumericsConfig& Numerics)
 	{
@@ -892,11 +1346,51 @@ namespace rb
 			{
 				return {};
 			}
-			// Circle r_p at the plane height of the cut (a tube of radius 0); the rim is the convex edge between the cap (up)
-			// and the hole wall (toward the axis): valid for centers inside the circle in plan and above the rim, with the
-			// circle point below the center belonging to this polygon.
+			// The rim is the convex edge between the rail top (up) and the hole wall (toward the axis). On a flat polygon (the
+			// cap, z = RailTopZ) it is the cut circle r_p about CutCenter (a tube of radius 0, degree 8), valid for centers
+			// inside the circle and above it whose rim point lies on this polygon. On a sloped cushion top it is the plan
+			// circle lifted onto the plane, followed by chords (ForEachRimChord), each a straight tube valid over its length
+			// where the center's foot on the plane lies over the cut (the plane contact's complement) and the center is above
+			// the plane. (A horizontal circle at the cut center's plane height floated 8 mm above or sank 2-4 mm below the
+			// sliver the cut takes from a cushion top; one at the top height or in the plane left mm steps at its ends.)
 			const Vec2 C = Polygon.CutCenter;
 			const double Rp = Polygon.CutRadius;
+			if (IsTilted(Polygon))
+			{
+				const Vec3 Normal = Polygon.PlaneNormal;
+				const double TauMax = LocalWindow(Seg, TimeLimit);
+				ContactPrediction Best;
+				ForEachRimChord(Polygon, [&](const Vec3& P0, const Vec3& P1)
+				{
+					const double L = Length(P1 - P0);
+					if (!(L > 0.0))
+					{
+						return;
+					}
+					const Vec3 D = (P1 - P0) / L;
+					const VecQuad Q0 = Relative(Seg, P0);
+					Polynomial F = SquaredNorm(RejectFrom(Q0, D));
+					F.c[0] -= Radius * Radius;
+					const auto ValidChord = [&](double Tau)
+					{
+						const Vec3 W = At(Q0, Tau);
+						const double s = Dot(D, W);
+						if (s < -Slack || s > L + Slack)
+						{
+							return false;
+						}
+						const Vec3 X = W + P0;
+						const double Above = Dot(Normal, X - Polygon.PlanePoint);
+						return Above >= -Slack && LengthSquared(XY(X - Normal * Above) - C) <= Square(Rp + Slack);
+					};
+					const ContactPrediction P = FirstCrossing(F, TauMax, Seg.T0, {2.0 * Radius, true}, Numerics, ValidChord);
+					if (Earlier(P, Best))
+					{
+						Best = P;
+					}
+				});
+				return Best;
+			}
 			const double Zc = PlaneHeight(Polygon, C);
 			const auto Valid = [&](double Tau)
 			{
@@ -913,26 +1407,39 @@ namespace rb
 				}
 				return InsidePolygon(Polygon, C + H * (Rp / Sqrt(Rho2)), Slack);
 			};
-			return CircleTubeContact(Seg, Radius, C, Rp, 0.0, Zc, TimeLimit, Numerics, Valid);
+			return CircleTubeContact(Seg, Relative(Seg, ToVec3(C, Zc)), Radius, Rp, 0.0, TimeLimit, Numerics, Valid);
 		}
-		if (Edge < 0 || Edge >= Polygon.VertexCount || !IsPhysicalRailTopEdge(Polygon.Edges[Edge]))
-		{
-			return {}; // Seam: no physical edge; Nose: the cushion nose line (PredictNoseAirborne)
-		}
-		const Vec2& V0 = Polygon.Vertices[Edge];
-		const Vec2& V1 = Polygon.Vertices[(Edge + 1) % Polygon.VertexCount];
-		const Vec3 E0 = ToVec3(V0, PlaneHeight(Polygon, V0));
-		const Vec3 E1 = ToVec3(V1, PlaneHeight(Polygon, V1));
-		const double L = Length(E1 - E0);
-		if (!(L > 0.0))
+		return StraightRailEdgeContact(Seg, Radius, Polygon, Edge, nullptr, TimeLimit, Numerics);
+	}
+
+	ContactPrediction PredictRailTopEdge(const MotionSegment& Seg, double Radius, const TableGeometry& Table, int Polygon, int Edge, double TimeLimit,
+		const NumericsConfig& Numerics)
+	{
+		if (Polygon < 0 || Polygon >= Table.RailTops.Size())
 		{
 			return {};
 		}
-		const Vec3 D = (E1 - E0) / L;
-		// Outward in-plane normal of the edge (the polygon is CCW seen from above, its normal points up): beyond this
-		// edge's line the edge is this polygon's closest feature.
-		const Vec3 Outward = Cross(D, Polygon.PlaneNormal);
-		return EdgeLineContact(Seg, Radius, E0, D, L, Outward, TimeLimit, Numerics);
+		const RailTopPolygon& Poly = Table.RailTops[Polygon];
+		if (Edge == kCutRimEdge)
+		{
+			return PredictRailTopEdge(Seg, Radius, Poly, Edge, TimeLimit, Numerics);
+		}
+		return StraightRailEdgeContact(Seg, Radius, Poly, Edge, &Table, TimeLimit, Numerics);
+	}
+
+	int RailTopEdgePieces(const TableGeometry& Table, int Polygon, int Edge, Vec3 From[2], Vec3 To[2])
+	{
+		RailEdgeLine E;
+		if (Polygon < 0 || Polygon >= Table.RailTops.Size() || !MakeRailEdgeLine(Table.RailTops[Polygon], Edge, &Table, E))
+		{
+			return 0;
+		}
+		for (int k = 0; k < E.Count; ++k)
+		{
+			From[k] = E.E0 + E.D * E.A[k];
+			To[k] = E.E0 + E.D * E.B[k];
+		}
+		return E.Count;
 	}
 
 	ContactPrediction PredictSupportExit(const MotionSegment& Seg, const RailTopPolygon& Polygon, double TimeLimit, int& EdgeOut)
@@ -1182,6 +1689,12 @@ namespace rb
 		const double R = Spec.Radius;
 		double Limit = TimeLimit; // t_best pruning (3.2); ties are broken by the full (Kind, Index, SubIndex) key below
 
+		// Swept bounds of the ball over its window, inflated by its radius (every candidate is culled against them); they
+		// shrink to the window up to the best candidate found so far (still containing its position: equal-time candidates
+		// with a smaller key survive).
+		const double Pad = R + Options.NoseProfileRadius + Numerics.ContactTol + Numerics.SegmentParamSlack;
+		Aabb3 Reach = SweptBounds(Seg, 0.0, TauMax).Inflated(Pad);
+
 		const auto Consider = [&](const ContactPrediction& P, TableFeatureKind Kind, int Index, int SubIndex)
 		{
 			if (!P.Found || P.Time > Limit)
@@ -1196,11 +1709,8 @@ namespace rb
 			Best.Contact = P;
 			Best.Feature = Ref;
 			Limit = P.Time;
+			Reach = SweptBounds(Seg, 0.0, Limit - Seg.T0).Inflated(Pad);
 		};
-
-		// Swept bounds of the ball over its window, inflated by its radius (every candidate is culled against them).
-		const double Pad = R + Options.NoseProfileRadius + Numerics.ContactTol + Numerics.SegmentParamSlack;
-		const Aabb3 Reach = SweptBounds(Seg, 0.0, TauMax).Inflated(Pad);
 
 		const int NumPockets = Table.Pockets.Size();
 		const auto FacingsOfPocket = [&](int Pocket, bool Edges)
@@ -1246,7 +1756,7 @@ namespace rb
 				{
 					if (IsPhysicalRailTopEdge(Poly.Edges[e]) && Reach.Overlaps(RailTopEdgeBox(Poly, e, 0.0)))
 					{
-						Consider(PredictRailTopEdge(Seg, R, Poly, e, Limit, Numerics), TableFeatureKind::RailTopEdge, i, e);
+						Consider(PredictRailTopEdge(Seg, R, Table, i, e, Limit, Numerics), TableFeatureKind::RailTopEdge, i, e);
 					}
 				}
 				if (Poly.HasCut && Reach.Overlaps(RailTopEdgeBox(Poly, kCutRimEdge, 0.0)))
@@ -1337,19 +1847,14 @@ namespace rb
 
 		if (State == MotionState::Airborne)
 		{
+			// Cheap features first (quadratics and quartics), so that the pruned window and the shrunk reach cull the
+			// degree-8 jaw arcs and rim tori (and the cut rims) as often as possible; the result does not depend on the order.
 			for (int i = 0; i < Table.Noses.Size(); ++i)
 			{
 				const NoseSegment& Nose = Table.Noses[i];
 				if (Nose.Present && Reach.Overlaps(NoseBox(Nose, 0.0)))
 				{
 					Consider(PredictNoseAirborne(Seg, R, Nose, Options.NoseProfileRadius, Limit, Numerics), TableFeatureKind::NoseSegment, i, 0);
-				}
-			}
-			for (int i = 0; i < Table.JawArcs.Size(); ++i)
-			{
-				if (Reach.Overlaps(JawBox(Table.JawArcs[i], 0.0)))
-				{
-					Consider(PredictJawArcAirborne(Seg, R, Table.JawArcs[i], Limit, Numerics), TableFeatureKind::JawArc, i, 0);
 				}
 			}
 			for (int i = 0; i < Table.Facings.Size(); ++i)
@@ -1361,6 +1866,9 @@ namespace rb
 					Consider(PredictFacingTopEdge(Seg, R, Face, Limit, Numerics), TableFeatureKind::FacingTopEdge, i, 0);
 				}
 			}
+			Consider(PredictOuterBoundary(Seg, Table.OuterBoundary, Limit), TableFeatureKind::OuterBoundary, 0, 0);
+			Consider(PredictLampApex(Seg, R, Environment, Gravity, Limit), TableFeatureKind::LampApex, 0, 0);
+			RailTopsIn(Reach);
 			if (Options.Pockets == PocketModel::GeometricLevelA)
 			{
 				// Every pocket whose a_d cylinder the swept bounds reach: liner / back wall and rim torus (architecture 8.2).
@@ -1370,13 +1878,27 @@ namespace rb
 					if (Reach.Overlaps(PocketBox(Pocket, 0.0)))
 					{
 						Consider(PredictLinerWall(Seg, R, Pocket, Limit, Numerics), TableFeatureKind::LinerWall, p, 0);
+					}
+				}
+			}
+			for (int i = 0; i < Table.JawArcs.Size(); ++i)
+			{
+				if (Reach.Overlaps(JawBox(Table.JawArcs[i], 0.0)))
+				{
+					Consider(PredictJawArcAirborne(Seg, R, Table.JawArcs[i], Limit, Numerics), TableFeatureKind::JawArc, i, 0);
+				}
+			}
+			if (Options.Pockets == PocketModel::GeometricLevelA)
+			{
+				for (int p = 0; p < NumPockets; ++p)
+				{
+					const PocketGeometry& Pocket = Table.Pockets[p];
+					if (Reach.Overlaps(TorusBox(Pocket, 0.0)))
+					{
 						Consider(PredictRimTorus(Seg, R, Pocket, Limit, Numerics), TableFeatureKind::RimTorus, p, 0);
 					}
 				}
 			}
-			RailTopsIn(Reach);
-			Consider(PredictOuterBoundary(Seg, Table.OuterBoundary, Limit), TableFeatureKind::OuterBoundary, 0, 0);
-			Consider(PredictLampApex(Seg, R, Environment, Gravity, Limit), TableFeatureKind::LampApex, 0, 0);
 			return Best;
 		}
 
@@ -1394,17 +1916,21 @@ namespace rb
 		}
 		if (State == MotionState::PocketFall)
 		{
+			// Cheap features first (see Airborne); the result does not depend on the order.
 			const PocketGeometry& P = Table.Pockets[Pocket];
-			JawsOfPocket(Pocket);
-			FacingsOfPocket(Pocket, true);
-			Consider(PredictLinerWall(Seg, R, P, Limit, Numerics), TableFeatureKind::LinerWall, Pocket, 0);
-			Consider(PredictRimTorus(Seg, R, P, Limit, Numerics), TableFeatureKind::RimTorus, Pocket, 0);
 			Consider(PredictCaptureDepth(Seg, R, Limit, Numerics), TableFeatureKind::CaptureDepth, Pocket, 0);
+			Consider(PredictLinerWall(Seg, R, P, Limit, Numerics), TableFeatureKind::LinerWall, Pocket, 0);
 			Consider(PredictPocketExit(Seg, R, P, Limit, Numerics), TableFeatureKind::PocketExit, Pocket, 0);
+			FacingsOfPocket(Pocket, true);
 			// A ball bouncing up inside the hole (rim torus, jaw) above WallTopZ is no longer stopped by the back wall: it meets
 			// the rim of the rail cut and the cap around it. Until PocketExit (center beyond a_d, z > R) hands it to the airborne
 			// dispatcher, only rail-top features within the a_d cylinder (plus the ball's reach) can be touched.
 			RailTopsIn(PocketBox(P, Pad));
+			JawsOfPocket(Pocket);
+			if (Reach.Overlaps(TorusBox(P, 0.0)))
+			{
+				Consider(PredictRimTorus(Seg, R, P, Limit, Numerics), TableFeatureKind::RimTorus, Pocket, 0);
+			}
 		}
 		return Best;
 	}
@@ -1480,7 +2006,8 @@ namespace rb
 			const RailTopPolygon& Poly = Table.RailTops[i];
 			for (int e = 0; e < Poly.VertexCount; ++e)
 			{
-				if (IsPhysicalRailTopEdge(Poly.Edges[e]) && Region.Overlaps(RailTopEdgeBox(Poly, e, 0.0)))
+				RailEdgeLine E;
+				if (MakeRailEdgeLine(Poly, e, &Table, E) && E.Count > 0 && Region.Overlaps(RailTopEdgeBox(Poly, e, 0.0)))
 				{
 					Emit(TableFeatureKind::RailTopEdge, i, e);
 				}
@@ -1674,20 +2201,97 @@ namespace rb
 			Out.BallOnCloth = false;
 			if (Feature.SubIndex == kCutRimEdge)
 			{
-				const Vec2 H = XY(P) - Poly.CutCenter;
-				const double Rho = Length(H);
-				const Vec2 Dir = Rho > 0.0 ? H / Rho : Vec2{};
-				const Vec3 Rim = ToVec3(Poly.CutCenter + Dir * Poly.CutRadius, PlaneHeight(Poly, Poly.CutCenter));
-				Out.Normal = Normalized(P - Rim);
+				// From the nearest point of the rim (circle or chords), as detected.
+				if (IsTilted(Poly))
+				{
+					double Best = kInfinity;
+					Vec3 Near = P;
+					ForEachRimChord(Poly, [&](const Vec3& P0, const Vec3& P1)
+					{
+						const Vec3 D = P1 - P0;
+						const double L2 = LengthSquared(D);
+						const double T = L2 > 0.0 ? Clamp(Dot(P - P0, D) / L2, 0.0, 1.0) : 0.0;
+						const Vec3 Q = P0 + D * T;
+						const double Dist2 = LengthSquared(P - Q);
+						if (Dist2 < Best)
+						{
+							Best = Dist2;
+							Near = Q;
+						}
+					});
+					// The chords decide the contact time; the normal comes from the TRUE rim (the plan circle lifted onto the
+					// plane), whose nearest point can lie up to 1 mm along the rim from the chord's (a chord's 0.02 mm sagitta
+					// shifts the flat minimum of the distance): golden-section search within one chord angle of it, kept on
+					// the polygon (fixed iteration count, deterministic).
+					const Vec2 H = XY(Near) - Poly.CutCenter;
+					if (Best < kInfinity && LengthSquared(H) > 0.0)
+					{
+						const auto RimAt = [&](double Phi)
+						{
+							const Vec2 Q = Poly.CutCenter + Vec2{Cos(Phi), Sin(Phi)} * Poly.CutRadius;
+							return ToVec3(Q, PlaneHeight(Poly, Q));
+						};
+						const auto Dist2At = [&](double Phi)
+						{
+							const Vec3 Q = RimAt(Phi);
+							return InsidePolygon(Poly, XY(Q), 1e-9) ? LengthSquared(P - Q) : kInfinity;
+						};
+						const double Phi0 = Atan2(H.y, H.x);
+						double Lo = Phi0 - kRimChordAngle;
+						double Hi = Phi0 + kRimChordAngle;
+						constexpr double kGolden = 0.3819660112501051;
+						double M1 = Lo + (Hi - Lo) * kGolden;
+						double M2 = Hi - (Hi - Lo) * kGolden;
+						double D1 = Dist2At(M1);
+						double D2 = Dist2At(M2);
+						for (int k = 0; k < 48; ++k)
+						{
+							if (D1 <= D2)
+							{
+								Hi = M2;
+								M2 = M1;
+								D2 = D1;
+								M1 = Lo + (Hi - Lo) * kGolden;
+								D1 = Dist2At(M1);
+							}
+							else
+							{
+								Lo = M1;
+								M1 = M2;
+								D1 = D2;
+								M2 = Hi - (Hi - Lo) * kGolden;
+								D2 = Dist2At(M2);
+							}
+						}
+						const double PhiBest = D1 <= D2 ? M1 : M2;
+						if (Min(D1, D2) < kInfinity)
+						{
+							Near = RimAt(PhiBest);
+						}
+					}
+					Out.Normal = Normalized(P - Near);
+				}
+				else
+				{
+					const Vec2 H = XY(P) - Poly.CutCenter;
+					const double Rho = Length(H);
+					const Vec2 Dir = Rho > 0.0 ? H / Rho : Vec2{};
+					const Vec3 Rim = ToVec3(Poly.CutCenter + Dir * Poly.CutRadius, PlaneHeight(Poly, Poly.CutCenter));
+					Out.Normal = Normalized(P - Rim);
+				}
 			}
-			else if (Feature.SubIndex < Poly.VertexCount)
+			else
 			{
-				const Vec2& V0 = Poly.Vertices[Feature.SubIndex];
-				const Vec2& V1 = Poly.Vertices[(Feature.SubIndex + 1) % Poly.VertexCount];
-				const Vec3 E0 = ToVec3(V0, PlaneHeight(Poly, V0));
-				const Vec3 D = Normalized(ToVec3(V1, PlaneHeight(Poly, V1)) - E0);
-				const Vec3 W = P - E0;
-				Out.Normal = Normalized(W - D * Dot(D, W));
+				// From the nearest point of the physical edge (the part outside the cut disc, incl. its corner at the cut),
+				// as detected.
+				RailEdgeLine E;
+				if (MakeRailEdgeLine(Poly, Feature.SubIndex, &Table, E) && E.Count > 0)
+				{
+					const Vec3 W = P - E.E0;
+					const double S = Dot(E.D, W);
+					const double Near = NearestOnRailEdge(E, S);
+					Out.Normal = Normalized(Near == S ? W - E.D * S : P - (E.E0 + E.D * Near));
+				}
 			}
 			Out.IntoFeature = IntoFrom(Out.Normal);
 			Out.Elevation = ElevationOf(Out.Normal);
