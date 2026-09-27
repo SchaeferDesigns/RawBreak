@@ -137,7 +137,8 @@ namespace rb
 	{
 		BallFinalStatus Status = BallFinalStatus::NotInPlay;
 		BallState State;        // final state (at rest on the table, or where it was removed)
-		Quat Orientation;       // final orientation (carry over into the next shot's SimBall::Orientation)
+		Quat Orientation;       // final orientation (carry over into the next shot's SimBall::Orientation). Integrated with
+		                        //   RecordOptions::Trajectories (and for marked balls with ChalkCling); otherwise the input orientation
 		PocketId Pocket = PocketId::None;
 		OffTableReason OffReason = OffTableReason::Floor;
 		double Time = 0.0;      // time it came to rest / was pocketed / left the table [s]
@@ -158,12 +159,13 @@ namespace rb
 		int EventsProcessed = 0;     // popped valid events (counted against MaxEvents)
 		int StaleEventsSkipped = 0;  // lazy-deletion discards
 		int Predictions = 0;         // root isolations performed
-		int Islands = 0;
+		int Islands = 0;             // islands started (WP-6b's StartIsland; a merge into the running island does not count)
+		int IslandHandOffs = 0;      // seeds the event loop handed to StartIsland (pressing, Zeno, cluster, exact simultaneity, re-anchor)
 		int IslandSteps = 0;         // compliant + rigid steps of all islands (budget NumericsConfig::MaxIslandSteps)
 		int IslandRigidSwitches = 0; // islands switched to Rigid mode (sustained contacts, CompliantMaxDuration, rail top)
 		bool IslandBudgetExceeded = false; // MaxIslandSteps reached: all balls stopped, SimStatus::Aborted
 		int ZenoTriggers = 0;
-		int PressingContacts = 0;
+		int PressingContacts = 0;    // contacts routed to an island at zero normal speed (Pressing flag, or the exact re-anchor rule)
 		int OverlapWarnings = 0;     // overlap > OverlapGuard detected (should be 0; ROB-11)
 		int MissedEvents = 0;        // e.g. landing over a rail (collisions 6.1 step 3)
 		int FeatureJoins = 0;        // table features added to running islands (architecture 8.8)
