@@ -191,8 +191,12 @@ namespace rb
 		//    touching and separating, or zero speed without F'' < 0, yields no start event (3.6);
 		//  * otherwise the first DOWNWARD crossing in (0, TauMax] (approach test: F' < 0) whose position IsValid; a
 		//    decreasing run that turns back up at an interior minimum above -Scale TangencyTolPerLength is a graze and a
-		//    miss (3.3). Roots are isolated on the time-scaled polynomial (tau = T s, T = min(TauMax, root bound), 3.4),
-		//    refined by safeguarded Newton-bisection, then optionally polished by Polish(tau, BracketLo, BracketHi).
+		//    miss (3.3), as is one that comes to rest at the window end (F' ~ 0) above -Scale ContactTol (5.5). Roots are
+		//    isolated on the time-scaled polynomial (tau = T s, T = min(TauMax, root bound), 3.4), refined by safeguarded
+		//    Newton-bisection, then optionally polished by Polish(tau, BracketLo, BracketHi);
+		//  * or, if earlier, an interior maximum of F within the touching band [-Scale ContactTol, 0] from which F falls below
+		//    -Scale TangencyTolPerLength (touching, turning into the feature without a crossing): Pressing at the maximum
+		//    (contact features; a region boundary is crossed there, no flag).
 		// Overlap beyond OverlapGuard at the start (contact features) sets ContactFlags::Overlap even without an event.
 		template <class ValidFn, class PolishFn>
 		ContactPrediction FirstCrossing(const Polynomial& F, double TauMax, double StartTime, const CrossingSpec& Spec, const NumericsConfig& N,
@@ -274,10 +278,22 @@ namespace rb
 			}
 
 			// ---- decreasing runs: the first one that goes from > 0 to <= 0 and is not a graze ----
+			// A run can also start at an interior MAXIMUM inside the touching band [-Scale ContactTol, 0] (the gap never became
+			// positive again): a pair that touched (a start in the band that separated slower than the gap's rounding, or a
+			// graze) turns and presses in. That is the pressing contact of 3.6 at the maximum (zero normal speed, gap'' < 0),
+			// no crossing: without this rule it had no event at all and interpenetrated (a 1e-15 m rounding overlap and a
+			// 2e-9 m/s separation drove a topspin ball through a frozen object ball or into a rail). It counts only when the
+			// run leaves the band (< -eps_f), a run that stays within it is a touch like a graze, and only when F never was
+			// deeper than the band before (a start deep beyond the boundary is no touch: corrupt overlap, or already inside a
+			// region such as a plan overlap).
 			const double GrazeTol = Spec.Scale * N.TangencyTolPerLength;
+			const double TouchBand = Spec.Scale * N.ContactTol;
+			const double Shallowest = -Max(TouchBand, GrazeTol);
+			double Lowest = Values[0]; // minimum of F on [0, Knots[i]] (monotone pieces: a knot value)
 			int i = 0;
 			while (i + 1 < NumKnots)
 			{
+				Lowest = Min(Lowest, Values[i]);
 				if (!(Values[i + 1] < Values[i]))
 				{
 					++i;
@@ -288,10 +304,27 @@ namespace rb
 				{
 					++j;
 				}
-				if (Values[i] > 0.0 && Values[j] <= 0.0)
+				if (i > 0 && Values[i] <= 0.0 && Values[i] >= -TouchBand && Lowest >= Shallowest && Values[j] < -GrazeTol)
+				{
+					const double Tau = Min(Knots[i] * T, TauMax);
+					if (IsValid(Tau))
+					{
+						Out.Found = true;
+						Out.Time = StartTime + Tau;
+						Out.Flags = static_cast<std::uint8_t>(Out.Flags | (Spec.Contact ? ContactFlags::Pressing : 0u));
+						return Out;
+					}
+				}
+				else if (Values[i] > 0.0 && Values[j] <= 0.0)
 				{
 					const bool InteriorMinimum = j + 1 < NumKnots;
-					if (!(InteriorMinimum && Values[j] > -GrazeTol))
+					// The same for a run that ends where the segment comes to REST within the touching band (F' ~ 0 at the window
+					// end, e.g. a rolling ball stopping 0.5 nm inside a drop-edge circle or against a ball): a touch, not a
+					// crossing (5.5: "use eps_touch to classify a stopped ball exactly on the circle as not crossed"). Only at
+					// the window's own end (not at a root-bound cut); a crossing that is still moving at the end is kept.
+					const bool RestsAtEnd =
+						!InteriorMinimum && T == TauMax && Values[j] >= -TouchBand && DS.Eval(1.0) >= -Spec.Scale * N.ApproachSpeedTol * T; // S' = T F'
+					if (!(InteriorMinimum && Values[j] > -GrazeTol) && !RestsAtEnd)
 					{
 						int p = i;
 						while (!(Values[p + 1] <= 0.0))
@@ -371,8 +404,13 @@ namespace rb
 		// at the facing's top) beyond the jaw's (collisions 5.3: "the small mismatch at the arc ends"). A ball passing the
 		// junction inside that step enters the facing's range already within its contact offset, with no crossing, and ran
 		// into the facing unchecked. The chain must be watertight (prior-art 5.7): entering the range (s rising through 0)
-		// within the step (-Band <= F <= ContactTol) and approaching is the contact. Deeper entries are not junction
-		// crossings (the jaw is in the way; only a corrupt state gets there).
+		// within the step (-Band <= F <= ContactTol) counts as touching the face there, with the start rules of 3.6 at that
+		// time: approaching is the contact, zero normal speed with F'' < 0 is a pressing contact, and a ball that separates
+		// but turns back while F is still <= 0 (it never left the step) presses in at that maximum (F is a quadratic). A ball
+		// that entered parallel to the face and curved in (slip or tilt) otherwise ran through the facing with no event. The
+		// same holds for a window that STARTS inside the range and the step, separating (a start that approaches or presses
+		// is FirstCrossing's start rule). Deeper entries are not junction crossings (the jaw is in the way; only a corrupt
+		// state gets there). Valid(tau) is the feature's validity (along the range [0, L] and, airborne, the face height).
 		template <class ValidFn>
 		ContactPrediction FacingStartEntry(const VecQuad& Q, const Vec3& Dir, const Polynomial& F, double Band, double TauMax, double StartTime,
 			const NumericsConfig& N, const ValidFn& Valid)
@@ -382,18 +420,50 @@ namespace rb
 			{
 				return Out;
 			}
-			double Entries[2];
-			const int Count = RisingRoots(Dot(Dir, Q.A), Dot(Dir, Q.B), Dot(Dir, Q.C), TauMax, Entries);
 			const Polynomial DF = F.Derivative();
+			const double Curvature = F.Degree >= 2 ? 2.0 * F.c[2] : 0.0; // F'' (constant: F is at most quadratic)
+			double Entries[3];
+			int Count = 0;
+			if (F.c[0] <= N.ContactTol && F.c[0] >= -Band && DF.Eval(0.0) > N.ApproachSpeedTol && Valid(0.0))
+			{
+				Entries[Count++] = 0.0; // starts in the range and the step, separating: only the turn-back below applies
+			}
+			Count += RisingRoots(Dot(Dir, Q.A), Dot(Dir, Q.B), Dot(Dir, Q.C), TauMax, Entries + Count);
 			for (int i = 0; i < Count; ++i)
 			{
 				const double Tau = Entries[i];
 				const double Gap = F.Eval(Tau);
-				if (Gap <= N.ContactTol && Gap >= -Band && DF.Eval(Tau) < -N.ApproachSpeedTol && Valid(Tau))
+				if (!(Gap <= N.ContactTol && Gap >= -Band))
+				{
+					continue;
+				}
+				const double Slope = DF.Eval(Tau);
+				if (Tau > 0.0 && Slope < -N.ApproachSpeedTol && Valid(Tau))
 				{
 					Out.Found = true;
 					Out.Time = StartTime + Tau;
 					return Out;
+				}
+				if (Tau > 0.0 && Abs(Slope) <= N.ApproachSpeedTol && Curvature < 0.0 && Valid(Tau))
+				{
+					Out.Found = true;
+					Out.Time = StartTime + Tau;
+					Out.Flags = ContactFlags::Pressing;
+					return Out;
+				}
+				if (Slope > N.ApproachSpeedTol && Curvature < 0.0)
+				{
+					// Separating within the step, turning back at the maximum TauTop: a pressing contact there if F never became
+					// positive (else the crossing from above is FirstCrossing's) and it then closes beyond eps_f.
+					const double TauTop = -F.c[1] / Curvature;
+					if (TauTop > Tau && TauTop <= TauMax && F.Eval(TauTop) <= 0.0 && F.Eval(Min(TauMax, kUnboundedWindow)) < -N.TangencyTolPerLength &&
+						Valid(TauTop))
+					{
+						Out.Found = true;
+						Out.Time = StartTime + TauTop;
+						Out.Flags = ContactFlags::Pressing;
+						return Out;
+					}
 				}
 			}
 			return Out;
@@ -1019,6 +1089,12 @@ namespace rb
 
 	ContactPrediction PredictJawArcAirborne(const MotionSegment& Seg, double Radius, const JawArc& Arc, double TimeLimit, const NumericsConfig& Numerics)
 	{
+		return PredictJawArcAirborne(Seg, Radius, Arc, 0.0, TimeLimit, Numerics);
+	}
+
+	ContactPrediction PredictJawArcAirborne(const MotionSegment& Seg, double Radius, const JawArc& Arc, double NoseProfileRadius, double TimeLimit,
+		const NumericsConfig& Numerics)
+	{
 		// EXACT edge contact (4.10 "alternative", degree 8 by the same isolation): the distance from the center to the arc's
 		// edge circle (radius r_j at height h about Center) equals R, where the nearest circle point lies on the exposed arc
 		// (plan direction Center -> center within [AngleFrom, AngleFrom + AngleSweep]). At each tangent point this surface
@@ -1027,31 +1103,34 @@ namespace rb
 		// |p - O| = R + r_j is not: at the nose junction it bulges up to r_j beyond the nose cylinder, and a ball crossing
 		// the junction plane inside that shell (e.g. falling onto the jaw while drifting along the rail) was hit by neither
 		// predictor and flew through the jaw into the cushion.
+		// With a nose profile radius r_n the edge is rounded like the nose (4.10, the on-cloth R_c of ComputeCushionContact):
+		// the tube around the edge circle has radius R + r_n, continuing the airborne nose's R + r_n.
+		const double Reach = Radius + NoseProfileRadius;
 		const VecQuad Q = Relative(Seg, ToVec3(Arc.Center, Arc.Height));
 		const double AngleSlack = Numerics.SegmentParamSlack / Max(Arc.Radius, 1e-6);
 		if (!(Arc.Radius > 0.0))
 		{
-			// Sharp jaw (r_j = 0): the circle is the point O itself, |p - O| = R (quartic, exact).
+			// Sharp jaw (r_j = 0): the circle is the point O itself, |p - O| = R + r_n (quartic, exact).
 			Polynomial F = SquaredNorm(Q);
-			F.c[0] -= Radius * Radius;
+			F.c[0] -= Reach * Reach;
 			const auto ValidPoint = [&](double Tau)
 			{
 				const Vec2 Dir = XY(At(Q, Tau));
 				return LengthSquared(Dir) > 0.0 && InAngularRange(Dir, Arc.AngleFrom, Arc.AngleSweep, AngleSlack);
 			};
-			return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, {2.0 * Radius, true}, Numerics, ValidPoint);
+			return FirstCrossing(F, LocalWindow(Seg, TimeLimit), Seg.T0, {2.0 * Reach, true}, Numerics, ValidPoint);
 		}
 		const double Rj2 = Arc.Radius * Arc.Radius;
-		const double R2 = Radius * Radius;
+		const double R2 = Reach * Reach;
 		const auto Valid = [&](double Tau)
 		{
 			const Vec3 W = At(Q, Tau);
 			const Vec2 Dir = XY(W);
 			const double Rho2 = LengthSquared(Dir);
-			// Q > 0: the root of the near factor (distance to the nearest circle point = R), never of the antipodal one.
+			// Q > 0: the root of the near factor (distance to the nearest circle point = R + r_n), never of the antipodal one.
 			return Rho2 > 0.0 && Rho2 + Rj2 + W.z * W.z - R2 > 0.0 && InAngularRange(Dir, Arc.AngleFrom, Arc.AngleSweep, AngleSlack);
 		};
-		return CircleTubeContact(Seg, Q, Radius, Arc.Radius, 0.0, TimeLimit, Numerics, Valid);
+		return CircleTubeContact(Seg, Q, Radius, Arc.Radius, NoseProfileRadius, TimeLimit, Numerics, Valid);
 	}
 
 	// =============================================================================================
@@ -1074,7 +1153,7 @@ namespace rb
 		};
 		const double TauMax = LocalWindow(Seg, TimeLimit);
 		const ContactPrediction Crossing = FirstCrossing(F, TauMax, Seg.T0, {1.0, true}, Numerics, Valid);
-		const ContactPrediction Entry = FacingStartEntry(Q, Dir, F, FacingJunctionBand(Radius, Face), TauMax, Seg.T0, Numerics, [](double) { return true; });
+		const ContactPrediction Entry = FacingStartEntry(Q, Dir, F, FacingJunctionBand(Radius, Face), TauMax, Seg.T0, Numerics, Valid);
 		return Earlier(Entry, Crossing) ? Entry : Crossing;
 	}
 
@@ -1099,12 +1178,7 @@ namespace rb
 		};
 		const double TauMax = LocalWindow(Seg, TimeLimit);
 		const ContactPrediction Crossing = FirstCrossing(F, TauMax, Seg.T0, {1.0, true}, Numerics, Valid);
-		const auto OnFace = [&](double Tau)
-		{
-			const double ContactZ = At(Q, Tau).z + H - Radius * Normal.z;
-			return ContactZ >= -Slack && ContactZ <= H + Slack;
-		};
-		const ContactPrediction Entry = FacingStartEntry(Q, Dir, F, FacingJunctionBand(Radius, Face), TauMax, Seg.T0, Numerics, OnFace);
+		const ContactPrediction Entry = FacingStartEntry(Q, Dir, F, FacingJunctionBand(Radius, Face), TauMax, Seg.T0, Numerics, Valid);
 		return Earlier(Entry, Crossing) ? Entry : Crossing;
 	}
 
@@ -1736,7 +1810,7 @@ namespace rb
 				const int Index = 2 * Pocket + Side;
 				if (Index < Table.JawArcs.Size() && Reach.Overlaps(JawBox(Table.JawArcs[Index], 0.0)))
 				{
-					Consider(PredictJawArcAirborne(Seg, R, Table.JawArcs[Index], Limit, Numerics), TableFeatureKind::JawArc, Index, 0);
+					Consider(PredictJawArcAirborne(Seg, R, Table.JawArcs[Index], Options.NoseProfileRadius, Limit, Numerics), TableFeatureKind::JawArc, Index, 0);
 				}
 			}
 		};
@@ -1885,7 +1959,7 @@ namespace rb
 			{
 				if (Reach.Overlaps(JawBox(Table.JawArcs[i], 0.0)))
 				{
-					Consider(PredictJawArcAirborne(Seg, R, Table.JawArcs[i], Limit, Numerics), TableFeatureKind::JawArc, i, 0);
+					Consider(PredictJawArcAirborne(Seg, R, Table.JawArcs[i], Options.NoseProfileRadius, Limit, Numerics), TableFeatureKind::JawArc, i, 0);
 				}
 			}
 			if (Options.Pockets == PocketModel::GeometricLevelA)
@@ -1961,7 +2035,7 @@ namespace rb
 		}
 		for (int i = 0; i < Table.JawArcs.Size(); ++i)
 		{
-			if (Region.Overlaps(JawBox(Table.JawArcs[i], 0.0)))
+			if (Region.Overlaps(JawBox(Table.JawArcs[i], Pad))) // rounded by r_n like the noses
 			{
 				Emit(TableFeatureKind::JawArc, i, 0);
 			}

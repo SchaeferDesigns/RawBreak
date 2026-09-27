@@ -16,7 +16,13 @@
 //    ContactFlags::AtStart; touching with zero normal speed (|gap'| <= ApproachSpeedTol) and gap'' < 0 yields
 //    AtStart | Pressing (3.6, 4.10); touching and separating, or zero speed without gap'' < 0, yields no start event;
 //    a decreasing run that turns back up at a minimum shallower than eps_f = TangencyTolPerLength is a graze and a
-//    miss (3.3). The same rules hold for every contact feature with its own gap function.
+//    miss (3.3), and so is a run that ends where the segment comes to rest (gap' ~ 0 at the window end) within
+//    ContactTol (collisions 5.5: a ball stopping within eps_touch of the drop-edge circle has not crossed it; a ball
+//    rolling to rest against another is touching, not hitting it). A pair that touches without a crossing later in
+//    the window (the gap turns down at a maximum within [-ContactTol, 0], e.g. after a start in the band that
+//    separated slower than its rounding overlap, or after a graze; never after being deeper than that) and then closes
+//    beyond eps_f yields Pressing (without AtStart) at that maximum: zero normal speed, gap'' < 0 (a region boundary is
+//    crossed there, no flag). The same rules hold for every contact feature with its own gap function.
 //  - Overlap beyond OverlapGuard at the start sets ContactFlags::Overlap (state corrupt: log, never move balls), also
 //    when no event follows (Found = false, Flags = Overlap: the pair separates).
 //  - Region events (drop edge, capture circle / depth, pocket exit, support exit, outer boundary) use the same crossing
@@ -102,13 +108,20 @@ namespace rb
 	// cylinders seamlessly; the quartic center-sphere approximation |p - O| = R + r_j does not (a ball crossing the nose
 	// junction inside the up-to-r_j bulge was missed by both). A sharp jaw (r_j = 0) is the point contact |p - O| = R.
 	RB_API ContactPrediction PredictJawArcAirborne(const MotionSegment& Seg, double Radius, const JawArc& Arc, double TimeLimit, const NumericsConfig& Numerics);
+	// The same with the nose profile radius r_n (DetectOptions::NoseProfileRadius; used by PredictTableEvent): the jaw's edge
+	// is rounded like the nose, the tube around the edge circle has radius R + r_n (the airborne nose's R + r_n, and at a
+	// ball on the cloth the on-cloth jaw distance r_j + R_c(r_n) of ComputeCushionContact).
+	RB_API ContactPrediction PredictJawArcAirborne(const MotionSegment& Seg, double Radius, const JawArc& Arc, double NoseProfileRadius, double TimeLimit,
+		const NumericsConfig& Numerics);
 
 	// ---------------------------------------------------------------------------------------------
 	// Pocket elements (5.3). Facing on the shelf: center-to-plan-line distance s_f (FacingContactOffset).
 	// Both facing-face predictors close the junction with the jaw arc (prior-art 5.7): the face's contact surface lies
 	// s_f - R_c = 0.06 mm (on the cloth; up to 0.6 mm at the facing's top) beyond the jaw's edge at the tangent point
 	// (collisions 5.3 "the small mismatch at the arc ends"), so entering the facing's range (s rising through 0) within
-	// its contact offset and approaching is the contact.
+	// that step counts as touching the face: approaching is the contact; zero normal speed pressed in (F'' < 0) is a
+	// Pressing contact at the entry; separating but turning back before the face distance became positive is a Pressing
+	// contact at that turn (also for a window that starts inside the range and the step).
 	// ---------------------------------------------------------------------------------------------
 	RB_API ContactPrediction PredictFacingOnShelf(const MotionSegment& Seg, double Radius, const Facing& Face, double ContactOffset, double TimeLimit,
 		const NumericsConfig& Numerics);
