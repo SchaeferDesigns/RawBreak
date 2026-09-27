@@ -1,8 +1,9 @@
 // rbsim - run one shot through BilliardsCore and write JSON (event log + sampled trajectories) for
-// debugging, visualisation, calibration (motion spec implementation note 14) and replays.
+// debugging, visualisation (viewer/index.html), calibration (motion spec implementation note 14) and replays.
 // Owner: WP-7 (output, playback & tools). Interface and JSON schema: Docs/architecture.md, section "rbsim".
 
 #include "JsonWriter.h"
+#include "SimInputJson.h"
 
 #include "rb/Core/Constants.h"
 #include "rb/Core/Error.h"
@@ -29,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -79,7 +81,9 @@ namespace
 		const char* OutPath = nullptr;
 		double SampleDt = 0.01;
 		bool Trajectories = true;
+		bool TrajectoriesGiven = false;
 		bool EventStates = true;
+		bool EventStatesGiven = false;
 		bool Record = false;
 		bool Facts = false;
 		int Bench = 0;
@@ -114,10 +118,13 @@ namespace
 			"  --list-params                            print every key, its value for the chosen table and its unit\n"
 			"Replay:\n"
 			"  --dump-input FILE                        write the complete SimInput as JSON (rbsimInput schema)\n"
-			"  --in FILE                                simulate a dumped SimInput (scenario options ignored) [TODO(WP-7)]\n"
+			"  --in FILE                                simulate a dumped SimInput (scenario and parameter options ignored;\n"
+			"                                           --record/--facts/--no-trajectories/--no-states still apply)\n"
 			"Output:\n"
 			"  --out FILE        JSON file (default stdout)     --dt S   sample interval (default 0.01, 0 = none)\n"
-			"  --no-trajectories --no-states --record --facts --compact --bench N --geometry\n",
+			"  --no-trajectories --no-states --record --facts --compact --bench N --geometry\n"
+			"Exit code: 0 = SimStatus::Ok, 2 = usage / setup error, 3 = simulation not Ok, 1 = I/O\n"
+			"Viewer: open Tools/rbsim/viewer/index.html in a browser and load the JSON (--geometry adds the full outline)\n",
 			rb::CoreVersion());
 	}
 
@@ -287,8 +294,8 @@ namespace
 			else if (Is(Arg, "--dump-input")) { O.DumpInputPath = Next(); }
 			else if (Is(Arg, "--out")) { O.OutPath = Next(); }
 			else if (Is(Arg, "--dt")) { O.SampleDt = std::strtod(Next(), nullptr); }
-			else if (Is(Arg, "--no-trajectories")) { O.Trajectories = false; }
-			else if (Is(Arg, "--no-states")) { O.EventStates = false; }
+			else if (Is(Arg, "--no-trajectories")) { O.Trajectories = false; O.TrajectoriesGiven = true; }
+			else if (Is(Arg, "--no-states")) { O.EventStates = false; O.EventStatesGiven = true; }
 			else if (Is(Arg, "--record")) { O.Record = true; }
 			else if (Is(Arg, "--facts")) { O.Facts = true; O.Record = true; }
 			else if (Is(Arg, "--compact")) { O.Compact = true; }
@@ -301,23 +308,6 @@ namespace
 			}
 		}
 		return true;
-	}
-
-	const char* ToString(rb::MotionState S)
-	{
-		switch (S)
-		{
-		case rb::MotionState::Stationary: return "Stationary";
-		case rb::MotionState::Spinning: return "Spinning";
-		case rb::MotionState::Sliding: return "Sliding";
-		case rb::MotionState::Rolling: return "Rolling";
-		case rb::MotionState::Airborne: return "Airborne";
-		case rb::MotionState::PocketPivot: return "PocketPivot";
-		case rb::MotionState::PocketFall: return "PocketFall";
-		case rb::MotionState::Pocketed: return "Pocketed";
-		case rb::MotionState::OffTable: return "OffTable";
-		}
-		return "?";
 	}
 
 	const char* ToString(rb::ShotEventType T)
@@ -415,7 +405,7 @@ namespace
 		WriteVec(J, "r", S.Position);
 		WriteVec(J, "v", S.Velocity);
 		WriteVec(J, "w", S.Omega);
-		J.Field("state", ToString(S.State));
+		J.Field("state", rbsim::MotionStateName(S.State));
 		J.EndObject();
 	}
 
@@ -461,15 +451,18 @@ namespace
 		return S;
 	}
 
-	// Builds the simulator input from the options. Returns false on a fatal setup error.
-	bool BuildInput(const Options& O, rb::TableGeometry& Geometry, rb::SimInput& In)
+	// Builds the simulator input from the scenario options into L (geometry + input). False on a fatal setup error.
+	bool BuildInput(const Options& O, rbsim::LoadedSimInput& L)
 	{
 		const rb::TableSpec Spec = rb::GetTableSpec(O.Table);
+		L.TableName = Spec.Name;
+		rb::TableGeometry& Geometry = L.Geometry;
 		if (rb::BuildTableGeometry(Spec, Geometry) != rb::ErrorCode::Ok)
 		{
-			std::fprintf(stderr, "rbsim: warning: BuildTableGeometry not available (%s); continuing with a partial table\n", Spec.Name);
+			std::fprintf(stderr, "rbsim: warning: BuildTableGeometry rejected %s; continuing with a partial table\n", Spec.Name);
 			Geometry.Spec = Spec;
 		}
+		rb::SimInput& In = L.Input;
 		In.Table = &Geometry;
 		In.Params = rb::MakePhysicsParams(Spec); // the single source of table-dependent physics
 		if (O.Cloth >= 0)
@@ -490,7 +483,13 @@ namespace
 				Set.Balls[i] = rb::kStandardPoolBall;
 			}
 		}
-		const rb::rules::RulesTable Landmarks = rb::rules::MakeRulesTable(Spec.Length, Spec.Width, Set.Balls[1].Radius);
+		double Radii[rb::kMaxBalls] = {};
+		for (int i = 0; i < Set.Count && i < rb::kMaxBalls; ++i)
+		{
+			Radii[i] = Set.Balls[i].Radius;
+		}
+		// The rules' table from the single geometry source (landmarks, pocket openings, per-ball radii).
+		const rb::rules::RulesTable Landmarks = rb::BuildRulesTable(Geometry, Set.Balls[1].Radius, Radii, Set.Count);
 
 		// Cue ball on the head spot unless placed explicitly.
 		rb::SimBall& Cue = In.Balls[rb::kCueBallId];
@@ -504,7 +503,7 @@ namespace
 			const rb::rules::RulesConfig Config;
 			if (rb::rules::GenerateRack(static_cast<rb::rules::Discipline>(O.Rack), Config, Landmarks, O.Seed, false, O.RackGap, Rack) != rb::ErrorCode::Ok)
 			{
-				std::fprintf(stderr, "rbsim: warning: GenerateRack not available; no rack placed\n");
+				std::fprintf(stderr, "rbsim: warning: GenerateRack failed; no rack placed\n");
 			}
 			for (int Id = 1; Id < rb::kPoolBallCount; ++Id)
 			{
@@ -569,158 +568,35 @@ namespace
 		return true;
 	}
 
-	void WriteTableSpec(rbsim::JsonWriter& J, const rb::TableSpec& S)
+	bool ReadTextFile(const char* Path, std::string& Out)
 	{
-		J.BeginObject();
-		J.Field("name", S.Name);
-		J.FieldInt("preset", static_cast<int>(S.Preset));
-		J.Field("length", S.Length);
-		J.Field("width", S.Width);
-		J.Field("bedHeight", S.BedHeight);
-		J.Field("cushionNoseHeight", S.CushionNoseHeight);
-		J.Field("cushionWidth", S.CushionWidth);
-		J.Field("cushionNoseProfileRadius", S.CushionNoseProfileRadius);
-		J.Field("railWidthTotal", S.RailWidthTotal);
-		J.Field("railTopZ", S.RailTopZ);
-		J.Field("slateThickness", S.SlateThickness);
-		J.Field("sightInset", S.SightInset);
-		J.Field("sightDiameter", S.SightDiameter);
-		const rb::PocketSpec* Pockets[2] = {&S.Corner, &S.Side};
-		const char* PocketKeys[2] = {"corner", "side"};
-		for (int k = 0; k < 2; ++k)
+		std::FILE* File = std::fopen(Path, "rb");
+		if (File == nullptr)
 		{
-			J.Key(PocketKeys[k]);
-			J.BeginObject();
-			J.Field("mouth", Pockets[k]->Mouth);
-			J.Field("cutAngle", Pockets[k]->CutAngle);
-			J.Field("shelf", Pockets[k]->Shelf);
-			J.Field("jawRadius", Pockets[k]->JawRadius);
-			J.Field("captureRadius", Pockets[k]->CaptureRadius);
-			J.EndObject();
+			std::fprintf(stderr, "rbsim: cannot open %s\n", Path);
+			return false;
 		}
-		J.Field("backdraft", S.Backdraft);
-		J.Field("dropPointRadius", S.DropPointRadius);
-		J.Field("facingThickness", S.FacingThickness);
-		J.Field("linerUndercut", S.LinerUndercut);
-		J.FieldBool("hasPockets", S.HasPockets);
-		J.FieldInt("cloth", static_cast<int>(S.Cloth));
-		J.Field("facingRestitutionScale", S.FacingRestitutionScale);
-		J.Field("linerRestitution", S.LinerRestitution);
-		J.Field("linerFriction", S.LinerFriction);
-		J.EndObject();
-	}
-
-	// rbsimInput schema v1: everything needed to reproduce Simulator::Run bit for bit (architecture 5.3).
-	void WriteSimInput(const rb::SimInput& In, rbsim::JsonWriter& J)
-	{
-		J.BeginObject();
-		J.FieldInt("rbsimInput", 1);
-		J.Field("coreVersion", rb::CoreVersion());
-		J.Key("tableSpec");
-		WriteTableSpec(J, In.Table->Spec);
-		J.Key("environment");
-		J.BeginObject();
-		J.Field("lampUndersideZ", In.Environment.LampUndersideZ);
-		const double Footprint[4] = {In.Environment.LampFootprint.Lo.x, In.Environment.LampFootprint.Lo.y, In.Environment.LampFootprint.Hi.x,
-			In.Environment.LampFootprint.Hi.y};
-		J.Key("lampFootprint");
-		J.NumberArray(Footprint, 4);
-		J.EndObject();
-		J.Key("params");
-		J.BeginObject();
-		for (int i = 0; i < rb::PhysicsParamCount(); ++i)
+		Out.clear();
+		char Buffer[1 << 16];
+		for (;;)
 		{
-			const rb::PhysicsParamInfo Info = rb::PhysicsParamAt(i);
-			double Value = 0.0;
-			rb::GetPhysicsParam(In.Params, Info.Key, Value);
-			J.Field(Info.Key, Value);
-		}
-		J.EndObject();
-		J.Key("balls");
-		J.BeginArray();
-		for (int Id = 0; Id < rb::kMaxBalls; ++Id)
-		{
-			const rb::SimBall& B = In.Balls[Id];
-			if (!B.InPlay)
+			const std::size_t N = std::fread(Buffer, 1, sizeof(Buffer), File);
+			Out.append(Buffer, N);
+			if (N < sizeof(Buffer))
 			{
-				continue;
+				break;
 			}
-			J.BeginObject();
-			J.FieldInt("id", Id);
-			J.Field("radius", B.Spec.Radius);
-			J.Field("mass", B.Spec.Mass);
-			J.Field("inertia", B.Spec.Inertia);
-			J.Key("state");
-			WriteState(J, B.State);
-			const double Q[4] = {B.Orientation.w, B.Orientation.x, B.Orientation.y, B.Orientation.z};
-			J.Key("q");
-			J.NumberArray(Q, 4);
-			J.EndObject();
 		}
-		J.EndArray();
-		J.Key("strikes");
-		J.BeginArray();
-		for (const rb::StrikeRequest& S : In.Strikes)
+		const bool Failed = std::ferror(File) != 0;
+		std::fclose(File);
+		if (Failed)
 		{
-			J.BeginObject();
-			J.FieldInt("ball", S.Ball);
-			J.Field("V", S.Input.Speed);
-			J.Field("theta", S.Input.Elevation);
-			J.Field("phi", S.Input.Azimuth);
-			J.Field("a", S.Input.OffsetA);
-			J.Field("b", S.Input.OffsetB);
-			J.Field("lambdaOverride", S.Input.LambdaOverride);
-			J.FieldBool("squirt", S.Input.SquirtEnabled);
-			J.FieldBool("tipTouchesCloth", S.Input.TipTouchesCloth);
-			J.Key("cue");
-			J.BeginObject();
-			J.Field("mass", S.Input.Cue.Mass);
-			J.Field("endMass", S.Input.Cue.EndMass);
-			J.Field("tipRestitution", S.Input.Cue.TipRestitution);
-			J.Field("tipFriction", S.Input.Cue.TipFriction);
-			J.Field("tipFrictionKinetic", S.Input.Cue.TipFrictionKinetic);
-			J.Field("tipDomeRadius", S.Input.Cue.TipDomeRadius);
-			J.Field("tipDiameter", S.Input.Cue.TipDiameter);
-			J.Field("length", S.Input.Cue.Length);
-			J.Field("contactTime", S.Input.Cue.ContactTime);
-			J.Field("followThroughDistance", S.Input.Cue.FollowThroughDistance);
-			J.FieldBool("jumpCue", S.Input.Cue.JumpCue);
-			J.EndObject();
-			J.EndObject();
+			std::fprintf(stderr, "rbsim: cannot read %s\n", Path);
 		}
-		J.EndArray();
-		J.Key("context");
-		J.BeginObject();
-		J.FieldInt("inHand", static_cast<int>(In.Context.InHand));
-		WriteVec2(J, "placed", In.Context.PlacedPosition);
-		J.FieldBool("templatePresent", In.Context.TemplatePresent);
-		J.Field("shotClockElapsed", In.Context.ShotClockElapsed);
-		J.FieldBool("footOnFloor", In.Context.FootOnFloor);
-		J.Field("frozenTolerance", In.Context.FrozenTolerance);
-		J.Key("nonTipContacts");
-		J.BeginArray();
-		for (const rb::NonTipContact& C : In.Context.NonTipContacts)
-		{
-			J.BeginObject();
-			J.FieldInt("ball", C.Ball);
-			J.FieldInt("source", static_cast<int>(C.Source));
-			J.Field("t", C.Time);
-			J.EndObject();
-		}
-		J.EndArray();
-		J.EndObject();
-		J.Key("record");
-		J.BeginObject();
-		J.FieldBool("trajectories", In.Record.Trajectories);
-		J.FieldBool("eventStates", In.Record.EventStates);
-		J.FieldBool("logTransitions", In.Record.LogTransitions);
-		J.FieldBool("logObservers", In.Record.LogObservers);
-		J.FieldBool("shotRecord", In.Record.ShotRecord);
-		J.EndObject();
-		J.EndObject();
+		return !Failed;
 	}
 
-	// Single-source-of-truth export for the render mesh generator (ue5-realism-plan 6.7).
+	// Single-source-of-truth export for the render mesh generator (ue5-realism-plan 6.7) and the viewer.
 	void WriteGeometry(rbsim::JsonWriter& J, const rb::TableGeometry& G)
 	{
 		J.Key("geometry");
@@ -731,6 +607,20 @@ namespace
 		J.Field("noseHeight", G.Spec.CushionNoseHeight);
 		J.Field("railTopZ", G.Spec.RailTopZ);
 		J.Field("railWidthTotal", G.Spec.RailWidthTotal);
+		J.Field("cushionWidth", G.Spec.CushionWidth);
+		J.FieldBool("hasPockets", G.Spec.HasPockets);
+		J.Key("landmarks");
+		J.BeginObject();
+		J.Field("headStringX", G.Landmarks.HeadStringX);
+		J.Field("footStringX", G.Landmarks.FootStringX);
+		J.Field("centerStringX", G.Landmarks.CenterStringX);
+		J.Field("longStringY", G.Landmarks.LongStringY);
+		J.Field("baulkX", G.Landmarks.BaulkX);
+		WriteVec2(J, "headSpot", G.Landmarks.HeadSpot);
+		WriteVec2(J, "footSpot", G.Landmarks.FootSpot);
+		WriteVec2(J, "centerSpot", G.Landmarks.CenterSpot);
+		J.Field("diamondSpacing", G.Landmarks.DiamondSpacing);
+		J.EndObject();
 		J.Key("noses");
 		J.BeginArray();
 		for (const rb::NoseSegment& N : G.Noses)
@@ -741,6 +631,7 @@ namespace
 			WriteVec2(J, "start", N.Start);
 			WriteVec2(J, "end", N.End);
 			WriteVec2(J, "inwardNormal", N.InwardNormal);
+			J.Field("height", N.Height);
 			J.EndObject();
 		}
 		J.EndArray();
@@ -753,8 +644,12 @@ namespace
 			J.FieldInt("side", static_cast<int>(A.Side));
 			WriteVec2(J, "center", A.Center);
 			J.Field("radius", A.Radius);
+			J.Field("height", A.Height);
 			J.Field("angleFrom", A.AngleFrom);
 			J.Field("angleSweep", A.AngleSweep);
+			WriteVec2(J, "tangentOnNose", A.TangentOnNose);
+			WriteVec2(J, "tangentOnFacing", A.TangentOnFacing);
+			WriteVec2(J, "virtualPoint", A.VirtualPoint);
 			J.EndObject();
 		}
 		J.EndArray();
@@ -767,6 +662,8 @@ namespace
 			J.FieldInt("side", static_cast<int>(F.Side));
 			WriteVec2(J, "start", F.Start);
 			WriteVec2(J, "end", F.End);
+			WriteVec2(J, "pocketNormal", F.PocketNormal);
+			J.Field("topHeight", F.TopHeight);
 			J.Field("backdraft", F.Backdraft);
 			J.Field("thickness", F.Thickness);
 			J.EndObject();
@@ -781,11 +678,20 @@ namespace
 			J.Field("kind", P.Kind == rb::PocketKind::Corner ? "corner" : "side");
 			WriteVec2(J, "jawIncoming", P.JawPoint[0]);
 			WriteVec2(J, "jawOutgoing", P.JawPoint[1]);
+			WriteVec2(J, "mouthMid", P.MouthMid);
+			WriteVec2(J, "axis", P.Axis);
+			J.Field("mouth", P.Mouth);
+			J.Field("cutAngle", P.CutAngle);
+			J.Field("shelf", P.Shelf);
+			J.Field("throat", P.Throat);
 			WriteVec2(J, "captureCenter", P.CaptureCenter);
 			J.Field("captureRadius", P.CaptureRadius);
 			J.Field("dropRadius", P.DropRadius);
 			J.Field("dropEdgeRadius", P.DropEdgeRadius);
-			J.Field("shelf", P.Shelf);
+			J.Field("frontArcFrom", P.FrontArcFrom);
+			J.Field("frontArcSweep", P.FrontArcSweep);
+			J.Field("linerUndercut", P.LinerUndercut);
+			J.Field("backdraft", P.Backdraft);
 			J.Field("wallTopZ", P.WallTopZ);
 			J.EndObject();
 		}
@@ -852,6 +758,48 @@ namespace
 		J.EndObject();
 	}
 
+	void WriteFacts(rbsim::JsonWriter& J, const rb::rules::ShotFacts& Facts)
+	{
+		J.Key("facts");
+		J.BeginObject();
+		J.FieldInt("earliestContact", Facts.EarliestContact);
+		J.Field("firstContactTime", Facts.FirstContactTime);
+		J.Key("tieSet");
+		J.BeginArray();
+		for (const rb::BallId B : Facts.FirstContactTieSet)
+		{
+			J.Integer(B);
+		}
+		J.EndArray();
+		J.FieldInt("drivenToRailAfterContactStrict", Facts.DrivenToRailAfterContactStrict);
+		J.FieldInt("drivenToRailAfterContactLegal", Facts.DrivenToRailAfterContactLegal);
+		J.FieldInt("objectBallsToRail", Facts.NumObjectBallsDrivenToRail);
+		J.FieldInt("countPocketedOrCrossedHeadString", Facts.CountPocketedOrCrossedHeadString);
+		J.FieldBool("cueBallPocketed", Facts.CueBallPocketed);
+		J.FieldBool("cueBallOffTable", Facts.CueBallOffTable);
+		J.FieldInt("objectBallsOffTable", Facts.ObjectBallsOffTable);
+		J.FieldBool("cueBallCrossedHeadString", Facts.CueBallCrossedHeadString);
+		J.Key("pocketed"); // [ball, pocket, t]
+		J.BeginArray();
+		for (const rb::rules::PocketedBall& P : Facts.Pocketed)
+		{
+			const double Row[3] = {static_cast<double>(P.Ball), static_cast<double>(static_cast<int>(P.Pocket)), P.Time};
+			J.NumberArray(Row, 3);
+		}
+		J.EndArray();
+		J.FieldInt("pocketedCount", Facts.Pocketed.Size());
+		J.FieldBool("doubleHit", Facts.DoubleHit);
+		J.FieldBool("pushShot", Facts.PushShot);
+		J.FieldBool("cueBallAirborne", Facts.CueBallAirborne);
+		J.FieldBool("scoop", Facts.Scoop);
+		J.FieldBool("miscue", Facts.Miscue);
+		J.FieldInt("jumpedOver", Facts.JumpedOver);
+		J.FieldBool("nonTipBallContact", Facts.NonTipBallContact);
+		J.FieldBool("ballsMovingAtStart", Facts.BallsMovingAtStart);
+		J.FieldBool("recordTruncated", Facts.RecordTruncated);
+		J.EndObject();
+	}
+
 	void WriteJson(const Options& O, const rb::SimInput& In, const rb::ShotResult& R, rbsim::JsonWriter& J)
 	{
 		J.BeginObject();
@@ -861,6 +809,8 @@ namespace
 		J.Key("input");
 		J.BeginObject();
 		J.Field("table", In.Table->Spec.Name);
+		J.Field("length", In.Table->Spec.Length);
+		J.Field("width", In.Table->Spec.Width);
 		J.Field("gravity", In.Params.Gravity);
 		J.Key("cloth");
 		J.BeginObject();
@@ -891,6 +841,10 @@ namespace
 		}
 		J.EndArray();
 		J.FieldInt("seed", static_cast<std::int64_t>(O.Seed));
+		if (O.InPath != nullptr)
+		{
+			J.Field("inFile", O.InPath);
+		}
 		J.EndObject();
 
 		J.Field("status", ToString(R.Status));
@@ -907,8 +861,16 @@ namespace
 		J.FieldInt("islandRigidSwitches", R.Diagnostics.IslandRigidSwitches);
 		J.FieldBool("islandBudgetExceeded", R.Diagnostics.IslandBudgetExceeded);
 		J.FieldInt("zenoTriggers", R.Diagnostics.ZenoTriggers);
+		J.FieldInt("pressingContacts", R.Diagnostics.PressingContacts);
 		J.FieldInt("overlapWarnings", R.Diagnostics.OverlapWarnings);
 		J.FieldInt("missedEvents", R.Diagnostics.MissedEvents);
+		J.FieldInt("featureJoins", R.Diagnostics.FeatureJoins);
+		J.FieldInt("tiltRefreshes", R.Diagnostics.TiltRefreshes);
+		J.FieldBool("islandCapacityExceeded", R.Diagnostics.IslandCapacityExceeded);
+		J.FieldBool("eventLogOverflow", R.Diagnostics.EventLogOverflow);
+		J.FieldBool("trajectoryOverflow", R.Diagnostics.TrajectoryOverflow);
+		J.FieldBool("cueTipOverflow", R.Diagnostics.CueTipOverflow);
+		J.FieldBool("recordOverflow", R.Diagnostics.RecordOverflow);
 		J.EndObject();
 
 		J.Key("strikeResults");
@@ -946,12 +908,12 @@ namespace
 			J.Field("jt", E.TangentImpulse);
 			J.Field("cut", E.CutAngle);
 			J.Field("value", E.Value);
-			if (E.Type == rb::ShotEventType::MotionTransition)
+			if (E.Type == rb::ShotEventType::MotionTransition || E.Type == rb::ShotEventType::TiltRefresh)
 			{
-				J.Field("from", ToString(E.From));
-				J.Field("to", ToString(E.To));
+				J.Field("from", rbsim::MotionStateName(E.From));
+				J.Field("to", rbsim::MotionStateName(E.To));
 			}
-			if (O.EventStates)
+			if (In.Record.EventStates)
 			{
 				J.Key("pre");
 				J.BeginArray();
@@ -970,7 +932,7 @@ namespace
 
 		J.Key("balls");
 		J.BeginArray();
-		std::vector<rb::TrajectorySample> Samples(static_cast<std::size_t>(1) << 16);
+		std::vector<rb::TrajectorySample> Samples(static_cast<std::size_t>(1) << 18);
 		for (int Id = 0; Id < rb::kMaxBalls; ++Id)
 		{
 			if (!In.Balls[Id].InPlay)
@@ -984,14 +946,22 @@ namespace
 			J.Field("mass", In.Balls[Id].Spec.Mass);
 			J.Key("initial");
 			WriteState(J, In.Balls[Id].State);
+			const double Q0[4] = {In.Balls[Id].Orientation.w, In.Balls[Id].Orientation.x, In.Balls[Id].Orientation.y, In.Balls[Id].Orientation.z};
+			J.Key("q0");
+			J.NumberArray(Q0, 4);
 			J.Field("final", ToString(F.Status));
 			J.Key("finalState");
 			WriteState(J, F.State);
 			J.FieldInt("pocket", static_cast<int>(F.Pocket));
 			J.FieldInt("segments", static_cast<std::int64_t>(R.Tracks[Id].Segments.size()));
-			if (O.Trajectories && O.SampleDt > 0.0)
+			if (In.Record.Trajectories && O.SampleDt > 0.0)
 			{
-				const int N = rb::SampleTrajectory(R, Id, O.SampleDt, Samples.data(), static_cast<int>(Samples.size()));
+				int N = rb::SampleTrajectory(R, Id, O.SampleDt, Samples.data(), static_cast<int>(Samples.size()));
+				if (N < 0)
+				{
+					std::fprintf(stderr, "rbsim: warning: ball %d needs more than %zu samples; increase --dt\n", Id, Samples.size());
+					N = 0;
+				}
 				J.Key("samples"); // [t, x, y, z, qw, qx, qy, qz, stateIndex]
 				J.BeginArray();
 				for (int k = 0; k < N; ++k)
@@ -1007,48 +977,66 @@ namespace
 		}
 		J.EndArray();
 
-		if (O.Trajectories)
+		if (In.Record.Trajectories)
 		{
-			J.Key("cueTips"); // [strike, t0, t1, x0, y0, z0, dx, dy, dz, speed0, decel, sampled]
+			// [strike, t0, t1, x0, y0, z0, dx, dy, dz, speed0, decel, sampled, ex, ey, ez] (e = EndPosition of a sampled piece)
+			J.Key("cueTips");
 			J.BeginArray();
 			for (const rb::CueTipSegment& C : R.CueTips)
 			{
-				const double Row[12] = {static_cast<double>(C.Strike), C.Path.StartTime, C.T1, C.Path.Start.x, C.Path.Start.y, C.Path.Start.z, C.Path.Direction.x,
-					C.Path.Direction.y, C.Path.Direction.z, C.Path.Speed0, C.Path.Deceleration, C.Kind == rb::SegmentKind::Sampled ? 1.0 : 0.0};
-				J.NumberArray(Row, 12);
+				const double Row[15] = {static_cast<double>(C.Strike), C.Path.StartTime, C.T1, C.Path.Start.x, C.Path.Start.y, C.Path.Start.z, C.Path.Direction.x,
+					C.Path.Direction.y, C.Path.Direction.z, C.Path.Speed0, C.Path.Deceleration, C.Kind == rb::SegmentKind::Sampled ? 1.0 : 0.0,
+					C.EndPosition.x, C.EndPosition.y, C.EndPosition.z};
+				J.NumberArray(Row, 15);
 			}
 			J.EndArray();
 		}
 
 		if (O.Record)
 		{
+			const rb::ShotRecord& Rec = R.Record;
 			J.Key("record");
 			J.BeginObject();
-			J.FieldInt("events", static_cast<std::int64_t>(R.Record.Events.size()));
-			J.FieldInt("tipContacts", R.Record.Stroke.TipContacts.Size());
-			J.FieldBool("truncated", R.Record.Truncated);
-			J.Field("stopTime", R.Record.End.StopTime);
+			J.FieldInt("events", static_cast<std::int64_t>(Rec.Events.size()));
+			J.FieldInt("tipContacts", Rec.Stroke.TipContacts.Size());
+			J.FieldBool("truncated", Rec.Truncated);
+			J.Field("stopTime", Rec.End.StopTime);
+			J.Key("tipIntervals"); // [strike, ball, start, end]
+			J.BeginArray();
+			for (const rb::TipContact& T : Rec.Stroke.TipContacts)
+			{
+				const double Row[4] = {static_cast<double>(T.Strike), static_cast<double>(T.Ball), T.Start, T.End};
+				J.NumberArray(Row, 4);
+			}
+			J.EndArray();
+			J.Key("nonTipContacts"); // [ball, source, t]
+			J.BeginArray();
+			for (const rb::NonTipContact& N : Rec.Stroke.NonTipContacts)
+			{
+				const double Row[3] = {static_cast<double>(N.Ball), static_cast<double>(static_cast<int>(N.Source)), N.Time};
+				J.NumberArray(Row, 3);
+			}
+			J.EndArray();
+			J.FieldInt("frozenToCueBall", Rec.Start.FrozenToCueBall);
+			J.Key("frozenToRail"); // per ball id: rail-feature mask at t = 0 (Core/Ids.h)
+			J.BeginArray();
+			for (int b = 0; b < rb::kMaxBalls; ++b)
+			{
+				J.Integer(Rec.Start.FrozenToRail[b]);
+			}
+			J.EndArray();
 			if (O.Facts)
 			{
 				double Radii[rb::kMaxBalls] = {};
 				for (int Id = 0; Id < rb::kMaxBalls; ++Id)
 				{
-					Radii[Id] = In.Balls[Id].Spec.Radius;
+					Radii[Id] = In.Balls[Id].InPlay ? In.Balls[Id].Spec.Radius : 0.0;
 				}
 				const double Nominal = In.Balls[1].InPlay ? In.Balls[1].Spec.Radius : In.Balls[0].Spec.Radius;
 				const rb::rules::RulesTable Table = rb::BuildRulesTable(*In.Table, Nominal, Radii, rb::kMaxBalls);
 				rb::rules::ShotFacts Facts;
-				rb::rules::DeriveShotFacts(R.Record, Table, rb::RulesTolerances{}, rb::kInfinity, Facts);
-				J.Key("facts");
-				J.BeginObject();
-				J.FieldInt("earliestContact", Facts.EarliestContact);
-				J.Field("firstContactTime", Facts.FirstContactTime);
-				J.FieldInt("objectBallsToRail", Facts.NumObjectBallsDrivenToRail);
-				J.FieldBool("cueBallPocketed", Facts.CueBallPocketed);
-				J.FieldBool("doubleHit", Facts.DoubleHit);
-				J.FieldBool("pushShot", Facts.PushShot);
-				J.FieldInt("pocketedCount", Facts.Pocketed.Size());
-				J.EndObject();
+				rb::rules::DeriveShotFacts(Rec, Table, rb::RulesTolerances{}, rb::kInfinity, Facts);
+				WriteFacts(J, Facts);
 			}
 			J.EndObject();
 		}
@@ -1069,11 +1057,12 @@ namespace
 		}
 		std::fwrite(Text.data(), 1, Text.size(), File);
 		std::fputc('\n', File);
+		const bool Failed = std::ferror(File) != 0;
 		if (File != stdout)
 		{
 			std::fclose(File);
 		}
-		return true;
+		return !Failed;
 	}
 }
 
@@ -1085,19 +1074,45 @@ int main(int Argc, char** Argv)
 		PrintUsage();
 		return 2;
 	}
+
+	const std::unique_ptr<rbsim::LoadedSimInput> Loaded = std::make_unique<rbsim::LoadedSimInput>();
 	if (O.InPath != nullptr)
 	{
-		// TODO(WP-7): parse the rbsimInput schema written by --dump-input (tableSpec, environment, params by key, balls,
-		// strikes, context, record) with a small JSON reader and simulate it instead of the scenario options.
-		std::fprintf(stderr, "rbsim: --in is not implemented yet (TODO(WP-7))\n");
-		return 2;
+		std::string Text;
+		if (!ReadTextFile(O.InPath, Text))
+		{
+			return 1;
+		}
+		std::string Error;
+		if (!rbsim::ParseSimInput(Text, *Loaded, Error))
+		{
+			std::fprintf(stderr, "rbsim: %s: %s\n", O.InPath, Error.c_str());
+			return 2;
+		}
+		if (Loaded->MissingParams > 0)
+		{
+			std::fprintf(stderr, "rbsim: warning: %s lacks %d parameter keys (MakePhysicsParams values used)\n", O.InPath, Loaded->MissingParams);
+		}
+		// Output-side switches only (they never change the simulated motion).
+		rb::RecordOptions& Record = Loaded->Input.Record;
+		Record.ShotRecord = Record.ShotRecord || O.Record;
+		if (O.TrajectoriesGiven)
+		{
+			Record.Trajectories = O.Trajectories;
+		}
+		if (O.EventStatesGiven)
+		{
+			Record.EventStates = O.EventStates;
+		}
 	}
-
-	rb::TableGeometry Geometry;
-	rb::SimInput Input;
-	if (!BuildInput(O, Geometry, Input))
+	else if (!BuildInput(O, *Loaded))
 	{
 		return 2;
+	}
+	rb::SimInput& Input = Loaded->Input;
+	if (O.Record && !Input.Record.ShotRecord)
+	{
+		Input.Record.ShotRecord = true;
 	}
 
 	if (O.ListParams)
@@ -1115,7 +1130,7 @@ int main(int Argc, char** Argv)
 	if (O.DumpInputPath != nullptr)
 	{
 		rbsim::JsonWriter D(!O.Compact);
-		WriteSimInput(Input, D);
+		rbsim::WriteSimInput(Input, D);
 		if (!WriteTextFile(O.DumpInputPath, D.Text()))
 		{
 			return 1;
