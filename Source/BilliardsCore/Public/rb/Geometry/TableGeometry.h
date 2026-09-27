@@ -47,6 +47,10 @@ namespace rb
 	};
 
 	// Rounded jaw point: circle of radius r_j at height h, tangent to the nose line and to the facing.
+	// The exposed arc runs between the two tangent points on the side away from the material; seen from Center
+	// they lie along the outward normals of the nose (NoseSegment::InwardNormal) and of the facing
+	// (Facing::PocketNormal), so AngleSweep = pi - C. r_j = 0 gives a sharp jaw (Center = tangent points =
+	// VirtualPoint).
 	struct JawArc
 	{
 		PocketId Pocket = PocketId::None;
@@ -54,8 +58,8 @@ namespace rb
 		Vec2 Center;          // r_j / sin(C/2) from the virtual point along the bisector, inside the material
 		double Radius = 0.0;  // r_j [m]
 		double Height = 0.0;  // h [m]
-		double AngleFrom = 0.0;  // plan angle (atan2 about Center) where the exposed arc starts [rad]
-		double AngleSweep = 0.0; // CCW sweep of the exposed arc, > 0 [rad]
+		double AngleFrom = 0.0;  // plan angle (atan2 about Center, in (-pi, pi]) where the exposed arc starts [rad]
+		double AngleSweep = 0.0; // CCW sweep of the exposed arc, pi - C > 0 [rad]
 		Vec2 TangentOnNose;   // r_j / tan(C/2) from the virtual point along the nose line
 		Vec2 TangentOnFacing; // same distance along the facing line
 		Vec2 VirtualPoint;    // WPA jaw point (nose line x facing line)
@@ -67,7 +71,8 @@ namespace rb
 		PocketId Pocket = PocketId::None;
 		JawSide Side = JawSide::Incoming;
 		Vec2 Start;           // plan line at z = h: jaw-arc tangent point
-		Vec2 End;             // plan line at z = h: where the facing meets the cushion back
+		Vec2 End;             // plan line at z = h: where the facing meets the cushion back (exactly on the
+		                      // cushion-back line, CushionWidth behind the nose line)
 		Vec2 Direction;       // unit (End - Start), into the pocket
 		double Length = 0.0;  // |End - Start| [m]
 		double LengthFromVirtualPoint = 0.0; // virtual jaw point -> cushion back (CushionWidth / sin phi), collisions P-1
@@ -94,8 +99,18 @@ namespace rb
 		double CaptureRadius = 0.0;  // r_p: hole wall / liner cylinder [m]
 		double DropRadius = 0.0;     // r_d: slate-edge rounding [m]
 		double DropEdgeRadius = 0.0; // a_d = r_p + r_d: drop-edge trigger / pivot axis radius [m] (collisions pitfall 19)
-		double FrontArcFrom = 0.0;   // plan angle about CaptureCenter where the front (table-side) drop edge starts [rad]
-		double FrontArcSweep = 0.0;  // CCW sweep of the front drop edge between the facings [rad]
+		// Front (table-side) arc, "the capture circle's front arc between the facings" (collisions 5.3): the angular
+		// range about CaptureCenter where the r_p circle (slate cut / liner) lies inside the pocket opening (on the
+		// pocket side of both facing plan lines and in front of the cushion-back lines), through its point nearest the
+		// table (CaptureCenter - r_p Axis). Its ends are where the r_p circle meets the facing plan lines, or a
+		// cushion-back line where the wall reaches the cushion back first (TABLE_7FT_78 side pockets); the rest of the
+		// circle lies under the rail (back wall up to WallTopZ). The same angles bound the rim / drop edge at a_d: on
+		// every preset the a_d circle meets the facing lines 4-9 deg inside the r_p crossings (the a_d points beyond
+		// lie behind a facing, where no ball center on the shelf can be). A custom hole centred far behind a
+		// cushion-back line can let the a_d circle reach the opening at wider angles; the arc is then widened to the
+		// a_d circle's, so every drop-edge point in the opening is on the arc.
+		double FrontArcFrom = 0.0;   // plan angle about CaptureCenter where the front (table-side) arc starts, in (-pi, pi] [rad]
+		double FrontArcSweep = 0.0;  // CCW sweep of the front arc between the facings, > 0 (< pi on every preset) [rad]
 		double LinerUndercut = 0.0;  // beta_l [rad]
 		double Backdraft = 0.0;      // beta_v [rad]
 		// Hole wall / liner (collisions 5.3): cylinder r_p around CaptureCenter. On the FRONT arc (between the
@@ -126,6 +141,32 @@ namespace rb
 
 	// Convex plan polygon (CCW) on a plane, optionally minus a disc (the pocket cut through the rail):
 	// the surface exists over { p in polygon } minus { |p - CutCenter| < CutRadius }.
+	//
+	// Decomposition built by BuildTableGeometry (A-GEO-1: the polygons cover every rail-top point between the
+	// nose lines and the outer boundary exactly once, except the pocket openings and the cut discs). The rail
+	// top excludes each pocket opening: the region between the facing plan lines from the mouth line back to the
+	// cushion-back line(s) (a corner opening ends at the cushion-back corner). Pocket tables: 28 polygons, the
+	// canonical quadrant x >= 0, y >= 0 in the order
+	//   0 CushionTop C3 half next to P4: nose (virtual jaw point -> seam), seam, cushion back, facing
+	//   1 CushionTop C3 half next to P3 (the left-rail cushion is split at the midpoint x_s of its virtual jaw
+	//     points, so every piece meets one pocket)
+	//   2 CushionTop C2 half above y = 0
+	//   3 RailCap behind P4, x in [0, x_s]      4 RailCap toward P3, x in [x_s, L/2 + CushionWidth]
+	//   5 RailCap corner square behind P3 (Cushion None)      6 RailCap foot strip above y = 0
+	// followed by its mirrors x -> -x (7-13), both (14-20) and y -> -y (21-27) (equipment 12.8; CCW order kept).
+	// Pocketless tables: 20 polygons (5 per quadrant: the two cushion tops meeting in a mitred valley on the
+	// corner diagonal, long cap, corner square, end cap). Conventions:
+	//  * Nose edges run through the virtual jaw points (the few mm^2 between a jaw arc and its virtual corner
+	//    belong to the cushion top); Facing edges lie on the facing plan lines at height h (the undercut face's
+	//    top edge is up to (RailTopZ - h) tan(beta_v) = 2.5 mm further into the opening; neglected) or, on a
+	//    cap piece, on the stretch of the cushion-back line that borders an opening. Collinear split vertices
+	//    (180 deg) separate edges of different kinds.
+	//  * Cushion tops: plane through the nose line at h and the cushion-back line at RailTopZ (~13 deg);
+	//    PlanePoint on the nose line. Caps: z = RailTopZ, normal +z.
+	//  * Pocket: the pocket whose surround the piece belongs to (every piece of a pocket table has one: the
+	//    pocket at its end of the rail); HasCut when that pocket's capture disc (liner cylinder r_p through the
+	//    rail) meets the piece (BuildTableGeometry rejects a table where a piece would meet another pocket's
+	//    disc). Cushion: the rail the piece belongs to (None for the corner squares).
 	struct RailTopPolygon
 	{
 		RailTopKind Kind = RailTopKind::CushionTop;
@@ -209,8 +250,23 @@ namespace rb
 		double HorizontalOffset = 0.0;  // R_c = sqrt((R + r_n)^2 - (h - R)^2); = R in pooltoolCompat mode
 	};
 
+	// Builds everything above from the spec (one corner and one side pocket constructed with sign parameters,
+	// so the table is exactly mirror-symmetric; T-GEOM-6). Sights: 18, counter-clockwise from the right rail's
+	// head end (index 4 of the long rails = side pocket, absent also on pocketless tables). Profile: rubber
+	// face bottom (0.4 CushionWidth, 0), nose (0, h), cushion back (CushionWidth, RailTopZ), outer edge
+	// (RailWidthTotal, RailTopZ). Landmarks use the expressions of rules::MakeRulesTable (bitwise equal).
+	// Returns ErrorCode::InvalidTable (Out = {Spec}, everything else empty) for a non-finite field,
+	// L, W, h, CushionWidth, RailTopZ <= 0, RailWidthTotal <= CushionWidth, |Backdraft| or |LinerUndercut| >= pi/2
+	// (a horizontal or flipped face), a cut angle outside (0, pi), jaw
+	// rounding longer than a facing or nose, facings that meet before the cushion back, a drop-edge circle
+	// that reaches a jaw point, a capture circle whose front point lies behind a facing or the rail or that lies
+	// entirely inside the pocket opening (no back wall under the rail), or a cut disc that would reach a second
+	// pocket's rail pieces.
 	RB_API ErrorCode BuildTableGeometry(const TableSpec& Spec, TableGeometry& Out);
 
+	// theta_c, R_c for a ball of radius R against a nose at height h with profile radius r_n (physics: 0).
+	// |h - R| > R + r_n is clamped (sin = +-1, R_c = 0). PooltoolCompat: HorizontalOffset = R (equipment 12.2).
+	// A non-finite input or R + r_n <= 0 returns the default (sin 0, cos 1, theta 0, offset 0).
 	RB_API CushionContactGeometry ComputeCushionContact(double BallRadius, double NoseHeight, double NoseProfileRadius, bool PooltoolCompat);
 
 	// Horizontal center-to-facing-plan-line distance at contact for a ball ON THE SHELF:
@@ -223,12 +279,18 @@ namespace rb
 	RB_API double SideThroat(double Mouth, double CutAngle, double Depth);
 
 	// True if a ball center at P would lie over a pocket opening (beyond a mouth line or inside a
-	// drop-edge circle) - used for cue-ball placement legality (rules F11).
+	// drop-edge circle) - used for cue-ball placement legality (rules F11). Strictly inside the a_d circle, or
+	// beyond the mouth line (Dot(P - JawPoint[0], Axis) > 0) with its projection onto the mouth between the
+	// jaw points: the same predicate as rules::OverPocketOpening on BuildRulesTable's pocket openings.
 	RB_API bool IsOverPocketOpening(const TableGeometry& Geometry, const Vec2& P);
 
 	// Closed CCW plan outline of the cushion noses at z = h (nose segments, jaw arcs sampled with
 	// SamplesPerArc points, facings to the cushion back) for mesh generation. Returns the number of
-	// points written, or -1 if Capacity is too small.
+	// points written, or -1 if Capacity is too small (0 for an unbuilt geometry). Per pocket P0..P5: the
+	// incoming jaw arc from its nose tangent point to its facing tangent point (max(2, SamplesPerArc) points
+	// incl. both ends; 1 point for a sharp jaw), the incoming facing's End, the outgoing facing's End, the
+	// outgoing jaw arc from facing to nose; the nose segments join consecutive pockets and the last point joins
+	// the first (not repeated). Pocketless: the 4 corners of the nose rectangle.
 	RB_API int BuildNoseOutline(const TableGeometry& Geometry, int SamplesPerArc, Vec2* Out, int Capacity);
 
 	// equipment T-GEOM-4: strictly above (toward the head rail); the string itself is not "above".

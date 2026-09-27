@@ -80,12 +80,20 @@ namespace rb
 		0.0254, 0.0936625, 0.0127, {0.123825, 138.0 * kDegToRad, 0.00635, 0.006, 0.062}, {0.12065, 100.0 * kDegToRad, 0.0, 0.006, 0.0645},
 		12.0 * kDegToRad, 0.0047625, 0.00635, 12.0 * kDegToRad, true, ClothPreset::NappedBar, 0.85, 0.3, 0.3};
 
-	// pooltool default table (78 x 39 in) for cross-validation only. VERIFY(WP-2) every pocket value
-	// against pooltool objects/table/specs.py before using it in XREF tests: corner mouth 0.118,
-	// corner_pocket_angle 5.3 deg (C = 140.3 deg), side_pocket_angle 7.14 deg (C = 97.14 deg),
-	// jaw radii 20.95 / 7.95 mm (tuned), cushion height 0.64 D; side mouth and shelves are placeholders.
+	// pooltool default table (78 x 39 in, PocketTableSpecs = SEVEN_FOOT_SHOWOOD) for cross-validation only.
+	// Verified (WP-2) against pooltool 0.6.0 objects/table/specs.py + layout.py: l = 1.9812, w = l/2, cushion
+	// width 0.0508, cushion height 0.64 D, corner mouth 0.118 between the virtual points (jaw points at
+	// pw cos(pi/4) along each rail), corner_pocket_angle 5.3 deg (C = 140.3 deg), side mouth 0.137,
+	// side_pocket_angle 7.14 deg (C = 97.14 deg), jaw radii 20.95 / 7.95 mm (tangent offsets r_j / tan(C/2) as
+	// pooltool's dc / ds), capture radii 0.062 / 0.0645. pooltool places the capture circles by depth: corner
+	// center corner_pocket_depth = 0.0417 beyond the corner point along the diagonal, side center
+	// side_pocket_depth = 0.0685 beyond the nose line; with C_cap = mouth midpoint + (shelf + r_p) axis this is
+	// corner shelf = 0.0417 + 0.118 / 2 - 0.062 = 0.0387 and side shelf = 0.0685 - 0.0645 = 0.004 (so the
+	// CaptureCircle pockets coincide with pooltool's). Differences that remain (by design): pooltool's side
+	// facings use the slope sin(angle) instead of tan(angle) (equipment 12.3, 0.06 deg), rail width, bed height,
+	// rail-top and drop values (pooltool has no rail top or drop edge).
 	inline constexpr TableSpec kTableSevenFoot78{TablePreset::SevenFoot78, "TABLE_7FT_78", 1.9812, 0.9906, 0.765, 0.036576, 0.0508, 0.001, 0.1651, 0.048,
-		0.0254, 0.0936625, 0.0127, {0.118, 140.3 * kDegToRad, 0.041275, 0.02095, 0.062}, {0.137, 97.14 * kDegToRad, 0.0047625, 0.00795, 0.0645},
+		0.0254, 0.0936625, 0.0127, {0.118, 140.3 * kDegToRad, 0.0387, 0.02095, 0.062}, {0.137, 97.14 * kDegToRad, 0.004, 0.00795, 0.0645},
 		12.0 * kDegToRad, 0.0047625, 0.003175, 12.0 * kDegToRad, true, ClothPreset::Default};
 
 	// "True" 7-ft (76 x 38 in) with bar pockets (ESTIMATE).
@@ -110,12 +118,14 @@ namespace rb
 	}
 
 	// --- WPA validation (equipment 11 sketch, tests T-WPA-1..3) ---------------------------------------
+	// Every range is closed (the WPA limits themselves pass) with a 1e-9 m / 1e-9 rad allowance for the
+	// decimal -> binary rounding of the limits; a non-finite field fails its check.
 	enum class WpaCheck : std::uint8_t
 	{
-		PlayingSurfaceSize, // 9-ft (100 x 50 in) or 8-ft (92 x 46 in), +- 1/8 in
+		PlayingSurfaceSize, // 9-ft (100 x 50 in) or 8-ft (92 x 46 in), +- 1/8 in on each dimension
 		BedHeight,          // 29.25-31 in
-		RailWidth,          // 4-7.5 in
-		CushionNoseHeight,  // 62.5-64.5 % of D
+		RailWidth,          // 4-7.5 in (RailWidthTotal)
+		CushionNoseHeight,  // 62.5-64.5 % of the standard D = 57.15 mm
 		CornerMouth,        // 4.5-4.625 in
 		SideMouth,          // 5-5.125 in
 		CornerCutAngle,     // 142 +- 1 deg
