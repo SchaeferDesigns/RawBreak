@@ -759,6 +759,12 @@ Shading (Substrate Slab + detail):
 
 ### 7.2 Asset sourcing and licences (VERIFY each licence at download; keep a licence ledger)
 
+**Decision (product owner, 2026-09-27): the rooms are built by us, not bought.** Every venue is an original scene
+authored by Claude: architecture, furniture and props modelled procedurally in Blender (Python, headless) and in
+Unreal, with our own materials (Substrate, procedural where possible) plus CC0 scan textures/HDRIs (Poly Haven,
+ambientCG) and optional own photogrammetry. No ready-made room/interior packs, so no scene looks like another
+game's. Fab/Megascans only as a last-resort fallback for an individual surface or prop, logged in the ledger.
+
 | Source | What | Licence summary |
 |---|---|---|
 | **Fab / Quixel Megascans** | Surfaces (wood floors, concrete, brick, carpet), 3D props | Fab Standard License: commercial use inside your project, modification allowed, distribution as part of the game allowed, no standalone resale/redistribution. Megascans were free until end of 2024 (anything claimed then stays usable); since 2025 most are paid (from ~USD 0.99 per asset) with a free starter selection (1,500+ assets). |
@@ -853,6 +859,12 @@ room tone 2 min per venue; sweep IR per venue position.
 
 ### 9.1 Targets
 
+**Principle (product owner, 2026-09-27): quality first, not dev-PC first.** The top presets (Epic, Cinematic) are
+authored for the best possible image and are **not** constrained by the development PC; they target current and
+future high-end GPUs (RTX 4080/5080 class and up, 16 GB+ VRAM), photo mode, replays and trailer capture. The RTX 3070 Ti
+numbers below define the **High** preset only (the dev machine's everyday test tier); Low/Medium exist so the game
+itself can be tested and played smoothly on weaker hardware. Never reduce the ceiling to make the dev PC run it.
+
 - Output 2560x1440, DLSS Super Resolution Quality (internal ~1707x960) on "High".
 - Frame time: **P95 GPU <= 16.7 ms** (60 fps floor) in the heaviest venue (pool hall); 90+ fps in bar/basement.
   NVIDIA Reflex on. Frame Generation is **not available** on the 3070 Ti (DLSS FG needs RTX 40+).
@@ -895,7 +907,7 @@ Rule: Megascans at 2k (4k only for hero surfaces), BC7/BC5 compression, virtual 
 
 ### 9.4 Scalability matrix (Steam settings menu)
 
-| Setting | Low / Deck | Medium | High (3070 Ti default) | Epic | Cinematic |
+| Setting | Low / Deck | Medium | High (3070 Ti test tier) | Epic (high-end, not bound to dev PC) | Cinematic (no budget: photo mode, replays, trailer, future GPUs) |
 |---|---|---|---|---|---|
 | GI | Lumen Lite (Beta) | Lumen Lite | Lumen HWRT | Lumen HWRT (higher quality) | Lumen HWRT max |
 | Reflections | SSR (via Lumen Lite) | Lumen HWRT, surface cache | HWRT, Hit Lighting | HWRT, Hit Lighting + RR | same, full-res |
@@ -905,8 +917,12 @@ Rule: Megascans at 2k (4k only for hero surfaces), BC7/BC5 compression, virtual 
 | Ball SSS / haze lobe | off | haze only | on | on | on |
 | Texture pool | 1000 MB | 1500 MB | 2500 MB | 3500 MB (>= 12 GB GPUs) | 4500 MB |
 | Frame generation | FSR FG optional | optional | n/a on 30-series | DLSS FG (RTX 40+) optional | off |
+| Hero texture resolution | 1k | 2k | 2k (4k hero) | 4k (8k hero surfaces: cloth, balls' decal atlas, rails) | 8k |
+| Forearm hair / fabric | cards, low | cards | cards | groom strands | groom strands, max density |
+| Screen percentage / internal res | 50-60 % | 58-67 % | DLSS Quality | DLSS Quality / DLAA | DLAA or supersampling (> 100 %) |
+| Path tracer | - | - | - | - | optional photo-mode / replay capture via Movie Render Queue |
 
-Plus: FOV, all camera-effect toggles (section 4), frame cap, V-Sync, HDR output (optional, lamp highlights
+Every row is also exposed as an individual setting (presets only fill in defaults). Plus: FOV, all camera-effect toggles (section 4), frame cap, V-Sync, HDR output (optional, lamp highlights
 benefit), Reflex, colour-blind aids (ball numbers overlay/high contrast), subtitles for commentary.
 
 Steam Deck profile: 1280x800 output, Lumen Lite, TSR/FSR from ~50 %, 30-40 fps cap, texture pool 1000 MB,
