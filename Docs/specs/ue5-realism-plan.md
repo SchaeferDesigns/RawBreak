@@ -764,6 +764,11 @@ authored by Claude: architecture, furniture and props modelled procedurally in B
 Unreal, with our own materials (Substrate, procedural where possible) plus CC0 scan textures/HDRIs (Poly Haven,
 ambientCG) and optional own photogrammetry. No ready-made room/interior packs, so no scene looks like another
 game's. Fab/Megascans only as a last-resort fallback for an individual surface or prop, logged in the ledger.
+Organic, worn props that procedural modelling handles poorly (torn vinyl stools, leather booths, jukebox, clutter) may
+be generated with **Meshy** (text/image-to-3D; official MCP `@meshy-ai/meshy-mcp-server` needs a Pro+ API key; paid
+plans own their output, free-plan output is CC BY 4.0 and needs credit). Reference images must be our own. Every AI
+mesh goes through the Blender cleanup pipeline (real-world scale, de-lit albedo, PBR check, Nanite prep) and the
+ledger. Never for precision items (table, balls, cue, pockets) or architecture.
 
 | Source | What | Licence summary |
 |---|---|---|
