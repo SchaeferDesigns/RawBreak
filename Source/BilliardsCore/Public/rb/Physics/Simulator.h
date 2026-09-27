@@ -83,8 +83,11 @@ namespace rb
 	// MakePhysicsParams(Spec, TableCondition{}) == MakePhysicsParams(Spec) for every ParamTable key.
 	RB_API PhysicsParams MakePhysicsParams(const TableSpec& Spec, const TableCondition& Condition);
 
-	// Rejects non-physical parameters (prior-art 5.11, ROB-06): mu <= 0, e outside [0, 1], alpha_sp <= 0,
-	// g <= 0, step sizes <= 0, capacities <= 0, Origin == Unset; tilt (human-factors 4.5.1, 4.5.6): non-finite tilt values,
+	// Rejects non-physical parameters (prior-art 5.11, ROB-06) with ErrorCode::InvalidParameter: support-surface frictions <= 0 (cloth
+	// mu_s, mu_r, alpha_sp and the rail cap's; contact frictions - ball-ball constants, cushion, facing, liner, rim - may be 0),
+	// any restitution outside [0, 1] (incl. k_f e_c,max > 1), g <= 0, step sizes / tolerances <= 0, counts < 1, a Tsuji alpha that is
+	// neither < 0 (derived) nor finite, any non-finite value, enum values out of range, Origin == Unset; tilt (human-factors 4.5.1,
+	// 4.5.6): non-finite tilt values,
 	// (5/7) |Slope| + |NapPseudoSlope| > (1 - NapResistance) mu_r / 2 of the cloth (the k = 2/5 form of the TiltParams validity
 	// rule; |Slope| <= 0.7 mu_r without nap), |Slope| > 0.7 mu_r of the rail cap (no nap there), Tolerance <= 0,
 	// RefreshMaxInterval <= 0, NapResistance outside [0, 1), ChalkClingFactor or ClingFactor <= 0. Run additionally checks
@@ -108,8 +111,10 @@ namespace rb
 		bool InPlay = false;        // simulated (on the table); false for pocketed / out-of-play / unused ids
 		BallSpec Spec;              // per-ball R, m, I (InertiaFactor in (0, 2/3])
 		BallState State;            // initial state; must be classified-consistent (at rest for a strike)
-		Quat Orientation;           // initial orientation (playback; the chalk-mark cling with PhysicsParams::ChalkCling)
-		BallChalkMarks ChalkMarks;  // body-frame chalk marks (rb/Human/BallMarks.h); read only with PhysicsParams::ChalkCling
+		Quat Orientation;           // initial orientation (playback; the chalk-mark cling with PhysicsParams::ChalkCling); finite and
+		                            //   non-zero, else Run returns InvalidInput (InvalidState)
+		BallChalkMarks ChalkMarks;  // body-frame chalk marks (rb/Human/BallMarks.h); read only with PhysicsParams::ChalkCling, then every
+		                            //   value must be finite (else InvalidInput, InvalidArgument)
 	};
 
 	// One cue stroke at t = 0. Normal shots have exactly one (Ball = the cue ball); the lag has two
