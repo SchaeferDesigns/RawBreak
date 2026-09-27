@@ -16,7 +16,8 @@
 // FinishShotRecord reads Result.Strikes, Result.Finals and Result.StopTime, and Result.Status only for the failure
 // states InvalidInput / Aborted / HorizonReached (so it may run before the simulator sets Status = Ok).
 // Standalone (replays, tools): BuildShotRecord = Begin + Append(all of Result.Events) + Finish; it is
-// only complete if the log was complete (EventStates, LogObservers and no EventLogOverflow; otherwise Truncated).
+// only complete if the log was complete (EventStates, LogObservers, LogTransitions and no EventLogOverflow; otherwise
+// Truncated).
 //
 // No allocation except BuildShotRecord (which reserves Out.Events for the whole log when needed): everything
 // else works inside the reserved capacity and fixed-size lists.

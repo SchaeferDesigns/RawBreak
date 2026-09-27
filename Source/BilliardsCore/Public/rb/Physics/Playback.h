@@ -50,7 +50,8 @@ namespace rb
 {
 	inline constexpr double kOrientationSubstep = 1.0e-3; // [s] grid step of the orientation law
 
-	// State of one segment at absolute time T (clamped to [T0, T1]). Analytic: EvaluateSegment(Motion, T - T0);
+	// State of one segment at absolute time T (clamped to [T0, T1]). Analytic: EvaluateSegment(Motion, T - T0) (tau = 0 for a
+	// segment at rest, the same state for every finite T and finite for T = +inf);
 	// Sampled: linear from Motion.Pos0 at T0 to EndPosition at T1 (velocity = chord / duration, w = Motion.Omega0);
 	// Terminal: frozen at Motion.Pos0 with zero velocity and spin. State = Motion.State.
 	RB_API BallState EvaluateTrajectorySegment(const TrajectorySegment& Segment, double T);

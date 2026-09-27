@@ -623,9 +623,9 @@ namespace rb
 			AppendRecordEvent(Event, Out);
 		}
 		FinishShotRecord(Input, Result, Out);
-		if (Result.Diagnostics.EventLogOverflow || !Input.Record.LogObservers || !Input.Record.EventStates)
+		if (Result.Diagnostics.EventLogOverflow || !Input.Record.LogObservers || !Input.Record.LogTransitions || !Input.Record.EventStates)
 		{
-			Out.Truncated = true; // the log lacks events or positions the record needs
+			Out.Truncated = true; // the log lacks events (observers, motion transitions) or positions the record needs
 		}
 	}
 

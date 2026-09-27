@@ -248,7 +248,11 @@ namespace rb
 		const MotionSegment& M = Segment.Motion;
 		switch (Segment.Kind)
 		{
-		case SegmentKind::Analytic: return EvaluateSegment(M, LocalTau(Segment, T));
+		case SegmentKind::Analytic:
+			// A segment at rest (Stationary, Pocketed, OffTable: zero velocity and acceleration) is evaluated at tau = 0:
+			// bitwise the same state for every finite tau, and still finite for T = +inf on the open last segment (T1 = +inf),
+			// where Pos0 + 0 * tau + 0 * tau^2 would be NaN.
+			return EvaluateSegment(M, IsMoving(M.State) ? LocalTau(Segment, T) : 0.0);
 		case SegmentKind::Sampled:
 		{
 			BallState S;
@@ -374,9 +378,11 @@ namespace rb
 
 		int K = Cursor.Segment[Ball];
 		bool Reseed = false;
-		if (!Cursor.Valid[Ball] || K < 0 || K >= Count || T < Cursor.LastTime[Ball])
+		// Not "T < LastTime": a NaN frame time (or a NaN LastTime left by one) is no forward step either, and would otherwise
+		// keep the cached segment for every later (backward) time.
+		if (!Cursor.Valid[Ball] || K < 0 || K >= Count || !(T >= Cursor.LastTime[Ball]))
 		{
-			K = FindSegment(Segments, T); // first use or a backward jump: random access
+			K = FindSegment(Segments, T); // first use, a backward jump or a non-finite time: random access
 			Reseed = true;
 		}
 		else
