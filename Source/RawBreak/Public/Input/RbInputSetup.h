@@ -39,7 +39,12 @@ class RAWBREAK_API URbInputSetup : public UObject
 
 public:
 	// Creates every action and the mapping context with the default bindings above (transient objects owned by Outer).
+	// Triggers: held actions have none (implicit Down: Triggered while held, Completed on release); pressed actions use
+	// UInputTriggerPressed (Triggered once per press); TipOffset uses a pulse (one step per press, repeated while held).
 	static URbInputSetup* CreateDefault(UObject* Outer);
+
+	// Every action above, in declaration order (tests: each one is mapped).
+	TArray<UInputAction*> GetAllActions() const;
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> Context;
 

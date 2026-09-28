@@ -11,19 +11,42 @@
 // Phases:
 //   Locked        not this player's turn, simulation / playback / replay / decision running
 //   Walking       free movement; GetDown -> GettingDown (if the cue ball is on the table and in reach)
-//   GettingDown   camera transition (URbCameraRigComponent), the cue appears behind the cue ball
+//   GettingDown   camera transition (URbCameraRigComponent), the cue appears behind the cue ball; Down at
+//                 DownSince = press time + GetDownSeconds (analytic, never accumulated frame times)
 //   Down          aiming; Stroke held = practice strokes (stop PracticeStopShort before the ball unless Commit / Hardcore)
 //   Contact       tip crossed the ball with Commit held: IntendedStroke built, OnStrokeContact fired once
 //   Watching      after contact (the camera stays down; GetDown stands up) until the director unlocks the next shot
-//   PlacingCueBall ball in hand: the cue ball follows the aim point on the cloth, Confirm places it (director validates)
-// NoiseKey::AddressIndex = number of earlier get-downs on this shot (HF 3.2), counted here.
+//   PlacingCueBall ball in hand: the cue ball follows the aim point on the cloth, Confirm places it (director validates);
+//                 a Stroke (left mouse) press is routed to Confirm here (review R-17: no key bound twice)
+// NoiseKey::AddressIndex = number of earlier get-downs on this shot (HF 3.2), counted here (every stand-up from
+// GettingDown / Down increments it; BeginAddress resets it).
+//
+// Frame-rate independence (pitfall 19, UE-5a acceptance): hand samples are processed one by one in time order
+// (FRbCueIntegrator), whatever frame they arrive in; the crossing is interpolated inside the sample step; speed and
+// acceleration come from a quadratic fit over the samples of the last FitWindowSeconds (plus the crossing sample),
+// evaluated at the crossing time. TimeDown, ForwardStart and PauseDuration are sample times relative to DownSince. So the
+// same samples give a bitwise identical IntendedStroke at 30, 60 or 144 fps.
+//
+// Input-log derivations (Docs/ue-architecture.md 6.2):
+//   ForwardStart    the moment the cue leaves the back of the stroke (end of the pause) of a forward stroke made while
+//                   live (Commit / Hardcore); a commit pressed during a forward stroke starts it at that sample
+//   PauseDuration   time the cue stayed within PauseTolerance of the back-most point of the final stroke (a still
+//                   mouse sends no reports, so the silence counts; the departure is taken one report interval before the
+//                   first sample beyond the tolerance)
+//   ContactAcceleration  d v_c / d v_m * a_m of the hand fit at the crossing (the gain curve's slope included)
+//   HeadMovedBeforeContact  look input after ForwardStart that the mouse stroke does not explain (look input while the
+//                   Stroke button is held IS the stroke and never counts), above HeadMoveThreshold [rad]
+//   Steering        lateral hand travel since ForwardStart x SteeringGain = grip offset y_g (plan 5.4): azimuth + y_g / L_bg,
+//                   axis offset A - y_g (L_b + R) / (L_bg R) (the pivot geometry of human-factors 3.5); TipVelocityRight =
+//                   the swoop -dy_g/dt L_b / L_bg at contact (animation only, HF-11)
 //
 // What you see is what hits (architecture.md 13 item 4, HF 3.7; review R-04): while Down, the rendered cue pose is
 // rb::human::SampleHand(provisional IntendedStroke, FRbStrokeContext..., t since down) - drift, tremor and, from the start
 // of the committed forward stroke (ForwardStart), the ramped per-shot draws - so the ExecuteStroke result at contact is
-// exactly the pose on screen. If a stroke that showed any part of the ramp (HandPose::RampShown) ends without contact, the
-// component broadcasts OnStrokeAborted(true): the director spends those draws (ShooterShotIndex++, AdvanceNoiseHistory,
-// HF-B13) and pushes the updated context.
+// exactly the pose on screen (at contact the pose is SampleHand of the FINAL IntendedStroke at TimeDown). If a committed
+// stroke ends without contact (reversed, Commit or Stroke released, stood up, locked), the component broadcasts
+// OnStrokeAborted(bRampShown): true when a PRESENTED frame showed part of the ramp (HandPose::RampShown); then the
+// director spends those draws (ShooterShotIndex++, AdvanceNoiseHistory, HF-B13) and pushes the updated context.
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
@@ -41,6 +64,7 @@
 class ARbCue;
 class ARbTable;
 class FRbRawMouseInput;
+class URbCameraRigComponent;
 
 UENUM(BlueprintType)
 enum class ERbStrokePhase : uint8
@@ -62,7 +86,7 @@ struct FRbAimState
 	double ElevationFloor = 0.0;// [rad] from RbCueClearance
 	double AxisOffsetA = 0.0;   // cue-axis offset / R (+ right)
 	double AxisOffsetB = 0.0;   // cue-axis offset / R (+ up)
-	double BridgeLength = 0.20; // [m]
+	double BridgeLength = 0.20; // [m] (= FRbStrokeContext::Situation.BridgeLength)
 };
 
 // Everything SampleHand / ExecuteStroke need besides the IntendedStroke, for the ACTIVE shooter and this shot. Built by
@@ -79,16 +103,24 @@ struct FRbStrokeContext
 	rb::human::NoiseKey Key;                // AddressIndex is overwritten by the component
 	rb::human::NoiseHistory History;
 	rb::human::HumanParams Params;
+	// Balls on the table except the cue ball (core frame, from FRbTableState): the clearance floor (RbCueClearance) and
+	// ExecuteStroke's OtherBalls. Empty = no ball obstacles (the floor then only sees rails / environment).
+	TArray<rb::human::BallObstacle> OtherBalls;
 };
 
 // Everything the director needs to execute the stroke.
 struct FRbStrokeCommit
 {
 	rb::human::IntendedStroke Intended;
-	TArray<FRbStrokeSample> InputLog;   // cue-axis hand positions of the final address (replay header)
+	TArray<FRbStrokeSample> InputLog;   // hand positions of the final address up to the crossing sample (replay header)
 	double ContactTime = 0.0;           // FPlatformTime::Seconds() at the crossing
 	uint32 AddressIndex = 0;            // earlier get-downs on this shot
 	FTransform EyeTransform;            // camera at contact (shooter replay view)
+	// The context the component rendered with (Key.AddressIndex and the Situation's elevation floor filled in):
+	// ExecuteStroke must use exactly this one (what you see is what hits).
+	FRbStrokeContext Context;
+	rb::human::HandPose ContactPose;    // SampleHand(Intended, Context, Intended.TimeDown): the pose on screen at contact
+	bool bTrueTimestamps = false;       // samples came from the raw-input thread (false: scripted or reconstructed)
 };
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FRbOnStrokeContact, const FRbStrokeCommit& /*Commit*/);
@@ -107,6 +139,7 @@ public:
 	void SetCue(ARbCue* InCue);
 
 	// Director -> component: which ball is struck and where it is (core, table frame), and whether input is allowed.
+	// BeginAddress starts a new shot: AddressIndex 0, tip offsets and elevation reset, phase Walking (stands up).
 	void BeginAddress(const rb::Vec3& CueBallPosition, double CueBallRadius);
 	void SetStrokeContext(const FRbStrokeContext& InContext);
 	void SetLocked(bool bLocked);
@@ -123,17 +156,64 @@ public:
 	void ConfirmPressed();
 
 	// Scripted stroke source (automation tests, cheats): hand positions along the axis with timestamps, consumed
-	// like raw mouse samples. Positions in metres of HAND travel (the gain curve still applies).
+	// like raw mouse samples. Positions in metres of HAND travel (the gain curve still applies). A scripted stream implies
+	// the Stroke button (it does not need SetStrokeHeld); Commit / Hardcore still decide practice vs shot. Samples are
+	// consumed while Down once the clock reaches their time; samples before the get-down completed are dropped.
 	void InjectStrokeSamples(const TArray<FRbStrokeSample>& Samples);
+
+	// Scripted stroke of the component's current state (cue displacement, gain, backswing limit) that crosses the ball at
+	// TipSpeed [m/s]; first sample at StartTime (FPlatformTime domain / the clock). For tests and the RbStroke cheat:
+	// InjectStrokeSamples(MakeScriptedStroke(V, Now + 0.05)).
+	TArray<FRbStrokeSample> MakeScriptedStroke(double TipSpeed, double StartTime) const;
+
+	// Aim of the current address (cheats / tests; the floor is recomputed). Kept by later get-downs of this shot (the view
+	// direction sets the azimuth at a get-down only without an explicit aim); BeginAddress clears it.
+	void SetAim(double Azimuth, double Elevation, double AxisOffsetA, double AxisOffsetB);
 
 	ERbStrokePhase GetPhase() const { return Phase; }
 	const FRbAimState& GetAim() const { return Aim; }
 	double GetCueDisplacement() const { return CueDisplacement; } // x_c [m], 0 = tip touching the ball
 	const rb::human::HandPose& GetHandPose() const { return HandPose; } // SampleHand of the current frame (debug, tests)
+	const FRbStrokeContext& GetContext() const { return Context; }
+	const FRbStrokeCommit& GetLastCommit() const { return LastCommit; }
+	uint32 GetAddressIndex() const { return AddressIndex; }
+	double GetDownSince() const { return DownSince; }
+	bool IsCommittedStrokeInProgress() const { return bCommittedStroke; }
+	bool IsStrokeActive() const { return bStrokeActive; } // a stroke source drives the cue (Stroke held / scripted stream)
+	bool HasTrueTimestamps() const;       // raw input with per-report timestamps (F2 debug block)
+	// Rendered cue pose (core, table frame): tip dome centre and butt -> tip direction.
+	void GetCuePoseCore(rb::Vec3& OutTipDomeCenter, rb::Vec3& OutDirection) const { OutTipDomeCenter = CuePoseTip; OutDirection = CuePoseDir; }
+
+	// Cue pose of a hand pose (the geometry of ExecuteStroke's executed pose, human-factors 3.6): axis from (elevation,
+	// azimuth), contact offsets = AimToContactOffset(axis offsets) clamped to OffsetClamp, dome centre on the ball at
+	// C + Q (R + r_dome) / R, then moved along the axis by the cue displacement X (< 0 = behind the ball).
+	static void ComputeCuePoseCore(const rb::human::HandPose& Pose, const rb::Vec3& BallCenter, double BallRadius, double DomeRadius,
+		double OffsetClamp, double CueDisplacementX, rb::Vec3& OutTipDomeCenter, rb::Vec3& OutDirection);
+
+	// Advances the machine to time NowSeconds (FPlatformTime domain): phase timing, sample processing, presentation. Called
+	// by TickComponent with the clock; tests and dev tools call it directly with their own clock.
+	void TickStroke(double NowSeconds);
+
+	// Test / tool clock (unset = FPlatformTime::Seconds()). Every input call stamps with it.
+	TFunction<double()> ClockOverride;
+
+	// Tests: the raw mouse source (BeginPlay takes the process instance, FRbRawMouseInput::Create). An automation test passes a
+	// forced input thread (FRbRawMouseInput::CreateWithOptions) and injects reports that are stamped on arrival like WM_INPUT.
+	void SetRawMouseInput(const TSharedPtr<FRbRawMouseInput>& InRawMouse) { RawMouse = InRawMouse; }
+
+	// Dev tool (Tools/unreal/editor/rb_dev_ue5a.py): runs a scripted stroke through a transient component (no world) and
+	// returns the rendered cue pose at every frame (table-local UE cm; location = tip dome centre, X axis = butt -> tip)
+	// from the get-down until contact or the end of the samples. NoiseScale scales the human layer (1 = Sim; larger values
+	// exaggerate the drift for a visible dev capture); the stroke starts HoldSeconds after the get-down. OutTimes = seconds
+	// since the get-down was requested.
+	UFUNCTION(BlueprintCallable, Category = "RawBreak|Dev")
+	static TArray<FTransform> DevRecordStrokePoses(float TipSpeed, float FrameRate, float NoiseScale, float HoldSeconds, bool bCommit, int32 Seed,
+		TArray<float>& OutTimes);
 
 	FRbOnStrokeContact OnStrokeContact;
 	FRbOnCueBallPlaced OnCueBallPlaced;
 	FRbOnStrokeAborted OnStrokeAborted;
+	FRbOnCueBallPlaced OnPlacementPointChanged; // ball in hand: the cue-ball centre under the aim point moved (world)
 
 	// --- tuning (plan 5.4 defaults) -------------------------------------------------------------------
 	FRbStrokeGain Gain;
@@ -141,34 +221,105 @@ public:
 	double FitWindowSeconds = 0.02;      // quadratic-fit window (15-25 ms)
 	double PracticeStopShort = 0.004;    // [m] practice strokes stop this far before the ball
 	double AimSensitivity = 0.0005;      // [rad per mouse count]
+	double FineAimScale = 0.2;           // FineAim held
 	bool bHardcore = false;              // any tip contact is a shot (plan 14 Q2)
+	double AddressDistance = 0.03;       // [m] tip behind the ball after getting down
+	double MaxBackswing = 0.30;          // [m] x_c never goes further back (also the clearance sweep's backswing)
+	double GetDownSeconds = 1.0;         // camera transition GettingDown -> Down (0.8-1.5 s)
+	double MaxReach = 1.5;               // [m] plan distance pawn -> cue ball for GetDown
+	double ElevationStep = 0.5 * UE_DOUBLE_PI / 180.0; // [rad] per wheel notch
+	double MaxElevation = 85.0 * UE_DOUBLE_PI / 180.0;
+	double TipOffsetStep = 0.05;         // [R] per arrow step
+	double MaxTipOffset = 0.7;           // [R] radius of the allowed axis-offset disc
+	double SteeringGain = 0.25;          // G_lat (plan 5.4; 0 = straight stroke assist)
+	double ForwardHysteresis = 0.002;    // [m] cue travel that starts a forward stroke
+	double ReverseHysteresis = 0.002;    // [m] cue travel back from the forward peak that ends it
+	double PauseTolerance = 0.001;       // [m] "still at the back" band of the pause detection
+	double MaxReportInterval = 0.008;    // [s] a moving mouse reports at least every 8 ms (125 Hz)
+	double HeadMoveThreshold = 0.005;    // [rad] of unexplained look input after ForwardStart (HF-10)
 
 	// UActorComponent
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
 	void SetPhase(ERbStrokePhase NewPhase);
-	// Integrates new samples into the cue displacement, detects the crossing, builds the IntendedStroke.
-	void ProcessStrokeSamples(double Now);
-	// Pushes the cue pose (address + displacement) to ARbCue and the eye placement to the camera rig.
+	// Integrates new samples (raw reports and scripted samples up to Now) into the cue displacement, detects the
+	// crossing, builds the IntendedStroke.
+	void ProcessStrokeSamples(double NowSeconds);
+	// Pushes the cue pose (SampleHand pose + displacement) to ARbCue and the eye placement to the camera rig.
 	void UpdatePresentation();
 
 private:
+	double ClockNow() const;
+	bool IsLive() const { return bCommitHeld || bHardcore; }
+	void BeginStroke(bool bRawSource, double StartTime);
+	void EndStroke();                         // stroke source released / stood up / locked (aborts a committed stroke)
+	void ResetAddress();                      // clears the input log of the address
+	bool ProcessHandSample(const FRbStrokeSample& Sample); // false = contact reached (stop consuming)
+	void TrackForwardStroke(int32 Index);
+	void StartCommittedStroke(double StartTime, int32 StartIndex);
+	void AbortCommittedStroke();
+	void OnCrossing(double CrossingTime, int32 CrossingIndex);
+	rb::human::IntendedStroke BuildIntended(double AbsoluteTime, double Speed, double Acceleration, double LateralNow, double LateralVelocity) const;
+	rb::human::HandPose SampleHandAt(const rb::human::IntendedStroke& Intended, double TimeSinceDown) const;
+	void PushPresentation();
+	void UpdateElevationFloor();
+	void UpdatePlacementPoint();
+	bool IsCueBallInReach() const;
+	void InitAimFromView();
+	FTransform GetEyeTransform() const;
+	URbCameraRigComponent* FindRig() const;
+	FVector CoreToWorld(const rb::Vec3& P) const;
+	FVector CoreDirectionToWorld(const rb::Vec3& D) const;
+
 	ERbStrokePhase Phase = ERbStrokePhase::Locked;
 	FRbAimState Aim;
 	rb::Vec3 CueBallPosition;
 	double CueBallRadius = 0.028575;
-	double CueDisplacement = -0.10;       // start 10 cm behind the ball
+	double CueDisplacement = -0.03;       // x_c [m]; AddressDistance behind the ball after a get-down
 	bool bStrokeHeld = false;
+	bool bStrokeNeedsRelease = false;     // a Stroke press was routed to Confirm: ignore it until released
+	double StrokeHeldSince = 0.0;
 	bool bCommitHeld = false;
-	double SettleSince = -1.0;            // FPlatformTime::Seconds() when Settle was pressed while down, < 0 = none
+	double SettleSince = -1.0;            // Now() when Settle was pressed while down, < 0 = none
 	FRbStrokeContext Context;
 	rb::human::HandPose HandPose;
 	uint32 AddressIndex = 0;
-	double DownSince = 0.0;               // FPlatformTime::Seconds() of the get-down (IntendedStroke::TimeDown)
-	TArray<FRbStrokeSample> HandSamples;  // hand positions of the current address
+	double DownSince = 0.0;               // Now() when Down begins (IntendedStroke::TimeDown origin)
+	double LastTickTime = 0.0;            // clock of the last TickStroke (presentation time)
+	bool bFloorDirty = true;
+	bool bAimSetExplicitly = false;       // SetAim this shot: a get-down keeps it (cheats), else the view sets the azimuth
+
+	// Stroke of the current address.
+	TArray<FRbStrokeSample> HandSamples;  // hand positions of the current address (the input log)
+	TArray<FRbStrokeSample> CueSamples;   // x_c at the same times (Position = x_c), parallel to HandSamples
 	TArray<FRbStrokeSample> PendingScripted;
+	FRbCueIntegrator Integrator;
+	bool bStrokeActive = false;           // a stroke source (Stroke button or a scripted stream) is driving the cue
+	bool bScriptedStroke = false;
+	int32 StrokeStartIndex = 0;           // first sample of the current stroke in HandSamples
+	int64 RawCountsX = 0;                 // accumulated raw counts of the address (+X right, +Y toward the user)
+	int64 RawCountsY = 0;
+	bool bForwardPhase = false;
+	double BackMostX = 0.0;
+	int32 BackMostIndex = 0;
+	double ForwardPeakX = 0.0;
+	double ForwardMotionStart = 0.0;      // end of the pause of the current forward motion [s, absolute]
+	int32 ForwardMotionIndex = 0;
+	double PauseDuration = 0.4;
+	bool bCommittedStroke = false;
+	double ForwardStart = 0.0;            // [s, absolute] of the committed forward stroke
+	int32 ForwardStartIndex = 0;
+	bool bRampShownLatched = false;       // a presented frame of the committed stroke showed the per-shot ramp
+	double HeadMoveAccum = 0.0;
+
+	FRbStrokeCommit LastCommit;
+	rb::Vec3 CuePoseTip;
+	rb::Vec3 CuePoseDir = rb::Vec3(1.0, 0.0, 0.0);
+	FVector PlacementWorld = FVector::ZeroVector;
+	bool bHasPlacement = false;
 	TSharedPtr<FRbRawMouseInput> RawMouse;
 	TWeakObjectPtr<ARbTable> Table;
 	TWeakObjectPtr<ARbCue> Cue;
