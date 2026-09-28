@@ -9,10 +9,10 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 - [x] Merge + Tests + Push (100/100 UE-Tests, 896/896 Core-Tests), Welle B gestartet
 
 ## Fenster 2 (ca. 13:10–18:00)
-- [ ] Unreal-Welle B: UE-3 Materialien & Shader (Kugeln, Tuch, Holz), UE-4 Queue, UE-5b Spielfigur/Kamera, UE-7 Overlay/Replay, UE-8 Testraum/Grafik-Settings/M1-Screenshots
-- [ ] Integration **M1 = erste spielbare Version**: 9-Ball-Training + Hot-Seat im Testraum
-- [ ] **Spielbarer Build** (gepackte .exe) + kurze Startanleitung, M1-Screenshots
-- [ ] Danach: Planung Vertical Slice „Dive Bar" (Raum-Layout, Licht, Props-Liste, Material-Pipeline), Sound-Plan
+- [x] Unreal-Welle B: UE-3 Materialien & Shader (Kugeln, Tuch, Holz), UE-4 Queue, UE-5b Spielfigur/Kamera, UE-7 Overlay/Replay, UE-8 Testraum/Grafik-Settings/M1-Screenshots
+- [x] Integration **M1 = erste spielbare Version**: 9-Ball-Training + Hot-Seat im Testraum
+- [x] **Spielbarer Build** (gepackte .exe) + kurze Startanleitung, M1-Screenshots
+- [x] Danach: Planung Vertical Slice „Dive Bar" (Raum-Layout, Licht, Props-Liste, Material-Pipeline), Sound-Plan
 
 ## Fenster 3 (ab ca. 18:00) – Agents arbeiten durch, unabhängig vom Playtest
 - [ ] Vertical Slice Dive Bar: Raum-Layout, Modellierung (Blender-Pipeline), eigene Materialien, Licht inkl. Neon; ggf. Meshy/Higgsfield-Tests
@@ -25,3 +25,7 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 - Pool hall mit ~8 Tischen: KI-Stammgäste spielen echte simulierte Partien an den Nachbartischen; später online geteilte Hallen (nur Stoß-Eingaben übertragen, deterministische Physik rechnet überall identisch). Voraussetzung ab jetzt: mehrere Tische + Matches pro Level.
 - Vom Tisch gesprungene Kugeln: Übergabe an Unreal-Physik (Boden, rollt unter Hocker), Aufheben als Chore.
 - Körper & Hände (MetaHuman – braucht einen Schritt vom Nutzer), Karriere, KI-Gegner, weitere Spielarten/Venues, Steam-Store-Page, Trailer (erst nach Freigabe durch den Nutzer)
+
+
+## M2 (läuft seit 28.09. abends)
+- [ ] Dive Bar v1 (The Low Bridge Tavern, DB-0..DB-3 ohne Meshy-Props), Sound v1 (alle Physik-Sounds, Raumklang), Pause-/Settings-Menü v1, Kugeln fallen vom Tisch auf den Boden, Vorbereitung Mehr-Tisch-Räume → Integration + gepackter M2-Build
