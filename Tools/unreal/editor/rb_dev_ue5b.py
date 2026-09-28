@@ -59,6 +59,9 @@ CAPTURES = {
 	"exposure_room": (f"{PLACE}, rb.Player.Teleport -2.2 1.2 150 -12, rb.Player.Dump -1", "1920x1080"),
 	# 21:9 (64:27): the same vertical FOV, more to the sides (Hor+, MaintainYFOV).
 	"down_on_shot_21x9": (f"{DOWN}, rb.Player.Dump -1", "2560x1080"),
+	# Still down after a (scripted) break, the head turned 50 deg to the right to follow the balls: the eyes focus on what they look
+	# at (review fix - the focus used to stay on the fixation plane of the aim line, which blurred the whole turned view).
+	"down_watch_turned": (f"{DOWN}, rb.Match.Break 9, rb.Player.Look 50 -6, rb.Player.Dump -1", "1920x1080"),
 }
 
 

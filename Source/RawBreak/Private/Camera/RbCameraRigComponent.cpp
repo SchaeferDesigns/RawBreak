@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/IConsoleManager.h"
 #include "SceneViewExtension.h"
 #include "UObject/Package.h"
 
@@ -27,6 +28,7 @@ namespace
 	constexpr double kMinFocusCm = 5.0;             // lens minimum focus distance (50 mm)
 	constexpr double kMaxFocusCm = 3000.0;          // "infinity" of the focus trace
 	constexpr double kAxisSnapCm = 20.0;            // a new address far from the last one snaps the smoothed axis
+	constexpr double kGazeOnLineDeg = 1.5;          // gaze offsets below this still fixate the line's fixation point
 
 	FVector HorizontalUnit(const FVector& V, const FVector& Fallback = FVector::ForwardVector)
 	{
@@ -85,7 +87,7 @@ FRbCameraPresetParams URbCameraRigComponent::GetEffectiveParams() const
 	FRbCameraPresetParams P = Params;
 	if (VerticalFovOverride > 0.0 && Preset == ERbCameraPreset::Eyes)
 	{
-		P.VerticalFovDeg = FMath::Clamp(VerticalFovOverride, 30.0, 90.0);
+		P.VerticalFovDeg = FMath::Clamp(VerticalFovOverride, MinVerticalFovDeg, MaxVerticalFovDeg);
 	}
 	return P;
 }
@@ -458,9 +460,25 @@ double URbCameraRigComponent::EaseFocusCm(double CurrentCm, double TargetCm, dou
 	return 1.0 / D;
 }
 
-double URbCameraRigComponent::Ev100FromExposure(double Exposure, double Compensation)
+double URbCameraRigComponent::Ev100FromExposure(double Exposure, double Compensation, double LuminanceMax)
 {
-	return Exposure > 0.0 ? Compensation - FMath::Log2(1.2 * Exposure) : -100.0;
+	// Eye adaptation (UE 5.8): the average luminance maps to 0.18 of the white point L_white = LuminanceMax 2^EV100, and the stored
+	// exposure is 2^compensation / L_white.
+	return (Exposure > 0.0 && LuminanceMax > 0.0) ? Compensation - FMath::Log2(LuminanceMax * Exposure) : -100.0;
+}
+
+double URbCameraRigComponent::EyeAdaptationLuminanceMax()
+{
+	// Mirrors the renderer's LuminanceMaxFromLensAttenuation (PostProcessEyeAdaptation.cpp, private to the Renderer module).
+	static IConsoleVariable* const Extended = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"));
+	static IConsoleVariable* const LensAttenuation = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.LensAttenuation"));
+	if (!Extended || Extended->GetInt() != 1)
+	{
+		return 1.0;
+	}
+	constexpr double kIsoSaturationSpeedConstant = 0.78; // ISO 12232:2006
+	const double Q = LensAttenuation ? static_cast<double>(LensAttenuation->GetFloat()) : 0.78;
+	return kIsoSaturationSpeedConstant / FMath::Max(Q, 0.01);
 }
 
 double URbCameraRigComponent::TraceFocusCm(const FVector& Eye, const FVector& Forward) const
@@ -483,7 +501,11 @@ void URbCameraRigComponent::UpdateFocus(double DeltaSeconds, const FVector& Eye,
 {
 	const FVector Forward = Rot.GetForwardVector();
 	double Target = kMaxFocusCm;
-	if (Mode == ERbCameraRigMode::DownOnShot && bSmoothedAxisValid)
+	// Down on the shot the eyes rest on the fixation point (the object ball on the line) until the gaze input turns them away: then
+	// they focus on what they look at, like standing. (The fixation plane alone would collapse toward the eye when the head turns:
+	// cos 60 deg halves the distance and blurs the whole scene while the player watches the balls after the shot.)
+	const bool bGazeOnLine = FMath::Square(GazeYawDeg) + FMath::Square(GazePitchDeg) <= FMath::Square(kGazeOnLineDeg);
+	if (Mode == ERbCameraRigMode::DownOnShot && bSmoothedAxisValid && bGazeOnLine)
 	{
 		Target = FVector::DotProduct(DownFixation() - Eye, Forward); // focus plane through the fixation point (thin lens)
 	}
@@ -628,6 +650,10 @@ void URbCameraRigComponent::ApplyPresetToCamera(UCineCameraComponent& Camera, co
 	Filmback.SensorVerticalOffset = 0.0f;
 	Camera.SetFilmback(Filmback);
 	Camera.bConstrainAspectRatio = false;
+	// The vertical FOV is authored: the camera carries MaintainYFOV itself (FMinimalViewInfo::AspectRatioAxisConstraint overrides the
+	// local player's config value), so no engine / user setting (MaintainXFOV, MajorAxisFOV) can turn 21:9 into a vertical crop.
+	Camera.bOverrideAspectRatioAxisConstraint = true;
+	Camera.SetAspectRatioAxisConstraint(EAspectRatioAxisConstraint::AspectRatio_MaintainYFOV);
 	Camera.Overscan = 0.0f; // the Headcam distortion pass (and its overscan) is post-M1
 
 	// Lens from the vertical FOV and the pupil: f = h / (2 tan(V/2)) (= w / (2 tan(H/2))), N = f / A.
@@ -703,7 +729,7 @@ void URbCameraRigComponent::ApplyPresetToCamera(UCineCameraComponent& Camera, co
 	PP.bOverride_SceneFringeIntensity = true;
 	PP.SceneFringeIntensity = static_cast<float>(Params.ChromaticAberration);
 	PP.bOverride_BloomMethod = true;
-	PP.BloomMethod = EBloomMethod::BM_SOG;
+	PP.BloomMethod = Params.bConvolutionBloom ? EBloomMethod::BM_FFT : EBloomMethod::BM_SOG; // plan 4.4: Eyes convolution, cameras standard
 	PP.bOverride_BloomIntensity = true;
 	PP.BloomIntensity = static_cast<float>(Params.BloomIntensity);
 }

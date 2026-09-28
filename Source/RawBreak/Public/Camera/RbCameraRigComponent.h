@@ -12,7 +12,8 @@
 // viewport aspect (h_sensor fixed, w_sensor = h_sensor * aspect, updated on viewport resize), sets f = h_sensor / (2 tan(V/2))
 // and N = f / A (pupil A). The plan's f = w_sensor / (2 tan(H/2)) is the same number only under that condition.
 // bConstrainAspectRatio is off: the projection takes the MaintainYFOV path (V from the filmback, Hor+ on wider screens), so even
-// the frame between a resize and the filmback update has the right vertical FOV and never shows black bars.
+// the frame between a resize and the filmback update has the right vertical FOV and never shows black bars. The camera carries
+// MaintainYFOV itself (bOverrideAspectRatioAxisConstraint), independent of the local player's config.
 //
 // Placement per mode (all world space, computed every tick in TG_PostPhysics after the character moved):
 //   Standing     eye StandingEyeHeight above the capsule bottom, view = control rotation
@@ -28,7 +29,9 @@
 // the 8-12 Hz hand tremor of SampleHand.
 //
 // Optics every tick: filmback = viewport aspect, focus = accommodation ease in dioptres (exp. time constant FocusEaseSeconds)
-// toward the focus target (down) or the first hit along the view axis (standing), film grain from the CURRENT adapted exposure
+// toward the fixation point down on the shot (its distance along the view axis) while the eyes rest on the line, else - standing,
+// or down with the eyes turned away from the line by the gaze input (watching the balls, looking along the line) - the first hit
+// along the view axis; film grain from the CURRENT adapted exposure
 // (FRbExposureProbe reads the renderer's eye adaptation back on the game thread) through RbCameraMath::ExposureCoupledGrain.
 // Comfort (URbGameUserSettings, bApplyUserSettings): camera preset, vertical FOV (Eyes), head bob scale, reduced motion (no
 // head motion, no motion blur), motion blur / grain scales, DoF on / off.
@@ -100,8 +103,11 @@ public:
 
 	// --- input and settings ------------------------------------------------------------------------------
 
-	// Vertical FOV [deg] replacing the preset's (settings slider 40-75, Eyes only); <= 0 = the preset's own.
+	// Vertical FOV [deg] replacing the preset's (settings slider, Eyes only), clamped to the plan 4.9 range 40-75; <= 0 = the
+	// preset's own.
 	void SetVerticalFovOverride(double VerticalDeg);
+	static constexpr double MinVerticalFovDeg = 40.0;
+	static constexpr double MaxVerticalFovDeg = 75.0;
 	// Eye / head rotation from look input while down [deg]: pitch while aiming (the eyes run along the line), yaw and pitch while
 	// watching the shot. Reset by every new get-down. Clamped to +-70 deg yaw, +-35 deg pitch.
 	void AddGazeInput(double YawDeg, double PitchDeg);
@@ -143,8 +149,13 @@ public:
 	static FQuat ComputeDownOnShotView(const FVector& Eye, const FVector& Direction, const FVector& GazePoint);
 	// Accommodation: exponential ease in dioptres (1 / distance), exact for any frame split at a constant target.
 	static double EaseFocusCm(double CurrentCm, double TargetCm, double DeltaSeconds, double TauSeconds);
-	// EV100 of a linear eye-adaptation exposure (UE: exposure = 2^compensation / (1.2 * 2^EV100)).
-	static double Ev100FromExposure(double Exposure, double Compensation);
+	// EV100 of a linear eye-adaptation exposure. UE 5.8 (PostProcessEyeAdaptation.cpp / .usf, extended luminance range):
+	// exposure = 2^compensation / (LuminanceMax * 2^EV100) with LuminanceMax = 0.78 / r.EyeAdaptation.LensAttenuation (1.0 at the
+	// 5.8 default 0.78; the pre-5.x 0.65 gave 1.2), 1.0 without r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange.
+	static double Ev100FromExposure(double Exposure, double Compensation, double LuminanceMax);
+	static double Ev100FromExposure(double Exposure, double Compensation) { return Ev100FromExposure(Exposure, Compensation, EyeAdaptationLuminanceMax()); }
+	// The renderer's LuminanceMax for the current console variables (see Ev100FromExposure).
+	static double EyeAdaptationLuminanceMax();
 	// Centre-weighted metering mask (gaussian of Sigma in image half-sizes, 5 % floor), one transient texture per sigma.
 	static UTexture2D* GetMeteringMask(double Sigma);
 

@@ -31,13 +31,7 @@ void ARbPlayerController::BeginPlay()
 	{
 		return;
 	}
-	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
-	{
-		if (InputSetup && InputSetup->Context && !Subsystem->HasMappingContext(InputSetup->Context))
-		{
-			Subsystem->AddMappingContext(InputSetup->Context, 0);
-		}
-	}
+	RegisterMappingContext();
 	// First-person mouse: captured and hidden (the stroke's raw-input thread relies on UE's high-precision mouse mode).
 	FInputModeGameOnly Mode;
 	Mode.SetConsumeCaptureMouseDown(true);
@@ -69,6 +63,22 @@ void ARbPlayerController::SetupInputComponent()
 	// bindings after the actions). UEnhancedInputComponent hides the legacy helpers, so bind through the base class. A "Back" action
 	// in URbInputSetup (UE-5a) would replace this.
 	static_cast<UInputComponent*>(Input)->BindKey(EKeys::Escape, IE_Pressed, this, &ARbPlayerController::HandleReplayBack);
+	RegisterMappingContext(); // SetPlayer (the local player is set) may run after BeginPlay
+}
+
+void ARbPlayerController::RegisterMappingContext()
+{
+	if (!InputSetup || !InputSetup->Context || !IsLocalController())
+	{
+		return;
+	}
+	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+	{
+		if (!Subsystem->HasMappingContext(InputSetup->Context))
+		{
+			Subsystem->AddMappingContext(InputSetup->Context, 0);
+		}
+	}
 }
 
 URbMatchDirector* ARbPlayerController::FindDirector() const

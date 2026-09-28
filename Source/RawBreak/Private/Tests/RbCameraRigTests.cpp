@@ -1,16 +1,19 @@
 // Camera rig, pawn and controller acceptance (Docs/ue-architecture.md 13, UE-5b): camera model defaults == plan 4.9; eye
 // placement down on the shot (plan 4.2) vs a hand-computed eye; the ENGINE's projection (FMinimalViewInfo::
 // CalculateProjectionMatrixGivenViewRectangle, MaintainYFOV) gives V = 50 deg at 16:9 and 21:9 with the filmback that
-// ApplyPresetToCamera sets, f and N equal PupilToCineLens at the viewport aspect; exposure / shutter / sensor post-process of the
-// presets; accommodation ease; head motion amplitudes (plan 4.8); the rig's get-down / stand-up transition and gaze clamps in a
-// game world; the pawn's input routing through the stroke component; the controller's overlay actions; and the functional
-// check that the pawn cannot walk into the table (a ticked physics world with the UE-1 table).
+// ApplyPresetToCamera sets (also when the local player is configured for MaintainXFOV: the camera carries MaintainYFOV), f and N
+// equal PupilToCineLens at the viewport aspect; exposure / shutter / sensor post-process of the presets; accommodation ease and the
+// EV100 read-back of UE 5.8's eye adaptation; head motion amplitudes (plan 4.8); the rig's get-down / stand-up transition and gaze
+// clamps in a game world; the focus following the gaze away from the line; the FOV slider range; the pawn's input routing through
+// the stroke component; the controller's actions and input wiring (incl. the legacy Esc binding); and the functional check that the
+// pawn cannot walk into the table (a ticked physics world with the UE-1 table, runtime and baked meshes).
 // Owner: UE-5b.
 
 #include "Camera/RbCameraModel.h"
 #include "Camera/RbCameraRigComponent.h"
 #include "Camera/RbHeadMotion.h"
 #include "Core/RbCoords.h"
+#include "Input/RbInputSetup.h"
 #include "Math/RbCameraMath.h"
 #include "Player/RbPlayerCharacter.h"
 #include "Player/RbPlayerController.h"
@@ -22,14 +25,20 @@
 #include "CineCameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "EnhancedInputComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/CheatManager.h"
+#include "HAL/IConsoleManager.h"
 #include "SceneView.h"
 #include "Tests/AutomationCommon.h"
 #include "UObject/Package.h"
+#if WITH_EDITOR
+#include "AssetCompilingManager.h"
+#endif
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -40,15 +49,17 @@ namespace RbCameraRigTests
 	constexpr double kAspect219 = 64.0 / 27.0;
 	constexpr double kR = 0.028575;
 
-	// The engine's own projection of a cine camera for a view rectangle (the path the game viewport takes).
-	void EngineFovs(UCineCameraComponent& Camera, int32 Width, int32 Height, double& OutVerticalDeg, double& OutHorizontalDeg)
+	// The engine's own projection of a cine camera for a view rectangle (the path the game viewport takes). LocalPlayerConstraint is
+	// the local player's config value the view falls back to when the camera does not carry its own constraint.
+	void EngineFovs(UCineCameraComponent& Camera, int32 Width, int32 Height, double& OutVerticalDeg, double& OutHorizontalDeg,
+		EAspectRatioAxisConstraint LocalPlayerConstraint = EAspectRatioAxisConstraint::AspectRatio_MaintainYFOV)
 	{
 		FMinimalViewInfo View;
 		Camera.GetCameraView(0.0f, View);
 		FSceneViewProjectionData Projection;
 		const FIntRect Rect(0, 0, Width, Height);
 		Projection.SetViewRectangle(Rect);
-		FMinimalViewInfo::CalculateProjectionMatrixGivenViewRectangle(View, EAspectRatioAxisConstraint::AspectRatio_MaintainYFOV, Rect, Projection);
+		FMinimalViewInfo::CalculateProjectionMatrixGivenViewRectangle(View, LocalPlayerConstraint, Rect, Projection);
 		const FMatrix& M = Projection.ProjectionMatrix;
 		OutVerticalDeg = FMath::RadiansToDegrees(2.0 * FMath::Atan(1.0 / M.M[1][1]));
 		OutHorizontalDeg = FMath::RadiansToDegrees(2.0 * FMath::Atan(1.0 / M.M[0][0]));
@@ -134,6 +145,8 @@ bool FRbCameraDefaults::RunTest(const FString& Parameters)
 	const FRbCameraPresetParams E = RbCameraModel::Defaults(ERbCameraPreset::Eyes);
 	const FRbCameraPresetParams H = RbCameraModel::Defaults(ERbCameraPreset::Headcam);
 	TestEqual(TEXT("vertical FOV Eyes"), E.VerticalFovDeg, 50.0);
+	TestTrue(TEXT("bloom: Eyes convolution, Headcam standard (plan 4.4)"), E.bConvolutionBloom && !H.bConvolutionBloom);
+	TestTrue(TEXT("bloom: Eyes low, Headcam slightly higher"), E.BloomIntensity > 0.0 && E.BloomIntensity < H.BloomIntensity);
 	TestEqual(TEXT("vertical FOV Headcam (H0 = 90 at 16:9)"), H.VerticalFovDeg, 58.7, 0.02);
 	TestEqual(TEXT("Headcam base H0 = 90 at 16:9"), RbCameraMath::HorizontalFromVerticalFovDeg(H.VerticalFovDeg, kAspect169), 90.0, 1e-9);
 	TestEqual(TEXT("k1 Eyes"), E.DistortionK1, 0.0);
@@ -286,6 +299,26 @@ bool FRbCameraEngineProjection::RunTest(const FString& Parameters)
 	EngineFovs(*Camera, 2560, 1080, V, H);
 	TestEqual(TEXT("stale 16:9 filmback on 21:9: V"), V, 50.0, 0.01);
 
+	// The camera carries MaintainYFOV itself: a local player configured for MaintainXFOV / MajorAxisFOV (engine default, user ini) still
+	// gets the authored vertical FOV and Hor+ on 21:9.
+	{
+		FMinimalViewInfo View;
+		Camera->GetCameraView(0.0f, View);
+		TestTrue(TEXT("view carries MaintainYFOV"), View.AspectRatioAxisConstraint.IsSet() &&
+			View.AspectRatioAxisConstraint.GetValue() == EAspectRatioAxisConstraint::AspectRatio_MaintainYFOV);
+	}
+	for (const EAspectRatioAxisConstraint LocalPlayer : {EAspectRatioAxisConstraint::AspectRatio_MaintainXFOV, EAspectRatioAxisConstraint::AspectRatio_MajorAxisFOV})
+	{
+		URbCameraRigComponent::ApplyPresetToCamera(*Camera, RbCameraModel::Defaults(ERbCameraPreset::Eyes), static_cast<float>(kAspect219));
+		EngineFovs(*Camera, 2560, 1080, V, H, LocalPlayer);
+		TestEqual(FString::Printf(TEXT("local player constraint %d: V at 21:9"), static_cast<int32>(LocalPlayer)), V, 50.0, 0.01);
+		TestEqual(FString::Printf(TEXT("local player constraint %d: H at 21:9"), static_cast<int32>(LocalPlayer)), H, 95.728, 0.01);
+		// Stale 16:9 filmback on a 21:9 viewport: without the camera's own constraint MaintainXFOV would crop V to 38.5 deg.
+		URbCameraRigComponent::ApplyPresetToCamera(*Camera, RbCameraModel::Defaults(ERbCameraPreset::Eyes), static_cast<float>(kAspect169));
+		EngineFovs(*Camera, 2560, 1080, V, H, LocalPlayer);
+		TestEqual(FString::Printf(TEXT("local player constraint %d: stale filmback V"), static_cast<int32>(LocalPlayer)), V, 50.0, 0.01);
+	}
+
 	// Headcam: the base projection (distortion post-process is post-M1), V = 58.7 at every aspect.
 	URbCameraRigComponent::ApplyPresetToCamera(*Camera, RbCameraModel::Defaults(ERbCameraPreset::Headcam), static_cast<float>(kAspect219));
 	EngineFovs(*Camera, 2560, 1080, V, H);
@@ -321,6 +354,10 @@ bool FRbCameraPostProcess::RunTest(const FString& Parameters)
 		TestTrue(Name + TEXT(": more grain in the shadows"), PP.FilmGrainIntensityShadows > PP.FilmGrainIntensityMidtones && PP.FilmGrainIntensityMidtones > PP.FilmGrainIntensityHighlights);
 		TestEqual(Name + TEXT(": vignette"), static_cast<double>(PP.VignetteIntensity), P.Vignette, 1e-6);
 		TestEqual(Name + TEXT(": CA"), static_cast<double>(PP.SceneFringeIntensity), P.ChromaticAberration, 1e-6);
+		// Plan 4.4 bloom row: Eyes convolution bloom at low intensity (lamp glare), Headcam standard and slightly higher.
+		TestTrue(Name + TEXT(": bloom method"), PP.bOverride_BloomMethod &&
+			PP.BloomMethod == (Preset == ERbCameraPreset::Eyes ? EBloomMethod::BM_FFT : EBloomMethod::BM_SOG));
+		TestEqual(Name + TEXT(": bloom intensity"), static_cast<double>(PP.BloomIntensity), P.BloomIntensity, 1e-6);
 		TestTrue(Name + TEXT(": manual focus, no engine smoothing"), Camera->FocusSettings.FocusMethod == ECameraFocusMethod::Manual && !Camera->FocusSettings.bSmoothFocusChanges);
 	}
 	Camera->RemoveFromRoot();
@@ -375,15 +412,33 @@ bool FRbCameraFocusEase::RunTest(const FString& Parameters)
 	TestEqual(TEXT("first value snaps"), URbCameraRigComponent::EaseFocusCm(0.0, 150.0, 0.016, Tau), 150.0);
 	TestEqual(TEXT("clamped to the minimum focus distance"), URbCameraRigComponent::EaseFocusCm(0.0, 1.0, 0.016, Tau), 5.0);
 
-	// EV100 of UE's exposure multiplier: exposure = 2^bias / (1.2 * 2^EV100).
+	// EV100 of UE 5.8's exposure multiplier (PostProcessEyeAdaptation.usf, extended luminance range): the white point is
+	// L_white = LuminanceMax 2^EV100 with LuminanceMax = 0.78 / r.EyeAdaptation.LensAttenuation, exposure = 2^bias / L_white.
+	// The project runs the extended range (the rig's Min / Max brightness are EV100 only then) at the 5.8 default attenuation 0.78:
+	// LuminanceMax = 1 (review: the old 1.2 of the pre-5.x attenuation 0.65 read every EV 0.26 too low and skewed the grain law).
+	const IConsoleVariable* Extended = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"));
+	const IConsoleVariable* LensAttenuation = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.LensAttenuation"));
+	if (TestNotNull(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"), Extended) && TestNotNull(TEXT("r.EyeAdaptation.LensAttenuation"), LensAttenuation))
+	{
+		TestEqual(TEXT("extended luminance range on (DefaultEngine.ini): Min / Max brightness are EV100"), Extended->GetInt(), 1);
+		TestEqual(TEXT("5.8 default lens attenuation"), static_cast<double>(LensAttenuation->GetFloat()), 0.78, 1e-6);
+		TestEqual(TEXT("LuminanceMax = 0.78 / q"), URbCameraRigComponent::EyeAdaptationLuminanceMax(), 0.78 / static_cast<double>(LensAttenuation->GetFloat()), 1e-9);
+	}
+	const double LMax = URbCameraRigComponent::EyeAdaptationLuminanceMax();
+	TestEqual(TEXT("LuminanceMax of the project config"), LMax, 1.0, 1e-6);
 	for (const double Ev : {2.0, 7.634, 11.0})
 	{
 		for (const double Bias : {0.0, 0.25, -0.3})
 		{
-			const double Exposure = FMath::Pow(2.0, Bias) / (1.2 * FMath::Pow(2.0, Ev));
-			TestEqual(FString::Printf(TEXT("EV %.3f bias %.2f round trip"), Ev, Bias), URbCameraRigComponent::Ev100FromExposure(Exposure, Bias), Ev, 1e-9);
+			const double Exposure = FMath::Pow(2.0, Bias) / (LMax * FMath::Pow(2.0, Ev));
+			TestEqual(FString::Printf(TEXT("EV %.3f bias %.2f round trip"), Ev, Bias), URbCameraRigComponent::Ev100FromExposure(Exposure, Bias), Ev, 1e-6);
+			// The pre-5.x calibration (q = 0.65 -> LuminanceMax 1.2) through the explicit overload.
+			const double OldExposure = FMath::Pow(2.0, Bias) / (1.2 * FMath::Pow(2.0, Ev));
+			TestEqual(FString::Printf(TEXT("EV %.3f bias %.2f, LuminanceMax 1.2"), Ev, Bias), URbCameraRigComponent::Ev100FromExposure(OldExposure, Bias, 1.2), Ev, 1e-9);
 		}
 	}
+	// A frame exposed for the plan's lit cloth (EV 7.634, plan 4.4 / T6) with the Eyes bias reads back as EV 7.634, not 7.37.
+	TestEqual(TEXT("cloth EV read back"), URbCameraRigComponent::Ev100FromExposure(FMath::Pow(2.0, 0.25) / FMath::Pow(2.0, 7.634), 0.25), 7.634, 1e-6);
 	TestTrue(TEXT("no exposure = unknown"), URbCameraRigComponent::Ev100FromExposure(0.0, 0.0) < -50.0);
 	return true;
 }
@@ -572,6 +627,122 @@ bool FRbCameraRigTransition::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbCameraFocusFollowsGaze, "RawBreak.Unit.Camera.FocusFollowsGaze", RB_UNIT_TEST_FLAGS)
+bool FRbCameraFocusFollowsGaze::RunTest(const FString& Parameters)
+{
+	// Down on the shot the eyes rest on the object ball (focus plane through it); when the gaze input turns them away (watching the
+	// balls after the shot, raising / lowering the eyes along the line) they focus on what they look at. Review finding: the focus
+	// stayed on the fixation plane, whose distance along a head turned 60 deg is halved - the whole scene went soft while watching.
+	FPawnWorld W;
+	if (!W.Create(*this, FVector(-200.0, 30.0, 88.0 + 5.0)))
+	{
+		return false;
+	}
+	W.SpawnFloor(); // top face at z = 0
+	// A wall parallel to X, 150 cm to the right (+Y) of the eye, long and tall enough for the turned view ray.
+	const FVector Contact(-100.0, 40.0, 80.0);
+	const double WallY = Contact.Y + 150.0;
+	AActor* Wall = W.World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity);
+	UBoxComponent* WallBox = NewObject<UBoxComponent>(Wall, TEXT("Wall"));
+	WallBox->SetBoxExtent(FVector(600.0, 10.0, 300.0));
+	WallBox->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	Wall->SetRootComponent(WallBox);
+	WallBox->RegisterComponent();
+	WallBox->SetWorldLocation(FVector(Contact.X, WallY + 10.0, 0.0));
+	for (int32 I = 0; I < 3; ++I)
+	{
+		W.Tick(); // physics scene up to date for the traces
+	}
+
+	URbCameraRigComponent* Rig = W.Pawn->GetCameraRig();
+	UCineCameraComponent* Cam = W.Pawn->GetCamera();
+	Rig->SetComfort(0.0, 1.0, 1.0, true); // no head motion: the camera = the base pose
+	const FRbCameraPresetParams& P = Rig->GetParams();
+	const double Th = FMath::DegreesToRadians(4.0);
+	const FVector U(FMath::Cos(Th), 0.0, -FMath::Sin(Th)); // cue along +X, butt raised 4 deg
+	const FVector ObjectBall = Contact + FVector(150.0, 0.0, 0.0);
+	Rig->SetCueAxisWorld(Contact, U);
+	Rig->SetFocusTargetWorld(ObjectBall);
+	Rig->SetMode(ERbCameraRigMode::DownOnShot);
+	Rig->TickRig(P.GetDownSeconds + 0.01);
+	const auto Settle = [Rig]() {
+		for (int32 I = 0; I < 120; ++I) // 2 s = 10 accommodation time constants
+		{
+			Rig->TickRig(1.0 / 60.0);
+		}
+	};
+	Settle();
+
+	// 1. On the line: the focus plane through the object ball.
+	FVector Eye = Cam->GetComponentLocation();
+	FVector Fwd = Cam->GetForwardVector();
+	TestEqual(TEXT("on the line: focus on the object ball"), Rig->GetFocusDistanceCm(), FVector::DotProduct(ObjectBall - Eye, Fwd), 0.5);
+
+	// 2. Head turned 60 deg to the right (after the shot): the focus is the wall the eyes look at, not the collapsed fixation plane.
+	Rig->AddGazeInput(60.0, 0.0);
+	Settle();
+	Eye = Cam->GetComponentLocation();
+	Fwd = Cam->GetForwardVector();
+	if (TestTrue(TEXT("the view turned toward the wall"), Fwd.Y > 0.8))
+	{
+		const double ToWall = (WallY - Eye.Y) / Fwd.Y;
+		const double OldPlane = FVector::DotProduct(ObjectBall - Eye, Fwd);
+		AddInfo(FString::Printf(TEXT("turned 60 deg: focus %.1f cm, wall %.1f cm, fixation plane %.1f cm"), Rig->GetFocusDistanceCm(), ToWall, OldPlane));
+		TestEqual(TEXT("turned: focus on the wall"), Rig->GetFocusDistanceCm(), ToWall, 0.5);
+		TestTrue(TEXT("the fixation plane would have been far off"), FMath::Abs(OldPlane - ToWall) > 50.0);
+		TestEqual(TEXT("the lens gets it"), static_cast<double>(Cam->FocusSettings.ManualFocusDistance), Rig->GetFocusDistanceCm(), 1e-2);
+	}
+
+	// 3. A gaze offset within 1.5 deg still rests on the object ball.
+	Rig->AddGazeInput(-60.0, 1.0);
+	Settle();
+	Eye = Cam->GetComponentLocation();
+	Fwd = Cam->GetForwardVector();
+	TestEqual(TEXT("small gaze offset: focus on the object ball"), Rig->GetFocusDistanceCm(), FVector::DotProduct(ObjectBall - Eye, Fwd), 0.5);
+
+	// 4. Eyes lowered along the line (look input while aiming): the focus follows the view ray down to the bed (here the floor).
+	Rig->AddGazeInput(0.0, -9.0);
+	Settle();
+	Eye = Cam->GetComponentLocation();
+	Fwd = Cam->GetForwardVector();
+	if (TestTrue(TEXT("looking down"), Fwd.Z < -0.05))
+	{
+		TestEqual(TEXT("eyes lowered: focus where the view ray meets the floor"), Rig->GetFocusDistanceCm(), -Eye.Z / Fwd.Z, 0.5);
+	}
+
+	// 5. A new get-down resets the gaze: back on the object ball.
+	Rig->SetMode(ERbCameraRigMode::Standing);
+	Rig->TickRig(P.GetDownSeconds + 0.01);
+	Rig->SetMode(ERbCameraRigMode::DownOnShot);
+	Rig->TickRig(P.GetDownSeconds + 0.01);
+	Settle();
+	Eye = Cam->GetComponentLocation();
+	Fwd = Cam->GetForwardVector();
+	TestEqual(TEXT("new address: focus on the object ball"), Rig->GetFocusDistanceCm(), FVector::DotProduct(ObjectBall - Eye, Fwd), 0.5);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbCameraFovOverride, "RawBreak.Unit.Camera.FovOverride_Range", RB_UNIT_TEST_FLAGS)
+bool FRbCameraFovOverride::RunTest(const FString& Parameters)
+{
+	// Settings slider (plan 4.9 range 40-75 deg), Eyes only; <= 0 = the preset's own.
+	URbCameraRigComponent* Rig = NewObject<URbCameraRigComponent>();
+	Rig->bApplyUserSettings = false;
+	TestEqual(TEXT("default Eyes V"), Rig->GetEffectiveParams().VerticalFovDeg, 50.0);
+	Rig->SetVerticalFovOverride(60.0);
+	TestEqual(TEXT("60 deg"), Rig->GetEffectiveParams().VerticalFovDeg, 60.0);
+	Rig->SetVerticalFovOverride(90.0);
+	TestEqual(TEXT("clamped to 75 deg"), Rig->GetEffectiveParams().VerticalFovDeg, 75.0);
+	Rig->SetVerticalFovOverride(20.0);
+	TestEqual(TEXT("clamped to 40 deg"), Rig->GetEffectiveParams().VerticalFovDeg, 40.0);
+	Rig->SetVerticalFovOverride(0.0);
+	TestEqual(TEXT("0 = the preset's"), Rig->GetEffectiveParams().VerticalFovDeg, 50.0);
+	Rig->SetVerticalFovOverride(60.0);
+	Rig->SetPreset(ERbCameraPreset::Headcam);
+	TestEqual(TEXT("the Headcam keeps its lens"), Rig->GetEffectiveParams().VerticalFovDeg, RbCameraModel::Defaults(ERbCameraPreset::Headcam).VerticalFovDeg);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbPlayerInputRouting, "RawBreak.Unit.Player.InputRouting", RB_UNIT_TEST_FLAGS)
 bool FRbPlayerInputRouting::RunTest(const FString& Parameters)
 {
@@ -696,6 +867,45 @@ bool FRbPlayerControllerActions::RunTest(const FString& Parameters)
 	PC->HandleReplayBack();
 	TestFalse(TEXT("no option to cycle without a director"), PC->HandleCycleOption(1.0f));
 	TestNotNull(TEXT("cheat manager class"), PC->CheatClass.Get());
+
+	// The input wiring a local player gets (InitInputSystem = what ULocalPlayer / SetPlayer runs): the runtime input setup exists
+	// before the pawn binds, the controller's non-pawn actions are bound on the Enhanced Input component, and Esc (a legacy key
+	// binding outside the mapping context, evaluated by UEnhancedPlayerInput through UPlayerInput::EvaluateInputComponentDelegates)
+	// reaches HandleReplayBack.
+	PC->InitInputSystem();
+	const URbInputSetup* Setup = PC->GetInputSetup();
+	UEnhancedInputComponent* Input = Cast<UEnhancedInputComponent>(PC->InputComponent);
+	if (!TestNotNull(TEXT("input setup created in SetupInputComponent"), Setup) || !TestNotNull(TEXT("Enhanced Input component (DefaultInput.ini)"), Input))
+	{
+		return false;
+	}
+	const auto Bound = [Input](const UInputAction* Action, ETriggerEvent Event) {
+		for (const TUniquePtr<FEnhancedInputActionEventBinding>& Binding : Input->GetActionEventBindings())
+		{
+			if (Binding && Action && Binding->GetAction() == Action && Binding->GetTriggerEvent() == Event)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	TestTrue(TEXT("Glance held"), Bound(Setup->Glance, ETriggerEvent::Triggered));
+	TestTrue(TEXT("Glance released"), Bound(Setup->Glance, ETriggerEvent::Completed));
+	TestTrue(TEXT("ToggleOverlay"), Bound(Setup->ToggleOverlay, ETriggerEvent::Triggered));
+	TestTrue(TEXT("ToggleDebug"), Bound(Setup->ToggleDebug, ETriggerEvent::Triggered));
+	TestTrue(TEXT("Replay"), Bound(Setup->Replay, ETriggerEvent::Triggered));
+	TestTrue(TEXT("CycleOption"), Bound(Setup->CycleOption, ETriggerEvent::Triggered));
+	TestFalse(TEXT("pawn actions are not bound on the controller"), Bound(Setup->Move, ETriggerEvent::Triggered) || Bound(Setup->Look, ETriggerEvent::Triggered));
+	int32 EscBindings = 0;
+	for (const FInputKeyBinding& Key : Input->KeyBindings)
+	{
+		if (Key.Chord.Key == EKeys::Escape && Key.KeyEvent == IE_Pressed && Key.KeyDelegate.IsBoundToObject(PC))
+		{
+			++EscBindings;
+			Key.KeyDelegate.Execute(EKeys::Escape); // HandleReplayBack without a replay: nothing to stop, never a crash
+		}
+	}
+	TestEqual(TEXT("Esc pressed -> HandleReplayBack, bound once"), EscBindings, 1);
 	return true;
 }
 
@@ -704,88 +914,126 @@ bool FRbPlayerControllerActions::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbPawnBlockedByTable, "RawBreak.Functional.Player.PawnBlockedByTable", RB_UNIT_TEST_FLAGS)
 bool FRbPawnBlockedByTable::RunTest(const FString& Parameters)
 {
-	// A yawed, translated 9-ft table (runtime meshes: complex-as-simple collision cooked when the mesh is set) on a floor; the pawn
-	// walks at it from the four sides and diagonally for 4 s each. It must reach the table and stop at the apron: the capsule never
-	// overlaps the table footprint and never climbs onto it.
+	// A yawed, translated 9-ft table on a floor; the pawn walks at it from the four sides and diagonally for 4 s each. It must reach
+	// the table and stop at the apron: the capsule never overlaps the table footprint and never climbs onto it. Both table paths:
+	// runtime meshes (complex-as-simple collision cooked when the mesh is set) and the baked static meshes the M1 level uses
+	// (complex-as-simple bodies of URbAssetBakeLibrary; skipped with a note when the LFS assets are not checked out).
 	FPawnWorld W;
 	if (!W.Create(*this, FVector(0.0, 0.0, 5000.0)))
 	{
 		return false;
 	}
 	W.SpawnFloor();
-	const FTransform TableXf(FRotator(0.0, 17.0, 0.0), FVector(40.0, -30.0, 0.0));
-	ARbTable* Table = W.World->SpawnActorDeferred<ARbTable>(ARbTable::StaticClass(), TableXf, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	if (!TestNotNull(TEXT("table"), Table))
-	{
-		return false;
-	}
-	Table->bUseBakedMeshes = false;
-	Table->FinishSpawning(TableXf);
-	if (!TestTrue(TEXT("table context"), Table->HasContext()))
-	{
-		return false;
-	}
-	const FBox Local = TableFootprintLocal(*Table);
-	if (!TestTrue(TEXT("table footprint"), Local.IsValid && Local.GetSize().X > 250.0 && Local.GetSize().Y > 120.0))
-	{
-		return false;
-	}
 	ARbPlayerCharacter* Pawn = W.Pawn;
 	const double Radius = Pawn->GetCapsuleComponent()->GetScaledCapsuleRadius();
 	const double HalfHeight = Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-	const FTransform ActorXf = Table->GetActorTransform();
+	const FTransform TableXf(FRotator(0.0, 17.0, 0.0), FVector(40.0, -30.0, 0.0));
 
 	struct FApproach
 	{
 		FVector2D Dir; // table-local walking direction
 		const TCHAR* Name;
 	};
-	for (const FApproach& A : {FApproach{FVector2D(1.0, 0.0), TEXT("head end")}, FApproach{FVector2D(-1.0, 0.0), TEXT("foot end")},
-			 FApproach{FVector2D(0.0, 1.0), TEXT("side A")}, FApproach{FVector2D(0.0, -1.0), TEXT("side B")},
-			 FApproach{FVector2D(1.0, 1.0).GetSafeNormal(), TEXT("diagonal at a corner")}})
+	for (const bool bBaked : {false, true})
 	{
-		// Start 1.5 m outside the footprint, walking at the table centre.
-		const FVector Centre = Local.GetCenter();
-		const double Reach = FMath::Max(Local.GetExtent().X, Local.GetExtent().Y) + 150.0 + Radius;
-		const FVector StartLocal(Centre.X - A.Dir.X * Reach, Centre.Y - A.Dir.Y * Reach, 0.0);
-		const FVector Start = ActorXf.TransformPosition(StartLocal) + FVector(0.0, 0.0, HalfHeight + 2.0);
-		Pawn->SetActorLocation(Start, false, nullptr, ETeleportType::TeleportPhysics);
-		Pawn->GetCharacterMovement()->StopMovementImmediately();
-		const FVector WorldDir = ActorXf.TransformVectorNoScale(FVector(A.Dir.X, A.Dir.Y, 0.0));
-		for (int32 I = 0; I < 20; ++I)
+		const TCHAR* Path = bBaked ? TEXT("baked") : TEXT("runtime");
+		ARbTable* Table = W.World->SpawnActorDeferred<ARbTable>(ARbTable::StaticClass(), TableXf, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!TestNotNull(TEXT("table"), Table))
 		{
-			W.Tick(); // settle on the floor
+			return false;
 		}
-		double MinClearance = UE_BIG_NUMBER;
-		double MaxZDev = 0.0;
-		for (int32 I = 0; I < 240; ++I)
+		Table->bUseBakedMeshes = bBaked;
+		Table->FinishSpawning(TableXf);
+		if (!TestTrue(TEXT("table context"), Table->HasContext()))
 		{
-			Pawn->AddMovementInput(WorldDir, 1.0f);
+			return false;
+		}
+		if (bBaked && !Cast<UStaticMeshComponent>(Table->GetPartComponent(ERbTablePart::Bed)))
+		{
+			AddInfo(TEXT("baked table meshes not loaded (LFS assets not checked out?): only the runtime table was walked at"));
+			Table->Destroy();
+			continue;
+		}
+#if WITH_EDITOR
+		// The editor loads and builds static meshes asynchronously (FStaticMeshCompilingManager): until the build finishes the
+		// component has no physics state, and a test world's ticks never pump the compiling manager - the capsule would walk
+		// through a table that in the game (cooked meshes, or the editor's own tick) blocks it. Finish the builds first.
+		FAssetCompilingManager::Get().FinishAllCompilation();
+		FAssetCompilingManager::Get().ProcessAsyncTasks();
+#endif
+		for (int32 I = 0; I < 3; ++I)
+		{
+			W.Tick(); // physics scene up to date
+		}
+		{
+			// Precondition: the table's collision is live in the physics scene (a vertical trace at the table centre hits a part).
+			const FVector Centre = Table->GetActorLocation();
+			FHitResult Hit;
+			const bool bHit = W.World->LineTraceSingleByChannel(Hit, Centre + FVector(0.0, 0.0, 300.0), Centre - FVector(0.0, 0.0, 1.0), ECC_Pawn);
+			if (!TestTrue(FString::Printf(TEXT("%s: the table blocks a trace at its centre"), Path), bHit && Hit.GetActor() == Table))
+			{
+				return false;
+			}
+		}
+		const FBox Local = TableFootprintLocal(*Table);
+		if (!TestTrue(FString::Printf(TEXT("%s: table footprint"), Path), Local.IsValid && Local.GetSize().X > 250.0 && Local.GetSize().Y > 120.0))
+		{
+			return false;
+		}
+		const FTransform ActorXf = Table->GetActorTransform();
+		for (const FApproach& A : {FApproach{FVector2D(1.0, 0.0), TEXT("head end")}, FApproach{FVector2D(-1.0, 0.0), TEXT("foot end")},
+				 FApproach{FVector2D(0.0, 1.0), TEXT("side A")}, FApproach{FVector2D(0.0, -1.0), TEXT("side B")},
+				 FApproach{FVector2D(1.0, 1.0).GetSafeNormal(), TEXT("diagonal at a corner")}})
+		{
+			const FString Name = FString::Printf(TEXT("%s table, %s"), Path, A.Name);
+			// Start 1.5 m outside the footprint, walking at the table centre.
+			const FVector Centre = Local.GetCenter();
+			const double Reach = FMath::Max(Local.GetExtent().X, Local.GetExtent().Y) + 150.0 + Radius;
+			const FVector StartLocal(Centre.X - A.Dir.X * Reach, Centre.Y - A.Dir.Y * Reach, 0.0);
+			const FVector Start = ActorXf.TransformPosition(StartLocal) + FVector(0.0, 0.0, HalfHeight + 2.0);
+			Pawn->SetActorLocation(Start, false, nullptr, ETeleportType::TeleportPhysics);
+			Pawn->GetCharacterMovement()->StopMovementImmediately();
+			const FVector WorldDir = ActorXf.TransformVectorNoScale(FVector(A.Dir.X, A.Dir.Y, 0.0));
+			for (int32 I = 0; I < 20; ++I)
+			{
+				W.Tick(); // settle on the floor
+			}
+			double MinClearance = UE_BIG_NUMBER;
+			double MaxZDev = 0.0;
+			for (int32 I = 0; I < 240; ++I)
+			{
+				Pawn->AddMovementInput(WorldDir, 1.0f);
+				W.Tick();
+				const FVector P = ActorXf.InverseTransformPosition(Pawn->GetActorLocation());
+				// Distance of the capsule axis to the footprint rectangle (2D).
+				const double Dx = FMath::Max3(Local.Min.X - P.X, 0.0, P.X - Local.Max.X);
+				const double Dy = FMath::Max3(Local.Min.Y - P.Y, 0.0, P.Y - Local.Max.Y);
+				MinClearance = FMath::Min(MinClearance, FMath::Sqrt(Dx * Dx + Dy * Dy) - Radius);
+				MaxZDev = FMath::Max(MaxZDev, FMath::Abs(Pawn->GetActorLocation().Z - HalfHeight));
+			}
+			const FVector End = ActorXf.InverseTransformPosition(Pawn->GetActorLocation());
+			const double Walked = FVector::Dist2D(End, StartLocal);
+			AddInfo(FString::Printf(TEXT("%s: walked %.1f cm, min clearance to the footprint %.2f cm, max z deviation %.2f cm"), *Name, Walked,
+				MinClearance, MaxZDev));
+			TestTrue(FString::Printf(TEXT("%s: the pawn walked (%.0f cm)"), *Name, Walked), Walked > 100.0);
+			// Rectangular footprint: at the rounded / cut corners the true boundary lies inside the box, so the diagonal only has to stay
+			// out of the box minus the corner region; the sides must touch the apron.
+			if (A.Dir.X == 0.0 || A.Dir.Y == 0.0)
+			{
+				TestTrue(FString::Printf(TEXT("%s: blocked at the table (clearance %.2f cm)"), *Name, MinClearance), MinClearance > -0.5 && MinClearance < 3.0);
+			}
+			else
+			{
+				TestTrue(FString::Printf(TEXT("%s: stays outside (clearance %.2f cm)"), *Name, MinClearance), MinClearance > -15.0);
+				TestTrue(FString::Printf(TEXT("%s: reached the table (clearance %.2f cm)"), *Name, MinClearance), MinClearance < 20.0);
+			}
+			TestTrue(FString::Printf(TEXT("%s: feet on the floor (max z deviation %.2f cm)"), *Name, MaxZDev), MaxZDev < 4.0);
+		}
+		Table->Destroy();
+		for (int32 I = 0; I < 3; ++I)
+		{
 			W.Tick();
-			const FVector P = ActorXf.InverseTransformPosition(Pawn->GetActorLocation());
-			// Distance of the capsule axis to the footprint rectangle (2D).
-			const double Dx = FMath::Max3(Local.Min.X - P.X, 0.0, P.X - Local.Max.X);
-			const double Dy = FMath::Max3(Local.Min.Y - P.Y, 0.0, P.Y - Local.Max.Y);
-			MinClearance = FMath::Min(MinClearance, FMath::Sqrt(Dx * Dx + Dy * Dy) - Radius);
-			MaxZDev = FMath::Max(MaxZDev, FMath::Abs(Pawn->GetActorLocation().Z - HalfHeight));
 		}
-		const FVector End = ActorXf.InverseTransformPosition(Pawn->GetActorLocation());
-		const double Walked = FVector::Dist2D(End, StartLocal);
-		AddInfo(FString::Printf(TEXT("%s: walked %.1f cm, min clearance to the footprint %.2f cm, max z deviation %.2f cm"), A.Name, Walked, MinClearance,
-			MaxZDev));
-		TestTrue(FString::Printf(TEXT("%s: the pawn walked (%.0f cm)"), A.Name, Walked), Walked > 100.0);
-		// Rectangular footprint: at the rounded / cut corners the true boundary lies inside the box, so the diagonal only has to stay
-		// out of the box minus the corner region; the sides must touch the apron.
-		if (A.Dir.X == 0.0 || A.Dir.Y == 0.0)
-		{
-			TestTrue(FString::Printf(TEXT("%s: blocked at the table (clearance %.2f cm)"), A.Name, MinClearance), MinClearance > -0.5 && MinClearance < 3.0);
-		}
-		else
-		{
-			TestTrue(FString::Printf(TEXT("%s: stays outside (clearance %.2f cm)"), A.Name, MinClearance), MinClearance > -15.0);
-			TestTrue(FString::Printf(TEXT("%s: reached the table (clearance %.2f cm)"), A.Name, MinClearance), MinClearance < 20.0);
-		}
-		TestTrue(FString::Printf(TEXT("%s: feet on the floor (max z deviation %.2f cm)"), A.Name, MaxZDev), MaxZDev < 4.0);
 	}
 	return true;
 }

@@ -42,6 +42,7 @@ namespace RbCameraModel
 			P.ShutterAngleDeg = 180.0;
 			P.ChromaticAberration = 0.4;
 			P.BloomIntensity = 0.6;               // lens veiling glare
+			P.bConvolutionBloom = false;          // standard bloom, slightly higher (plan 4.4)
 			P.AdaptSpeedUp = 3.0;                 // camera AE is fast
 			P.AdaptSpeedDown = 2.0;
 			P.ExposureCompensation = -0.3;        // cameras protect highlights
@@ -66,6 +67,7 @@ namespace RbCameraModel
 			P.FocusEaseSeconds = 0.35;
 			P.ShutterAngleDeg = 180.0;
 			P.BloomIntensity = 0.4;
+			P.bConvolutionBloom = false;
 			P.AdaptSpeedUp = 2.0;
 			P.AdaptSpeedDown = 1.5;
 			P.ExposureCompensation = 0.0;

@@ -57,6 +57,11 @@ protected:
 	void OnReplay(const FInputActionValue& Value);
 	void OnCycleOption(const FInputActionValue& Value);
 
+	// Adds the input setup's mapping context to the local player's Enhanced Input subsystem (once). Called from BeginPlay AND
+	// SetupInputComponent: a controller spawned into a world that already began play runs BeginPlay before SetPlayer ->
+	// InitInputSystem creates the setup, and must still get its mapping context.
+	void RegisterMappingContext();
+
 	URbMatchDirector* FindDirector() const;
 	URbReplaySubsystem* FindReplay() const;
 

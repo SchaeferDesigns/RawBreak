@@ -59,6 +59,9 @@ struct FRbCameraPresetParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optics") double MotionBlurMaxPercent = 5.0;   // of the screen width (plan 4.6)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optics") double ChromaticAberration = 0.0;    // scene fringe (Headcam 0.3-0.6)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optics") double BloomIntensity = 0.25;        // lamp glare / veiling glare
+	// Plan 4.4: the Eyes see the lamp glare through a convolution bloom (FFT, the engine's default kernel) at low intensity; the
+	// Headcam / Broadcast lenses use the standard (sum of gaussians) bloom.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optics") bool bConvolutionBloom = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exposure") double MinEv100 = 2.0;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exposure") double MaxEv100 = 11.0;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exposure") double AdaptSpeedUp = 1.5;         // [EV/s] dark -> bright
