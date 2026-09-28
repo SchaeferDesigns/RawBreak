@@ -10,8 +10,9 @@
 //     other balls, NoiseKey + NoiseHistory) -> SimInput (FRbTableState, strikes, ShotContext) -> URbSimulationSubsystem
 //   OnShotSimulated -> live playback (ARbBallSet) + rules on the game thread: DeriveShotFacts(Result.Record) ->
 //     EvaluateShot -> ApplyShot (committed when the playback finishes, so the UI never spoils the outcome)
-//   after the shot: ApplyShotToEquipment, AdvanceNoiseHistory, FRbTableState from Result.Finals, spotting,
-//     next turn / decision (ApplyOption) / rack over (new rack) / match over
+//   after the shot: ApplyShotToEquipment, AdvanceNoiseHistory, ApplyShot (spotting), then ONE sync of FRbTableState from
+//     MatchState.Game.Balls (status + plan position) and Result.Finals (orientation), R-12; next turn / decision
+//     (ApplyOption) / rack over (Confirm: new rack) / match over (Confirm: new match), R-20
 //
 // Practice = one human shooting every turn with the rules running; HotSeat = two humans alternating (the same pawn).
 // Lag optional (two strikes in one SimInput, EvaluateLag). M1 runs rules InputMode::Assisted (no F10 / 3.4 / 3.10 fouls
@@ -23,6 +24,22 @@
 //   * SetLivePlaybackRate(0) commits a shot as soon as it is simulated (headless tests without a ball set or real-time
 //     waiting; a 9-ball break plays 11 s). Tests of UE-6b therefore never depend on UE-2's playback (R-15).
 //   * MakeStrokeContext / OnStrokeAborted: the SampleHand contract of URbStrokeComponent (what you see is what hits, R-04).
+//
+// Implementation notes (UE-6b):
+//   * Practice: the rules still alternate their two players (a foul hands "the opponent" ball in hand), but both rule
+//     players are the same human: every player-model operation (attributes, tip, noise stream) uses shooter slot 0
+//     (GetShooter(0) == GetShooter(1)); RaceTo is unbounded, so a won rack racks again after Confirm.
+//   * Auto-chalk (HF 4.1 A mode, [DD-CHALK]): PerformChalking with the shooter's cube and habit before EVERY shot, so every
+//     visit starts chalked.
+//   * Scripted strikes (cheats, tests) bypass the human layer: they reveal no per-shot draws and change no equipment.
+//   * Without a URbSimulationSubsystem (world-free unit tests) the director simulates on the game thread with
+//     URbSimulationSubsystem::RunShotBlocking and hands the shot to itself - the same simulation code, no worker.
+//   * Lag (hot-seat, ?Lag=1): player 0 lags ball 0 (the cue ball), player 1 ball 1 from rb::rules::LagStartPositions;
+//     the director collects both executed strokes and simulates ONE SimInput with two strikes; the lag winner breaks.
+//   * ExecuteStroke uses MakeStrokeContext() + the commit's AddressIndex + the stroke component's aim ElevationFloor (what it
+//     rendered with); FloorBy / FloorBall are not in FRbStrokeCommit yet (they only feed the F2 shaft-contact list).
+//   * With a synchronous simulation (no subsystem) a stroke is committed and the next turn armed INSIDE the stroke
+//     component's OnStrokeContact broadcast: the component must enter Watching before it broadcasts.
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
@@ -32,6 +49,7 @@
 #include "Player/RbStrokeComponent.h"
 #include "Simulation/RbShot.h"
 
+#include "rb/Rules/Lag.h"
 #include "rb/Rules/Match.h"
 #include "rb/Rules/ShotFacts.h"
 
@@ -40,6 +58,7 @@
 class ARbBallSet;
 class ARbCue;
 class ARbTable;
+class URbShotPlaybackComponent;
 class URbSimulationSubsystem;
 
 // Game-side phase (finer than rb::rules::MatchPhase: the simulation / playback / placement steps).
@@ -69,6 +88,12 @@ struct FRbMatchSetup
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") int64 Seed = 0;  // 0 = random at start (stored for replays)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") FString Player1 = TEXT("Player 1");
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") FString Player2 = TEXT("Player 2");
+	// Every execution attribute of both shooters [0, 100]; < 0 = the neutral guest profile (HotSeatGuestAttributes, 50). ?Attr=
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") double ShooterAttribute = -1.0;
+	// HF-15 pressure (PressureMode On / Off); hot-seat may switch it off for both. ?Pressure=0
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") bool bPressure = true;
+	// HumanParams::NoiseScale (Imperfections slider Sim 1 / Scaled 0.6 / Low 0.3 / Off 0). ?Noise=
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") double NoiseScale = 1.0;
 };
 
 // What the overlay shows about the last shot (plain data, filled after rules evaluation).
@@ -85,6 +110,9 @@ struct FRbLastShotSummary
 	double SimMilliseconds = 0.0;
 	bool bPredictedMiscue = false;   // from the human layer
 	bool bMiscue = false;            // from the physics
+	bool bLag = false;               // the shot was the lag (LagOutcome in LagWinner)
+	int32 LagWinner = -1;            // 0 / 1, -1 = re-lag
+	rb::rules::NextAction Next = rb::rules::NextAction::Pass;
 };
 
 DECLARE_MULTICAST_DELEGATE(FRbOnMatchChanged);
@@ -96,7 +124,20 @@ class RAWBREAK_API URbMatchDirector : public UObject
 
 public:
 	// Wires the director to the scene (all four required) and subscribes to the simulation / playback events.
+	// Null actors are tolerated (world-free tests): no presentation, and without InSimulation the shot runs on the
+	// game thread (URbSimulationSubsystem::RunShotBlocking).
 	void Initialize(ARbTable* InTable, ARbBallSet* InBalls, ARbCue* InCue, URbSimulationSubsystem* InSimulation);
+
+	// Uses this table context instead of the table actor's (world-free tests, tools). Read at StartMatch.
+	void SetTableContext(TSharedPtr<const FRbTableContext> InContext) { ContextOverride = InContext; }
+
+	// The pawn's stroke component (one for both hot-seat players): the director pushes BeginAddress / placement / lock /
+	// FRbStrokeContext to it and listens to OnStrokeContact, OnCueBallPlaced and OnStrokeAborted. Null unbinds.
+	void SetStrokeComponent(URbStrokeComponent* InStroke);
+	URbStrokeComponent* GetStrokeComponent() const { return StrokeComponent.Get(); }
+
+	// Unsubscribes from every event source (game mode EndPlay).
+	void Shutdown();
 
 	// Starts a match (Practice or HotSeat, M1: 9-ball) and racks the first rack.
 	bool StartMatch(const FRbMatchSetup& Setup);
@@ -108,9 +149,28 @@ public:
 	const rb::rules::MatchState& GetMatchState() const { return State; }
 	rb::rules::ShotConstraints GetConstraints() const;
 	int32 GetActivePlayer() const;
-	const FRbShooterState& GetShooter(int32 Player) const { return Shooters[FMath::Clamp(Player, 0, 1)]; }
+	// Player-model state of rules player 0 / 1 (practice: both are the one human, slot 0).
+	const FRbShooterState& GetShooter(int32 Player) const { return Shooters[ShooterSlot(Player)]; }
 	const FRbTableState& GetTableState() const { return TableState; }
 	const FRbLastShotSummary& GetLastShot() const { return LastShot; }
+	TSharedPtr<const FRbTableContext> GetTableContext() const { return TableContext; }
+	TSharedPtr<const FRbShot> GetPendingShot() const { return PendingShot; }
+	// The last committed shot (request incl. the human-layer record, result): debug block, tests.
+	TSharedPtr<const FRbShot> GetLastCommittedShot() const { return LastCommittedShot; }
+	const rb::rules::ShotDeclaration& GetDeclaration() const { return Declaration; }
+	const rb::human::HumanParams& GetHumanParams() const { return HumanParams; }
+	uint64 GetMatchSeed() const { return MatchSeed; }
+	uint32 GetMatchShotIndex() const { return MatchShotIndex; }
+	// Ball in hand for the current shot (AwaitPlacement, or AwaitStroke after the placement), the placed position.
+	bool IsCueBallInHand() const;
+	bool IsCueBallPlaced() const { return bCueBallPlaced; }
+	rb::Vec2 GetPlacedCueBall() const { return PlacedCueBall; }
+	// Lag: whose lag stroke is next (0 / 1), -1 outside the lag.
+	int32 GetLagStroker() const { return Phase == ERbDirectorPhase::Lag ? LagStroker : -1; }
+	// Index into GetMatchState().PendingOutcome.Options of the highlighted decision option (AwaitDecision).
+	int32 GetSelectedOption() const { return SelectedOption; }
+	// Last refused action / error for logs and the debug block.
+	const FString& GetLastError() const { return LastError; }
 
 	// --- player actions -------------------------------------------------------------------------------
 	// Ball in hand: legality check and placement (table-frame plan position of the cue-ball centre).
@@ -130,10 +190,24 @@ public:
 	// AwaitDecision: the deciding player picks one of GetMatchState().PendingOutcome.Options.
 	bool ChooseOption(rb::rules::Option Choice);
 
-	// Test / cheat support: replaces the ball layout (core states), e.g. "9-ball alone on the table".
+	// Confirm input (R-20): AwaitDecision -> the highlighted option; RackOver -> next rack; MatchOver -> new match with the
+	// same setup (a random seed is drawn again when the setup's seed is 0). False if Confirm means nothing now.
+	bool Confirm();
+
+	// CycleOption input (Q / E): moves the highlighted decision option by Direction (wraps). False outside AwaitDecision.
+	bool CycleOption(int32 Direction);
+
+	// Re-rack the current rack (stalemate R 1.10 / 5.9: the rack's breaker breaks again, no score; RbRerack cheat).
+	bool RequestRerack();
+
+	// Test / cheat support: replaces the ball layout (core states), e.g. "9-ball alone on the table". The rules' GameState
+	// follows: balls in play are OnTable at their plan position, racked balls not in play are Pocketed; the layout is a
+	// mid-rack position (no break shot, no push-out); a cue ball in play is in position, one out of play is in hand
+	// anywhere. The current turn is re-armed (AwaitStroke / AwaitPlacement). Only in AwaitStroke / AwaitPlacement.
 	void SetTableStateForTest(const FRbTableState& NewState);
 
-	// Live playback rate (1 = real time). 0 = no playback: commit right after the simulation (tests, RbFastForward).
+	// Live playback rate (1 = real time). 0 = no playback: commit right after the simulation (tests, RbPlaybackRate cheat,
+	// ?Rate=0, rb.Match.Rate 0).
 	void SetLivePlaybackRate(float Rate) { LivePlaybackRate = FMath::Max(0.0f, Rate); }
 	float GetLivePlaybackRate() const { return LivePlaybackRate; }
 
@@ -148,7 +222,15 @@ public:
 	// simulating or playing back); the replay subsystem locks the stroke component through the director.
 	bool IsReplayAllowed() const;
 
+	// Replay subsystem: true locks the stroke component; false shows FRbTableState again and re-arms the stroke component
+	// for the current phase (without resetting its address count).
+	void SetReplayActive(bool bActive);
+	bool IsReplayActive() const { return bReplayActive; }
+
 	FRbOnMatchChanged OnMatchChanged;
+
+	// UObject
+	virtual UWorld* GetWorld() const override;
 
 protected:
 	void RackNext();
@@ -159,6 +241,47 @@ protected:
 	void SetPhase(ERbDirectorPhase NewPhase);
 
 private:
+	// Shooter slot of a rules player (practice: always 0).
+	int32 ShooterSlot(int32 Player) const;
+	FRbShooterState& ActiveShooterState();
+	const FRbShooterState& ActiveShooterState() const;
+	int32 ActiveRulesPlayer() const;
+
+	void InitShooters();
+	rb::human::NoiseKey MakeNoiseKey(const FRbShooterState& Shooter) const;
+	rb::human::StrokeSituation MakeSituation() const;
+	rb::rules::ShotDeclaration NeutralDeclaration() const;
+	rb::rules::CueBallNext PlacementRegion() const;
+	bool CanShootNow() const;
+	// Enters the director phase of the rules' MatchPhase after a commit / decision / re-rack (lag skipped unless enabled).
+	void EnterRulesPhase();
+
+	// The ONE sync of FRbTableState from the rules' GameState (+ the shot's finals / chalk marks), review R-12.
+	void SyncTableState(const FRbShot* Shot, const rb::BallChalkMarks* Marks);
+	void SetupLagTable();
+	int32 LagBall(int32 Player) const { return Player == 0 ? 0 : 1; }
+	rb::Vec3 StruckBallPosition() const;
+	int32 StruckBallId() const { return Phase == ERbDirectorPhase::Lag ? LagBall(LagStroker) : 0; }
+
+	// Human or scripted strike for the current shot (lag: for the current lag stroker). Record.bHuman selects the path.
+	bool SubmitStrike(const rb::CueStrikeInput& Strike, FRbStrokeRecord&& Record, double ContactTime, const FTransform& ShooterView);
+	bool SubmitRequest(FRbShotRequest&& Request);
+	void BuildShotInput(FRbShotRequest& Request) const;
+	void SpendRevealedDraws(FRbShooterState& Shooter);
+	void ApplyEquipment(const FRbShot& Shot, rb::BallChalkMarks* Marks);
+	void CommitLag(const TSharedRef<const FRbShot>& Shot, rb::BallChalkMarks* Marks);
+
+	// Presentation / input wiring.
+	void ShowTableState();
+	void ArmStrokeForPhase(bool bNewTurn);
+	void LockStroke();
+	void AutoChalk(FRbShooterState& Shooter);
+	void Refuse(const FString& Why);
+
+	void HandleStrokeContact(const FRbStrokeCommit& Commit);
+	void HandleCueBallPlaced(const FVector& WorldPosition);
+	void HandleStrokeAborted(bool bRampShown);
+
 	ERbDirectorPhase Phase = ERbDirectorPhase::Idle;
 	FRbMatchSetup Setup;
 	rb::rules::MatchConfig Config;
@@ -170,13 +293,42 @@ private:
 	uint32 MatchShotIndex = 0;
 	float LivePlaybackRate = 1.0f;
 	TSharedPtr<const FRbShot> PendingShot;       // simulated, playing back, not yet committed
+	TSharedPtr<const FRbShot> LastCommittedShot;
 	rb::rules::ShotFacts PendingFacts;
 	rb::rules::ShotOutcome PendingOutcome;
+
+	TSharedPtr<const FRbTableContext> TableContext;
+	TSharedPtr<const FRbTableContext> ContextOverride;
+	rb::human::HumanParams HumanParams;
+	uint64 MatchSeed = 0;
+	bool bRandomSeed = false;
+	bool bCueBallPlaced = false;
+	rb::Vec2 PlacedCueBall;
+	rb::rules::ShotDeclaration PendingDeclaration; // the declaration the pending shot was validated with
+	FRbLastShotSummary PendingSummary;
+	bool bAwaitingSimulation = false;
+	bool bPendingIsLag = false;
+	uint32 SubmittedShotId = 0;
+	uint32 LocalShotId = 0;                        // ids of game-thread shots without a subsystem
+	int32 SelectedOption = 0;
+	bool bReplayActive = false;
+	FString LastError;
+
+	// Lag
+	int32 LagStroker = 0;
+	rb::CueStrikeInput LagStrikes[2];
+	FRbStrokeRecord LagRecords[2];
+	rb::rules::LagResult PendingLag;
 
 	TWeakObjectPtr<ARbTable> Table;
 	TWeakObjectPtr<ARbBallSet> Balls;
 	TWeakObjectPtr<ARbCue> Cue;
 	TWeakObjectPtr<URbSimulationSubsystem> Simulation;
+	TWeakObjectPtr<URbShotPlaybackComponent> Playback;
+	TWeakObjectPtr<URbStrokeComponent> StrokeComponent;
 	FDelegateHandle SimulatedHandle;
 	FDelegateHandle PlaybackHandle;
+	FDelegateHandle ContactHandle;
+	FDelegateHandle PlacedHandle;
+	FDelegateHandle AbortedHandle;
 };
