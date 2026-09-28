@@ -182,18 +182,20 @@ UWorld* URbMatchDirector::GetWorld() const
 bool URbMatchDirector::StartMatch(const FRbMatchSetup& InSetup)
 {
 	LastError.Reset();
-	// A match restarted mid-shot drops the shot in flight (its hand-off / playback end is ignored).
-	if (Phase == ERbDirectorPhase::PlayingBack)
+	// A match restarted mid-shot drops the shot in flight (its hand-off / playback end is ignored). The shot is forgotten
+	// BEFORE the playback stops, so nothing the stop might broadcast can commit it into the new match.
+	const bool bWasPlayingBack = Phase == ERbDirectorPhase::PlayingBack;
+	bAwaitingSimulation = false;
+	SubmittedShotId = 0;
+	PendingShot.Reset();
+	Phase = ERbDirectorPhase::Idle; // no stale Lag / placement state while the new match is set up (broadcast by EnterRulesPhase)
+	if (bWasPlayingBack)
 	{
 		if (URbShotPlaybackComponent* Pb = Playback.Get())
 		{
 			Pb->Stop(false);
 		}
 	}
-	bAwaitingSimulation = false;
-	SubmittedShotId = 0;
-	PendingShot.Reset();
-	Phase = ERbDirectorPhase::Idle; // no stale Lag / placement state while the new match is set up (broadcast by EnterRulesPhase)
 
 	TableContext = ContextOverride.IsValid() ? ContextOverride : nullptr;
 	if (!TableContext.IsValid())
@@ -222,6 +224,13 @@ bool URbMatchDirector::StartMatch(const FRbMatchSetup& InSetup)
 	Config.Game = RbTypes::ToCore(Setup.Discipline);
 	Config.Rules = rb::rules::MakeRulesConfig(RbTypes::RulesPresetFor(Setup.Discipline));
 	Config.Rules.Input = rb::rules::InputMode::Assisted; // M1: no body / bridge hand (rules.md 16 item 22, review R-11)
+	// Practice and hot-seat are casual play: calls use the casual default ObviousAssist (rules.md 4.5) instead of the ranked
+	// Explicit of the WPA presets (8-ball, 10-ball, 14.1). M1 has no call input, and Explicit would refuse every shot after the
+	// break that carries no call (CallRequired); explicit calls made through SetCalledShot are still honoured.
+	if (Config.Rules.Calls == rb::rules::CallMode::Explicit)
+	{
+		Config.Rules.Calls = rb::rules::CallMode::ObviousAssist;
+	}
 	Config.RaceTo = bPractice ? TNumericLimits<int32>::Max() : Race; // practice: a won rack racks again
 	if (Config.Game == rb::rules::Discipline::StraightPool)
 	{
@@ -506,7 +515,10 @@ rb::human::StrokeSituation URbMatchDirector::MakeSituation() const
 		case rb::rules::Discipline::StraightPool: break;
 		}
 	}
-	Inputs.Hill = bHotSeat && Config.RaceTo > 1 && (State.RackWins[0] == Config.RaceTo - 1 || State.RackWins[1] == Config.RaceTo - 1);
+	// Hill (HF 3.4): either player needs one rack - in a race to 1 both do from the first rack on. 14.1 counts points, not
+	// racks (RackWins stay 0), and practice has no race.
+	Inputs.Hill = bHotSeat && Config.Game != rb::rules::Discipline::StraightPool &&
+		(State.RackWins[0] >= Config.RaceTo - 1 || State.RackWins[1] >= Config.RaceTo - 1);
 	Situation.Pressure = rb::human::ComputePressure(Inputs, Setup.bPressure ? rb::human::PressureMode::On : rb::human::PressureMode::Off);
 	Situation.Fatigue = 0.0;      // HF-16: off in practice and hot-seat
 	Situation.Intoxication = 0.0; // V1: cosmetic only
@@ -543,6 +555,21 @@ void URbMatchDirector::SpendRevealedDraws(FRbShooterState& Shooter)
 	}
 	rb::human::AdvanceNoiseHistory(Shooter.History);
 	++Shooter.ShooterShotIndex;
+}
+
+void URbMatchDirector::SpendRejectedStroke(int32 Player, bool bHuman)
+{
+	if (!bHuman)
+	{
+		return; // scripted strikes reveal no draws
+	}
+	// The stroke reached the ball, so the component showed the whole per-shot ramp: those draws are spent (HF-B13), exactly as
+	// for an aborted stroke with the ramp, and the retry gets the next ones.
+	SpendRevealedDraws(Shooters[ShooterSlot(Player)]);
+	if (URbStrokeComponent* Stroke = StrokeComponent.Get())
+	{
+		Stroke->SetStrokeContext(MakeStrokeContext());
+	}
 }
 
 void URbMatchDirector::AutoChalk(FRbShooterState& Shooter)
@@ -610,15 +637,65 @@ bool URbMatchDirector::PlaceCueBall(const rb::Vec2& Position)
 	return true;
 }
 
+bool URbMatchDirector::CanDeclareNow() const
+{
+	return !bReplayActive && TableContext.IsValid() && State.Phase == rb::rules::MatchPhase::AwaitShot &&
+		(Phase == ERbDirectorPhase::AwaitStroke || Phase == ERbDirectorPhase::AwaitPlacement);
+}
+
+bool URbMatchDirector::IsDeclarationAllowed(const rb::rules::ShotDeclaration& D) const
+{
+	// ValidateDeclaration checks the kind, the call and the claim, and - for a cue ball in hand - the placement. The placement
+	// is PlaceCueBall's job (and is checked again at the stroke), so the probe plays the cue ball from position.
+	rb::rules::MatchState Probe = State;
+	Probe.Game.CueBall = rb::rules::CueBallNext::InPosition;
+	Probe.Game.FreeShot = false;
+	rb::rules::ShotDeclaration Completed = D;
+	rb::rules::CompleteDeclaration(Config, Probe, Completed);
+	return rb::rules::ValidateDeclaration(Config, Probe, Completed, nullptr) == rb::ErrorCode::Ok;
+}
+
 void URbMatchDirector::SetCalledShot(int32 Ball, int32 Pocket)
 {
-	Declaration.Called.Ball = static_cast<rb::BallId>(Ball);
-	Declaration.Called.Pocket = static_cast<rb::PocketId>(Pocket);
+	if (!CanDeclareNow())
+	{
+		Refuse(FString::Printf(TEXT("call refused in phase %d"), static_cast<int32>(Phase)));
+		return;
+	}
+	// Negative = no call; anything else must be a ball / pocket id (never wrapped by the narrowing casts).
+	if (Ball >= rb::rules::kRulesBallCount || Pocket >= rb::kPocketCount)
+	{
+		Refuse(FString::Printf(TEXT("call of ball %d in pocket %d refused: no such ball / pocket"), Ball, Pocket));
+		return;
+	}
+	rb::rules::ShotDeclaration D = Declaration;
+	D.Called.Ball = Ball < 0 ? rb::kNoBall : static_cast<rb::BallId>(Ball);
+	D.Called.Pocket = Pocket < 0 ? rb::PocketId::None : static_cast<rb::PocketId>(Pocket);
+	if (!IsDeclarationAllowed(D))
+	{
+		Refuse(FString::Printf(TEXT("call of ball %d in pocket %d refused by the rules"), Ball, Pocket));
+		return;
+	}
+	Declaration = D;
+	OnMatchChanged.Broadcast();
 }
 
 void URbMatchDirector::SetShotKind(rb::rules::ShotKind Kind)
 {
-	Declaration.Kind = Kind;
+	if (!CanDeclareNow())
+	{
+		Refuse(FString::Printf(TEXT("shot kind refused in phase %d"), static_cast<int32>(Phase)));
+		return;
+	}
+	rb::rules::ShotDeclaration D = Declaration;
+	D.Kind = Kind;
+	if (!IsDeclarationAllowed(D))
+	{
+		Refuse(FString::Printf(TEXT("shot kind %d refused by the rules (push-out / safety not allowed now)"), static_cast<int32>(Kind)));
+		return;
+	}
+	Declaration = D;
+	OnMatchChanged.Broadcast();
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -661,6 +738,7 @@ bool URbMatchDirector::SubmitStroke(const FRbStrokeCommit& Commit)
 	if (Executed.Error != rb::ErrorCode::Ok)
 	{
 		Refuse(FString::Printf(TEXT("ExecuteStroke failed: %hs"), rb::ToString(Executed.Error)));
+		SpendRejectedStroke(GetActivePlayer(), true);
 		return false;
 	}
 
@@ -760,6 +838,7 @@ bool URbMatchDirector::SubmitStrike(const rb::CueStrikeInput& Strike, FRbStrokeR
 	if (!rb::Succeeded(Valid))
 	{
 		Refuse(FString::Printf(TEXT("declaration refused: %hs"), rb::ToString(Valid)));
+		SpendRejectedStroke(State.Game.Shooter, Record.bHuman);
 		return false;
 	}
 	PendingDeclaration = D;
@@ -786,9 +865,22 @@ bool URbMatchDirector::SubmitStrike(const rb::CueStrikeInput& Strike, FRbStrokeR
 bool URbMatchDirector::SubmitRequest(FRbShotRequest&& Request)
 {
 	const ERbDirectorPhase Before = Phase;
+	// The stroke that triggered this submission (lag: the second lagger's; the first one's strike stays valid).
+	const bool bLagRequest = bPendingIsLag;
+	const int32 Stroker = bLagRequest ? 1 : Request.Shooter;
+	const bool bHumanStroke = bLagRequest ? LagRecords[1].bHuman : Request.Stroke.bHuman;
 	bAwaitingSimulation = true;
 	SubmittedShotId = 0;
-	LockStroke();
+	// A component that made the contact is in Contact and enters Watching after its broadcast (6.2: the player may stand up
+	// and watch); it cannot stroke again from there, and the director re-arms it at the commit. Any other phase (a scripted
+	// strike while the player walks or is down) is locked so no second stroke reaches the director during the shot.
+	if (URbStrokeComponent* Stroke = StrokeComponent.Get())
+	{
+		if (Stroke->GetPhase() != ERbStrokePhase::Contact && Stroke->GetPhase() != ERbStrokePhase::Watching)
+		{
+			Stroke->SetLocked(true);
+		}
+	}
 	SetPhase(ERbDirectorPhase::Simulating);
 
 	if (URbSimulationSubsystem* Sim = Simulation.Get())
@@ -800,13 +892,14 @@ bool URbMatchDirector::SubmitRequest(FRbShotRequest&& Request)
 			if (bAwaitingSimulation)
 			{
 				bAwaitingSimulation = false;
-				if (bPendingIsLag)
+				if (bLagRequest)
 				{
 					LagStroker = 1; // the second lag stroke has to be played again
 				}
 				SetPhase(Before);
-				ArmStrokeForPhase(true);
 				Refuse(TEXT("the simulation refused the shot (busy or invalid request)"));
+				SpendRejectedStroke(Stroker, bHumanStroke);
+				ArmStrokeForPhase(true);
 			}
 			return false;
 		}
@@ -847,18 +940,19 @@ void URbMatchDirector::OnShotSimulated(const TSharedRef<const FRbShot>& Shot)
 	{
 		Refuse(FString::Printf(TEXT("simulation rejected the shot: status %d, input error %hs"), static_cast<int32>(Result.Status),
 			rb::ToString(Result.Diagnostics.InputError)));
+		// Every stroke of the rejected shot showed its full ramp: spent (HF-B13); the shot is played again with new draws.
 		if (bPendingIsLag)
 		{
-			LagStroker = 0;
+			bPendingIsLag = false;
+			LagStroker = 0; // both players lag again
 			SetPhase(ERbDirectorPhase::Lag);
+			SpendRejectedStroke(0, LagRecords[0].bHuman);
+			SpendRejectedStroke(1, LagRecords[1].bHuman);
 		}
 		else
 		{
-			if (Shot->Request.Stroke.bHuman)
-			{
-				SpendRevealedDraws(Shooters[ShooterSlot(Shot->Request.Shooter)]); // the full ramp was shown
-			}
 			SetPhase(ERbDirectorPhase::AwaitStroke);
+			SpendRejectedStroke(Shot->Request.Shooter, Shot->Request.Stroke.bHuman);
 		}
 		ArmStrokeForPhase(true);
 		return;
@@ -920,6 +1014,36 @@ void URbMatchDirector::OnShotSimulated(const TSharedRef<const FRbShot>& Shot)
 	Pb->Play(Shot, true, 0.0, LivePlaybackRate);
 }
 
+void URbMatchDirector::SetLivePlaybackRate(float Rate)
+{
+	if (!FMath::IsFinite(Rate))
+	{
+		return;
+	}
+	LivePlaybackRate = FMath::Max(0.0f, Rate);
+	if (Phase != ERbDirectorPhase::PlayingBack || !PendingShot.IsValid())
+	{
+		return; // applies to the next live shot
+	}
+	// The live shot that is playing: same rate change for it (the playback re-anchors its clock, no time jump), or at 0 its
+	// end state at once and the commit (what a rate-0 shot does right after the simulation).
+	URbShotPlaybackComponent* Pb = Playback.Get();
+	const bool bOurs = Pb && Pb->GetShot() == PendingShot;
+	if (LivePlaybackRate > 0.0f)
+	{
+		if (bOurs)
+		{
+			Pb->SetRate(LivePlaybackRate);
+		}
+		return;
+	}
+	if (bOurs)
+	{
+		Pb->Stop(true);
+	}
+	CommitShot(PendingShot.ToSharedRef());
+}
+
 void URbMatchDirector::OnPlaybackFinished(const TSharedRef<const FRbShot>& Shot)
 {
 	// The playback component also plays replays: only our own pending live shot is committed (review R-07).
@@ -978,6 +1102,7 @@ void URbMatchDirector::CommitShot(const TSharedRef<const FRbShot>& Shot)
 	LastCommittedShot = Committed;
 	PendingShot.Reset();
 	bPendingIsLag = false;
+	Declaration = NeutralDeclaration(); // the declaration belonged to this shot (a decision / rack over follows without BeginTurn)
 	if (ARbCue* CueActor = Cue.Get())
 	{
 		CueActor->SetDrive(ERbCueDrive::Hidden);

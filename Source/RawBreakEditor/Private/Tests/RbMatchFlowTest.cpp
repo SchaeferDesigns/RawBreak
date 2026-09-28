@@ -5,7 +5,8 @@
 // OnStrokeContact: the human layer path) and scripted strikes, at live playback rate 0 (review R-15), except the R-07 check
 // that runs one shot at rate 1 into PlayingBack and fires the playback component's OnFinished by hand:
 //   rack -> illegal placement refused -> placement -> break (ExecuteStroke -> subsystem -> rules) -> turn logic
-//   scratch -> ball in hand to the opponent; 9 pocketed wins -> RackOver -> Confirm; a finished replay never commits (R-07).
+//   scratch -> ball in hand to the opponent; 9 pocketed wins -> RackOver -> Confirm; a finished replay never commits (R-07);
+//   a scripted strike locks a component that did not make the contact; a rate change reaches the live shot (0 = commit now).
 // Owner: UE-6b.
 
 #include "Editor.h"
@@ -286,6 +287,7 @@ bool FRbMatchFlowCommand::Update()
 	const TSharedPtr<const FRbShot> Pending = Director->GetPendingShot();
 	Test->TestTrue(TEXT("PlayingBack, not yet committed"), Director->GetPhase() == ERbDirectorPhase::PlayingBack && Pending.IsValid() &&
 		Director->GetMatchShotIndex() == ShotIndex && Cue->GetDrive() == ERbCueDrive::Playback);
+	Test->TestTrue(TEXT("a scripted strike locks a component that did not make the contact"), Stroke->GetPhase() == ERbStrokePhase::Locked);
 	Test->TestFalse(TEXT("no replay while a live shot plays back"), Director->IsReplayAllowed());
 	const TSharedPtr<const FRbShot> Replayed = Replay->GetShot(0);
 	if (Test->TestTrue(TEXT("a recorded shot to replay"), Replayed.IsValid() && Pending.IsValid() && Replayed != Pending))
@@ -300,6 +302,28 @@ bool FRbMatchFlowCommand::Update()
 		Playback->OnFinished.Broadcast(Pending.ToSharedRef());
 		Test->TestTrue(TEXT("a second OnFinished of the same shot changes nothing"), Director->GetPhase() == After &&
 			Director->GetMatchShotIndex() == ShotIndex + 1);
+	}
+
+	// --- a rate change reaches the live shot that is playing (review fix) ------------------------------------------------------
+	ToShotPhase(*Director);
+	SetLayout(*Director, {{0, rb::Vec2(-0.6, 0.0)}, {1, rb::Vec2(0.3, 0.1)}, {9, rb::Vec2(0.6, -0.3)}});
+	const uint32 RateShotIndex = Director->GetMatchShotIndex();
+	Test->TestTrue(TEXT("live shot at rate 1"), Director->SubmitScriptedStrike(1.0, 0.1, 0.0, 0.0, 0.0) && WaitForHandOff(*Director, Simulation));
+	const TSharedPtr<const FRbShot> Live = Director->GetPendingShot();
+	if (Test->TestTrue(TEXT("playing back"), Director->GetPhase() == ERbDirectorPhase::PlayingBack && Live.IsValid() && Playback->GetShot() == Live))
+	{
+		Director->SetLivePlaybackRate(0.5f);
+		Test->TestTrue(TEXT("rate 0.5: the live shot keeps playing (slower)"), Director->GetPhase() == ERbDirectorPhase::PlayingBack &&
+			Director->GetPendingShot() == Live && Playback->GetShot() == Live && Director->GetMatchShotIndex() == RateShotIndex);
+		Director->SetLivePlaybackRate(0.0f);
+		Test->TestTrue(TEXT("rate 0 during the playback: snapped to its end and committed"), Director->GetPhase() != ERbDirectorPhase::PlayingBack &&
+			!Playback->IsPlaying() && Director->GetMatchShotIndex() == RateShotIndex + 1 && Director->GetLastCommittedShot() == Live &&
+			Replay->GetShot(0) == Live);
+		Test->TestTrue(TEXT("table state in sync after the early commit"), TableStateInSync(*Director));
+		const ERbDirectorPhase After = Director->GetPhase();
+		Playback->OnFinished.Broadcast(Live.ToSharedRef());
+		Test->TestTrue(TEXT("a late OnFinished of that shot changes nothing"), Director->GetPhase() == After &&
+			Director->GetMatchShotIndex() == RateShotIndex + 1);
 	}
 	Director->SetLivePlaybackRate(0.0f);
 	return true;

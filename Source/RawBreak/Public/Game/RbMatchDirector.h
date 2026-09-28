@@ -40,6 +40,19 @@
 //     rendered with); FloorBy / FloorBall are not in FRbStrokeCommit yet (they only feed the F2 shaft-contact list).
 //   * With a synchronous simulation (no subsystem) a stroke is committed and the next turn armed INSIDE the stroke
 //     component's OnStrokeContact broadcast: the component must enter Watching before it broadcasts.
+//
+// Review fixes (UE-6b review):
+//   * A human stroke that reached the ball but produced no committed shot (ExecuteStroke error, declaration refused, the
+//     simulation service busy, InvalidInput from the simulator) showed the whole per-shot ramp: its draws are spent like an
+//     aborted stroke with the ramp (HF-B13), so a retry never replays the draws the player has seen.
+//   * The stroke component that made the contact stays in Contact / Watching while the shot simulates and plays back (6.2:
+//     Contact -> Watching, GetDown stands up); the director only locks a component in any other phase (scripted strikes).
+//   * SetShotKind / SetCalledShot refuse a declaration the rules would refuse (ValidateDeclaration without the placement), so a
+//     bad declaration can never block every stroke of a turn.
+//   * Calls: practice and hot-seat are casual, so the Explicit call mode of the WPA presets (8-ball, 10-ball, 14.1) becomes the
+//     casual default ObviousAssist (rules.md 4.5); without it every shot after the break would need a call M1 cannot enter.
+//   * Pressure hill (HF-15): either player needs one rack, also in a race to 1 (never in 14.1, which counts points).
+//   * SetLivePlaybackRate applies to the live shot that is playing (0 = snap to its end and commit now).
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
@@ -177,7 +190,10 @@ public:
 	bool CanPlaceCueBall(const rb::Vec2& Position) const;
 	bool PlaceCueBall(const rb::Vec2& Position);
 
-	// Declaration for the next shot (calls where the discipline requires them; push-out / safety).
+	// Declaration for the next shot (calls where the discipline requires them; push-out / safety). Only while the shooter
+	// places / addresses (AwaitPlacement / AwaitStroke, no replay); a declaration ValidateDeclaration would refuse (push-out out
+	// of its window, safety in 9-ball, a call of a ball that is not on the table, ...) is refused and the previous one kept
+	// (GetLastError). SetCalledShot(-1, -1) clears the call. The declaration resets to the neutral one at every new shot.
 	void SetCalledShot(int32 Ball, int32 Pocket);
 	void SetShotKind(rb::rules::ShotKind Kind);
 
@@ -207,8 +223,9 @@ public:
 	void SetTableStateForTest(const FRbTableState& NewState);
 
 	// Live playback rate (1 = real time). 0 = no playback: commit right after the simulation (tests, RbPlaybackRate cheat,
-	// ?Rate=0, rb.Match.Rate 0).
-	void SetLivePlaybackRate(float Rate) { LivePlaybackRate = FMath::Max(0.0f, Rate); }
+	// ?Rate=0, rb.Match.Rate 0). While a live shot plays back the new rate applies to it at once (the playback re-anchors its
+	// clock); 0 then snaps it to its end and commits it. A non-finite rate is ignored.
+	void SetLivePlaybackRate(float Rate);
 	float GetLivePlaybackRate() const { return LivePlaybackRate; }
 
 	// SampleHand / ExecuteStroke inputs of the active shooter for the current shot (URbStrokeComponent::SetStrokeContext).
@@ -251,6 +268,9 @@ private:
 	rb::human::NoiseKey MakeNoiseKey(const FRbShooterState& Shooter) const;
 	rb::human::StrokeSituation MakeSituation() const;
 	rb::rules::ShotDeclaration NeutralDeclaration() const;
+	// ValidateDeclaration of D for the current shot without the cue-ball placement (PlaceCueBall checks that).
+	bool IsDeclarationAllowed(const rb::rules::ShotDeclaration& D) const;
+	bool CanDeclareNow() const;
 	rb::rules::CueBallNext PlacementRegion() const;
 	bool CanShootNow() const;
 	// Enters the director phase of the rules' MatchPhase after a commit / decision / re-rack (lag skipped unless enabled).
@@ -268,6 +288,9 @@ private:
 	bool SubmitRequest(FRbShotRequest&& Request);
 	void BuildShotInput(FRbShotRequest& Request) const;
 	void SpendRevealedDraws(FRbShooterState& Shooter);
+	// A human stroke of rules player Player reached the ball but gave no committed shot: spend its draws (HF-B13) and push
+	// the new context to the stroke component.
+	void SpendRejectedStroke(int32 Player, bool bHuman);
 	void ApplyEquipment(const FRbShot& Shot, rb::BallChalkMarks* Marks);
 	void CommitLag(const TSharedRef<const FRbShot>& Shot, rb::BallChalkMarks* Marks);
 

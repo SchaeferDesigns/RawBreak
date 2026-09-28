@@ -19,6 +19,8 @@
 //   Unit.Match.PushOutDecision       legal break -> push-out -> AwaitDecision -> CycleOption / Confirm
 //   Unit.Match.Lag                   hot-seat lag: two strokes, ONE simulation with two strikes, the winner breaks
 //   Unit.Match.Rerack                stalemate re-rack keeps the rack's breaker
+//   Unit.Match.RejectedStroke        a human stroke refused / rejected after contact spends its shown draws (HF-B13) (review)
+//   Unit.Match.Declarations          invalid push-out / safety / calls refused when declared; 10-ball ObviousAssist (review)
 //   Unit.Match.Options               ARbGameMode URL options
 
 #include "Game/RbGameMode.h"
@@ -46,7 +48,7 @@ namespace RbMatchTestUtil
 	using FBallAt = TPair<int32, rb::Vec2>;
 
 	TStrongObjectPtr<URbMatchDirector> MakeDirector(FAutomationTestBase& Test, ERbMatchMode Mode, int64 Seed, int32 RaceTo = 5, bool bLag = false,
-		double NoiseScale = 1.0)
+		double NoiseScale = 1.0, ERbDiscipline Discipline = ERbDiscipline::NineBall)
 	{
 		FString Error;
 		const TSharedPtr<const FRbTableContext> Table = FRbTableContext::Create(FRbTableSetup{}, Error);
@@ -65,6 +67,7 @@ namespace RbMatchTestUtil
 		Setup.RaceTo = RaceTo;
 		Setup.bLag = bLag;
 		Setup.NoiseScale = NoiseScale;
+		Setup.Discipline = Discipline;
 		if (!Director->StartMatch(Setup))
 		{
 			Test.AddError(FString::Printf(TEXT("StartMatch failed: %s"), *Director->GetLastError()));
@@ -185,6 +188,29 @@ namespace RbMatchTestUtil
 		return A.Speed == B.Speed && A.Elevation == B.Elevation && A.Azimuth == B.Azimuth && A.OffsetA == B.OffsetA && A.OffsetB == B.OffsetB &&
 			A.Cue.TipFriction == B.Cue.TipFriction && A.Cue.TipDomeRadius == B.Cue.TipDomeRadius && A.TipTouchesCloth == B.TipTouchesCloth;
 	}
+
+	// The shooter's noise history is the canonical RebuildNoiseHistory of its index (the cache never drifts).
+	bool HistoryIsCanonical(const FRbShooterState& S, uint64 Seed)
+	{
+		const rb::human::NoiseHistory Canonical = rb::human::RebuildNoiseHistory(Seed, S.ShooterId, S.ShooterShotIndex);
+		bool bSame = Canonical.NextIndex == S.History.NextIndex && Canonical.MatchSeed == S.History.MatchSeed && Canonical.Shooter == S.History.Shooter;
+		for (int32 C = 0; C < rb::human::kStreakChannelCount; ++C)
+		{
+			bSame = bSame && Canonical.Channels[C].Count == S.History.Channels[C].Count &&
+				FMemory::Memcmp(Canonical.Channels[C].Eighths, S.History.Channels[C].Eighths, sizeof(Canonical.Channels[C].Eighths)) == 0;
+		}
+		return bSame;
+	}
+
+	// HF-15 pressure of a hot-seat shot (friendly stakes) with the given game-ball / hill terms.
+	double FriendlyPressure(bool bGameBall, bool bHill)
+	{
+		rb::human::PressureInputs Inputs;
+		Inputs.Stakes = rb::human::kStakesFriendly;
+		Inputs.GameBall = bGameBall;
+		Inputs.Hill = bHill;
+		return rb::human::ComputePressure(Inputs, rb::human::PressureMode::On);
+	}
 }
 
 using namespace RbMatchTestUtil;
@@ -244,6 +270,16 @@ bool FRbMatchStartRack::RunTest(const FString& Parameters)
 	TestTrue(TEXT("context key"), Context.Key.MatchSeed == 11 && Context.Key.ShooterId == 0 && Context.Key.ShotIndex == 0 && Context.Key.RackIndex == 0 &&
 		Context.Key.Purpose == 0);
 	TestTrue(TEXT("context pressure: friendly stakes only (0.35 x 0.3)"), FMath::IsNearlyEqual(Context.Situation.Pressure, 0.35 * 0.3, 1e-12));
+	TestEqual(TEXT("race 5 at 0 : 0 is not the hill"), Context.Situation.Pressure, FriendlyPressure(false, false));
+
+	// Race to 1: both players need one rack from the first break on, so every shot is on the hill (HF-15, review fix).
+	TStrongObjectPtr<URbMatchDirector> RaceToOne = MakeDirector(*this, ERbMatchMode::HotSeat, 11, 1);
+	if (RaceToOne.IsValid())
+	{
+		TestEqual(TEXT("race 1: hill pressure on the break (0.35 x 0.3 + 0.15)"), RaceToOne->MakeStrokeContext().Situation.Pressure,
+			FriendlyPressure(false, true));
+		TestTrue(TEXT("race 1: 0.255"), FMath::IsNearlyEqual(RaceToOne->MakeStrokeContext().Situation.Pressure, 0.35 * 0.3 + 0.15, 1e-12));
+	}
 	TestTrue(TEXT("context fatigue / intoxication 0"), Context.Situation.Fatigue == 0.0 && Context.Situation.Intoxication == 0.0);
 	TestEqual(TEXT("context cue ball spec"), Context.CueBall.Radius, D->GetTableContext()->BallRadius(0));
 
@@ -433,6 +469,9 @@ bool FRbMatchNinePocketedWins::RunTest(const FString& Parameters)
 	const auto PotTheNine = [&](int32 Shooter) {
 		SetLayout(*D, {{0, Nine - P.Axis * 0.25}, {9, Nine}});
 		TestEqual(TEXT("shooter"), D->GetMatchState().Game.Shooter, Shooter);
+		const bool bHill = D->GetMatchState().RackWins[0] >= 1 || D->GetMatchState().RackWins[1] >= 1; // race to 2
+		TestEqual(TEXT("the 9 alone is the game ball (+ hill once a player has a rack)"), D->MakeStrokeContext().Situation.Pressure,
+			FriendlyPressure(true, bHill));
 		TestTrue(TEXT("stun into the 9"), ShootDirection(*D, P.Axis, 2.0, -0.35));
 		AddInfo(Describe(*D));
 		TestTrue(TEXT("the 9 pocketed without a foul"), D->GetLastShot().Pocketed.Contains(9) && D->GetLastShot().Fouls.Bits == 0);
@@ -450,6 +489,8 @@ bool FRbMatchNinePocketedWins::RunTest(const FString& Parameters)
 	TestEqual(TEXT("break ball in hand"), D->GetPhase(), ERbDirectorPhase::AwaitPlacement);
 	CheckTableStateSync(*this, *D, TEXT("rack 2"));
 	TestEqual(TEXT("new rack index in the noise key"), D->MakeStrokeContext().Key.RackIndex, 1u);
+	TestEqual(TEXT("1 : 0 in a race to 2: player 1 is on the hill (pressure hill term)"), D->MakeStrokeContext().Situation.Pressure,
+		FriendlyPressure(false, true));
 
 	PotTheNine(1);
 	TestEqual(TEXT("1 : 1"), D->GetMatchState().RackWins[1], 1);
@@ -780,7 +821,10 @@ bool FRbMatchPushOutDecision::RunTest(const FString& Parameters)
 		return false;
 	}
 	const int32 Pusher = D->GetMatchState().Game.Shooter;
+	D->SetShotKind(rb::rules::ShotKind::Safety);
+	TestTrue(TEXT("9-ball has no safety call: refused, the declaration is unchanged"), D->GetDeclaration().Kind == rb::rules::ShotKind::Normal);
 	D->SetShotKind(rb::rules::ShotKind::PushOut);
+	TestTrue(TEXT("push-out in its window accepted"), D->GetDeclaration().Kind == rb::rules::ShotKind::PushOut);
 	const rb::Vec3 Cue = D->GetTableState().Balls[0].State.Position;
 	TestTrue(TEXT("soft push-out toward the table centre"), D->SubmitScriptedStrike(0.35, FMath::Atan2(-Cue.y, -Cue.x), 0.0, 0.0, 0.0));
 	AddInfo(Describe(*D));
@@ -793,6 +837,10 @@ bool FRbMatchPushOutDecision::RunTest(const FString& Parameters)
 	TestTrue(TEXT("options: shoot / pass back"), S.PendingOutcome.Options.Size() == 2 && S.PendingOutcome.Options[0] == rb::rules::Option::ShootFromPosition &&
 		S.PendingOutcome.Options[1] == rb::rules::Option::PassBack);
 	TestTrue(TEXT("no stroke while deciding"), !D->SubmitScriptedStrike(1.0, 0.0, 0.0, 0.0, 0.0));
+	TestTrue(TEXT("AwaitDecision: replays allowed"), D->IsReplayAllowed());
+	TestTrue(TEXT("the push-out declaration ended with its shot"), D->GetDeclaration().Kind == rb::rules::ShotKind::Normal);
+	D->SetShotKind(rb::rules::ShotKind::PushOut);
+	TestTrue(TEXT("no declaration while deciding"), D->GetDeclaration().Kind == rb::rules::ShotKind::Normal);
 	TestTrue(TEXT("CycleOption"), D->CycleOption(1) && D->GetSelectedOption() == 1);
 	TestTrue(TEXT("CycleOption wraps"), D->CycleOption(1) && D->GetSelectedOption() == 0 && D->CycleOption(-1) && D->GetSelectedOption() == 1);
 	TestTrue(TEXT("Confirm = pass back"), D->Confirm());
@@ -877,6 +925,117 @@ bool FRbMatchRerack::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("break ball in hand"), D->GetPhase(), ERbDirectorPhase::AwaitPlacement);
 	CheckTableStateSync(*this, *D, TEXT("re-racked"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbMatchRejectedStroke, "RawBreak.Unit.Match.RejectedStroke", RB_UNIT_TEST_FLAGS)
+bool FRbMatchRejectedStroke::RunTest(const FString& Parameters)
+{
+	TStrongObjectPtr<URbMatchDirector> D = MakeDirector(*this, ERbMatchMode::HotSeat, 141);
+	if (!D.IsValid())
+	{
+		return false;
+	}
+	FRbStrokeCommit Commit;
+	Commit.Intended.Azimuth = 0.0;
+	Commit.Intended.Speed = 3.0;
+
+	// No stroke is possible before the break placement: nothing was shown, nothing is spent.
+	TestFalse(TEXT("stroke before the placement refused"), D->SubmitStroke(Commit));
+	TestEqual(TEXT("no draw spent without a possible stroke"), D->GetShooter(0).ShooterShotIndex, 0u);
+	TestTrue(TEXT("place"), D->PlaceCueBall(rb::Vec2(D->GetMatchConfig().Table.HeadStringX - 0.2, 0.0)));
+
+	// ExecuteStroke refuses a non-finite stroke. It reached the ball, so the component showed its whole ramp: the draws are
+	// spent (HF-B13, like an abort with the ramp) and a retry gets new ones.
+	FRbStrokeCommit Broken = Commit;
+	Broken.Intended.Speed = std::numeric_limits<double>::quiet_NaN();
+	TestFalse(TEXT("non-finite stroke refused"), D->SubmitStroke(Broken));
+	TestTrue(TEXT("still the same shot"), D->GetPhase() == ERbDirectorPhase::AwaitStroke && D->GetMatchShotIndex() == 0 &&
+		!D->GetLastCommittedShot().IsValid() && D->GetMatchState().Game.Shooter == 0);
+	TestEqual(TEXT("refused stroke: its draws are spent"), D->GetShooter(0).ShooterShotIndex, 1u);
+	TestTrue(TEXT("history canonical after the refusal"), HistoryIsCanonical(D->GetShooter(0), 141));
+	TestEqual(TEXT("the next context draws the next index"), D->MakeStrokeContext().Key.ShooterShotIndex, 1u);
+	TestEqual(TEXT("the opponent is untouched"), D->GetShooter(1).ShooterShotIndex, 0u);
+
+	// The simulator rejects the input (the 1 overlaps the cue ball by 2 cm): nothing is played or committed, the stroke's
+	// draws are spent, the same shooter plays again from the same table.
+	SetLayout(*D, {{0, rb::Vec2(0.0, 0.0)}, {1, rb::Vec2(0.037, 0.0)}, {9, rb::Vec2(0.6, 0.3)}});
+	const uint32 IndexBefore = D->GetShooter(0).ShooterShotIndex;
+	Commit.Intended.Azimuth = PI; // away from the 1
+	Commit.Intended.Speed = 1.0;
+	TestTrue(TEXT("submitted (the rejection comes with the hand-off)"), D->SubmitStroke(Commit));
+	TestTrue(TEXT("InvalidInput: no shot committed, same shooter addresses again"), D->GetPhase() == ERbDirectorPhase::AwaitStroke &&
+		D->GetMatchShotIndex() == 0 && !D->GetLastCommittedShot().IsValid() && D->GetMatchState().Game.Shooter == 0 &&
+		D->GetLastError().Contains(TEXT("rejected")));
+	TestEqual(TEXT("rejected shot: the stroke's draws are spent"), D->GetShooter(0).ShooterShotIndex, IndexBefore + 1);
+	TestTrue(TEXT("history canonical after the rejection"), HistoryIsCanonical(D->GetShooter(0), 141));
+	TestTrue(TEXT("the table is unchanged"), D->GetTableState().Balls[1].InPlay && D->GetTableState().Balls[1].State.Position.x == 0.037);
+
+	// Scripted strikes reveal no draws, rejected or not.
+	TestTrue(TEXT("scripted strike into the same table"), D->SubmitScriptedStrike(1.0, PI, 0.0, 0.0, 0.0));
+	TestTrue(TEXT("rejected again"), D->GetPhase() == ERbDirectorPhase::AwaitStroke && D->GetMatchShotIndex() == 0);
+	TestEqual(TEXT("scripted: nothing spent"), D->GetShooter(0).ShooterShotIndex, IndexBefore + 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbMatchDeclarations, "RawBreak.Unit.Match.Declarations", RB_UNIT_TEST_FLAGS)
+bool FRbMatchDeclarations::RunTest(const FString& Parameters)
+{
+	// 9-ball break: no push-out, no safety - a refused declaration keeps the previous one and never blocks the stroke.
+	TStrongObjectPtr<URbMatchDirector> D = MakeDirector(*this, ERbMatchMode::HotSeat, 151, 5, false, 0.0);
+	if (!D.IsValid())
+	{
+		return false;
+	}
+	TestTrue(TEXT("break declaration"), D->GetDeclaration().Kind == rb::rules::ShotKind::Break);
+	D->SetShotKind(rb::rules::ShotKind::PushOut);
+	TestTrue(TEXT("push-out on the break refused"), D->GetDeclaration().Kind == rb::rules::ShotKind::Break && !D->GetLastError().IsEmpty());
+	D->SetShotKind(rb::rules::ShotKind::Safety);
+	TestTrue(TEXT("safety in 9-ball refused"), D->GetDeclaration().Kind == rb::rules::ShotKind::Break);
+	TestTrue(TEXT("place"), D->PlaceCueBall(rb::Vec2(D->GetMatchConfig().Table.HeadStringX - 0.12, 0.08)));
+	const rb::Vec3 Cue = D->GetTableState().Balls[0].State.Position;
+	const rb::Vec3 Apex = D->GetTableState().Balls[1].State.Position;
+	FRbStrokeCommit Break;
+	Break.Intended.Azimuth = FMath::Atan2(Apex.y - Cue.y, Apex.x - Cue.x);
+	Break.Intended.AxisOffsetB = -0.1;
+	Break.Intended.Speed = 8.0;
+	TestTrue(TEXT("the break is played"), D->SubmitStroke(Break) && D->GetMatchShotIndex() == 1);
+
+	// 10-ball (calls): casual play infers obvious calls (rules.md 4.5 ObviousAssist), explicit calls are validated when made.
+	TStrongObjectPtr<URbMatchDirector> T = MakeDirector(*this, ERbMatchMode::HotSeat, 152, 5, false, 0.0, ERbDiscipline::TenBall);
+	if (!T.IsValid())
+	{
+		return false;
+	}
+	TestTrue(TEXT("10-ball"), T->GetMatchConfig().Game == rb::rules::Discipline::TenBall);
+	TestTrue(TEXT("casual call mode ObviousAssist (the WPA preset's Explicit would need a call input)"),
+		T->GetMatchConfig().Rules.Calls == rb::rules::CallMode::ObviousAssist);
+	const rb::PocketGeometry& P = Pocket(*T, rb::PocketId::FootRight);
+	const rb::Vec2 One = P.MouthMid - P.Axis * 0.3;
+	SetLayout(*T, {{0, One - P.Axis * 0.25}, {1, One}, {10, rb::Vec2(-0.7, 0.35)}});
+	TestFalse(TEXT("no call required mid-rack"), T->GetConstraints().CallRequired);
+	T->SetCalledShot(15, static_cast<int32>(rb::PocketId::FootRight));
+	TestTrue(TEXT("call of a ball that is not on the table refused"), T->GetDeclaration().Called.Ball == rb::kNoBall);
+	T->SetCalledShot(1, 9);
+	TestTrue(TEXT("call into pocket 9 refused"), T->GetDeclaration().Called.Ball == rb::kNoBall);
+	T->SetCalledShot(1, -1);
+	TestTrue(TEXT("ball without a pocket refused"), T->GetDeclaration().Called.Ball == rb::kNoBall);
+	T->SetShotKind(rb::rules::ShotKind::Safety);
+	TestTrue(TEXT("no safety in 10-ball (R 6.5)"), T->GetDeclaration().Kind == rb::rules::ShotKind::Normal);
+	T->SetCalledShot(1, static_cast<int32>(rb::PocketId::FootLeft));
+	TestTrue(TEXT("legal call accepted"), T->GetDeclaration().Called.Ball == 1 && T->GetDeclaration().Called.Pocket == rb::PocketId::FootLeft);
+	T->SetCalledShot(-1, -1);
+	TestTrue(TEXT("call cleared"), T->GetDeclaration().Called.Ball == rb::kNoBall && T->GetDeclaration().Called.Pocket == rb::PocketId::None);
+
+	// No call: the obvious pot of the 1 is inferred as called and the shooter continues.
+	FRbStrokeCommit Pot;
+	Pot.Intended.Azimuth = FMath::Atan2(P.Axis.y, P.Axis.x);
+	Pot.Intended.AxisOffsetB = -0.35;
+	Pot.Intended.Speed = 2.0;
+	TestTrue(TEXT("uncalled stroke accepted"), T->SubmitStroke(Pot));
+	AddInfo(Describe(*T));
+	TestTrue(TEXT("obvious pot of the 1 counts (inferred call): the shooter continues"), T->GetLastShot().Pocketed.Contains(1) &&
+		T->GetLastShot().Fouls.Bits == 0 && T->GetLastShot().Next == rb::rules::NextAction::Continue && T->GetMatchState().Game.Shooter == 0);
 	return true;
 }
 
