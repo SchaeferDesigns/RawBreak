@@ -16,7 +16,7 @@ Claude arbeitet autonom durch alle Limit-Fenster (Wiederaufnahme per Zeitplan-Ch
 
 ## Fenster 3 (ab ca. 18:00) – Agents arbeiten durch, unabhängig vom Playtest
 - [ ] Vertical Slice Dive Bar: Raum-Layout, Modellierung (Blender-Pipeline), eigene Materialien, Licht inkl. Neon; ggf. Meshy/Higgsfield-Tests
-- [ ] Sound: Kugel-Klicks, Banden, Taschen, Bar-Atmo – gesteuert von den Physik-Events
+- [ ] Sound: Kugel-Klicks, Banden, Taschen, Bar-Atmo – gesteuert von den Physik-Events. Vergleichstest: echte Aufnahmen (lizenzfreie Libraries) vs. physikbasierte Klick-Synthese vs. KI-SFX (Higgsfield Mirelo); KI für Handlungen/Atmo, Jukebox-Musik (Sonilo) und Sprachzeilen (TTS, u. a. ElevenLabs-Engine) – Lizenz jeweils prüfen
 - [ ] KI-Gegner: Stoßplanung über den Simulator + Skill-Profile aus dem Human-Factors-Modell
 - [ ] UI/UX: Hauptmenü-Szene, Settings-Menü mit Grafik-Presets, Mockups
 - [ ] Sobald der Nutzer M1 gespielt hat: Feedback (Stoß-Gefühl, Kamera, Steuerung) parallel einarbeiten
