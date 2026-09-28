@@ -5,12 +5,18 @@
 // It is also the ONLY place that maps the table-local core frame into the world (FRbCoords + the ClothOrigin
 // transform). Owner: UE-1 (the header is a UE-0 contract: additions allowed, no signature changes).
 //
+// Placement: translation + yaw only (the physics has no tilted table and FRbCoords maps centimetres 1:1); a scaled or tilted
+// actor is reset to upright and unscaled at construction / BeginPlay, with a warning.
 // Components:  Root (floor, actor location) -> ClothOrigin (bed centre on the cloth, +BedHeight, no rotation /
 // scale relative to the actor) -> one mesh component per ERbTablePart: a UStaticMeshComponent with the baked asset
 // <RbAssetPaths::TableMeshDir>/<Preset>/SM_Table_<Part> when it exists and bUseBakedMeshes, otherwise a
 // UDynamicMeshComponent built at runtime by RbTableMeshBuilder (same data; baked = Nanite / Lumen cards / HWRT).
-// Collision: complex-as-simple on the cloth, cushions, caps and apron (pawn walking, cue sweeps); balls never use
-// Chaos (plan pitfall 23).
+// Collision: complex-as-simple on every part (the render triangles; pawn walking, traces - UE-4's cue sweep ignores the table,
+// whose rails it handles analytically); baked parts get the body cooked at bake time, runtime parts when the mesh is set.
+// Balls never use Chaos (plan pitfall 23).
+// The part components are TRANSIENT (RF_Transient, tagged PartComponentTag): OnConstruction builds them in the editor,
+// BeginPlay rebuilds them in PIE / -game, and a saved level never stores (stale) meshes - a changed TableSpec shows up
+// on the next load.
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -93,6 +99,12 @@ public:
 	// Mesh component of a part (static or dynamic), nullptr before the first build.
 	UPrimitiveComponent* GetPartComponent(ERbTablePart Part) const;
 
+	// True if the part shows the baked static mesh asset (else the runtime dynamic mesh, or nothing).
+	bool IsPartBaked(ERbTablePart Part) const;
+
+	// Tag of every part component (they are transient: created at construction / BeginPlay, never saved).
+	static const FName PartComponentTag;
+
 	// AActor
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -100,6 +112,12 @@ public:
 protected:
 	// Creates / replaces the part components (baked static meshes or runtime dynamic meshes).
 	void RebuildMeshes();
+
+	// Destroys every part component (also stale copies, found by PartComponentTag).
+	void DestroyPartComponents();
+
+	// Everything the context and the meshes depend on (skips redundant rebuilds when the editor re-runs construction).
+	FString MakeBuildKey() const;
 
 	UPROPERTY(VisibleAnywhere, Category = "RawBreak|Table")
 	TObjectPtr<USceneComponent> Root;
@@ -112,4 +130,7 @@ protected:
 
 private:
 	TSharedPtr<const FRbTableContext> Context;
+
+	// Build key of the current context + meshes (empty = nothing built).
+	FString BuiltKey;
 };
