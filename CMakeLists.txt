@@ -31,12 +31,20 @@ endforeach()
 # Layering guard (Docs/architecture.md sections 4 and 7.5): the player model rb::human sits ABOVE the physics and
 # the rules. No core file outside rb/Human/ (in particular the event loop rb/Physics, the physics -> rules contract
 # rb/Shot and the rules rb/Rules; also Core, Math, Equipment, Geometry) may include an rb/Human/ header, in any
-# spelling ("..." or <...>, spaces after #, relative paths such as "../Human/...") (human-factors 3.11).
+# spelling ("..." or <...>, spaces after #, relative paths such as "../Human/...") (human-factors 3.11). The AI
+# planner rb/Ai/ sits above rb::human and may include it; nothing outside rb/Ai/ may include rb/Ai/.
 foreach(RB_FILE ${RB_CORE_SOURCES} ${RB_CORE_HEADERS})
-	if(NOT RB_FILE MATCHES "/rb/Human/")
+	if(NOT RB_FILE MATCHES "/rb/Human/" AND NOT RB_FILE MATCHES "/rb/Ai/")
 		file(STRINGS ${RB_FILE} RB_HUMAN_INCLUDES REGEX "#[ \t]*include[ \t]*[<\"]([^>\"]*/)?Human/")
 		if(RB_HUMAN_INCLUDES)
 			message(FATAL_ERROR "${RB_FILE}: rb::human (rb/Human/*) must not be included by the physics, the shot record, the rules or any other layer below it")
+		endif()
+	endif()
+	# The AI planner rb::ai (WP-12, architecture 7.6) sits on top of everything: only rb/Ai/ itself includes rb/Ai/ headers.
+	if(NOT RB_FILE MATCHES "/rb/Ai/")
+		file(STRINGS ${RB_FILE} RB_AI_INCLUDES REGEX "#[ \t]*include[ \t]*[<\"]([^>\"]*/)?Ai/")
+		if(RB_AI_INCLUDES)
+			message(FATAL_ERROR "${RB_FILE}: rb::ai (rb/Ai/*) must not be included by rb::human, the rules, the physics or any other layer below it")
 		endif()
 	endif()
 endforeach()
