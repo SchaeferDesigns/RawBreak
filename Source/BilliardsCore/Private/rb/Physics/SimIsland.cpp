@@ -658,6 +658,24 @@ namespace rb::sim
 			return IslandJoinDistance(Max(0.0, Approach), Mass, P.Cli, P.Numerics.ContactTol);
 		}
 
+		// (WP-10 review) Whether the seed ball of a table-feature seed would join as a cloth member (AddMember: ClothSupport) that
+		// MemberExit flies out at the first step: not yet a member, off the cloth over a pocket's opening (Level A; the capture model
+		// pockets such a ball instead).
+		bool SeedLeavesClothIslandAtOnce(const Workspace& Ws, int Ball, double Time, const BallState* SeedState)
+		{
+			const IslandState& I = Ws.Island;
+			if (Ws.Params.Pockets == PocketModel::CaptureCircle || I.Solver.FindBody(Ball) >= 0)
+			{
+				return false;
+			}
+			const BallSlot& B = Ws.Balls[Ball];
+			const BallState S = SeedState != nullptr ? *SeedState : EventStateAt(Ws, Ball, I.Active ? I.Solver.Time() : Time, Time);
+			const TableGeometry& Table = TableOf(Ws);
+			const bool ClothMember = B.Context.Support == SupportKind::Cloth && !IsInPocket(S.State) && !OverRailRegion(Table, S.Position);
+			const bool OnCloth = S.Position.z - SpecOf(Ws, Ball).Radius <= kClothSnapHeight && Abs(S.Velocity.z) <= Ws.Params.Numerics.RestSpeed;
+			return ClothMember && !OnCloth && PocketContaining(Table, Ws.Params.Pockets, XY(S.Position)) >= 0;
+		}
+
 		void StartIslandImpl(Workspace& Ws, const IslandSeed& InSeed, double Time, const BallState* SeedState)
 		{
 			if (Ws.Input == nullptr || Ws.Input->Table == nullptr || Ws.Result == nullptr || InSeed.BallA < 0 || InSeed.BallA >= kMaxBalls)
@@ -677,6 +695,16 @@ namespace rb::sim
 			if (FeatureSeed && (SeedKind == TableFeatureKind::RailTop || SeedKind == TableFeatureKind::RailTopEdge))
 			{
 				Seed.RailTop = true; // rail-top islands are rigid (collisions 6.2)
+			}
+			if (FeatureSeed && !Seed.RailTop && SeedKind != TableFeatureKind::None && SeedLeavesClothIslandAtOnce(Ws, Seed.BallA, Time, SeedState))
+			{
+				// (WP-10 review) A pressing / Zeno contact of a table feature with a ball off the cloth over a pocket's opening (e.g.
+				// balancing on the top point of a facing's back-end edge beside a sloped cushion top): as a cloth member it would leave
+				// at the first step (MemberExit: Fly), the contact came back at the same instant and the ball ping-ponged between
+				// one-step islands and GRI until the event cap (TABLE_7FT_TRUE B1 seed 13038951, SimStatus::Aborted). It becomes a
+				// rigid off-cloth member, like a pocket-state or rail-top ball: it stays while it touches the feature and flies once
+				// clear of it (MemberExit's rail-top rules).
+				Seed.RailTop = true;
 			}
 			IslandState& I = Ws.Island;
 			const PhysicsParams& P = Ws.Params;

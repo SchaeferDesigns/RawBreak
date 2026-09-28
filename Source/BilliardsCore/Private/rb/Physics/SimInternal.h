@@ -58,6 +58,9 @@
 //  * (WP-10) An approaching event-mode ball-ball contact with a ball in a pocket state (PocketPivot / PocketFall) is resolved
 //    pairwise, never handed to an island for its neighbourhood (NeedsIsland): pocket states never join islands and a member in
 //    a pocket's hole leaves at the first step, so such an island ended after one step with the pair still approaching.
+//  * (WP-10 review) StartIsland with a table-feature seed whose ball is off the cloth over a pocket's opening (not a member yet,
+//    cloth context, no pocket state) makes that ball a rigid off-cloth member, as for a rail-top seed (SimIsland.cpp
+//    SeedLeavesClothIslandAtOnce): a cloth member there leaves at the first step while the contact comes back at once.
 //  * Exactly simultaneous IMPULSE contacts (ball-ball, tip, and the cushion-like / rail-top table contacts) sharing a ball form
 //    one group (architecture 8.3): the loop calls StartIsland once per group member, in queue-key order, at the same Time (the
 //    first call starts the island, the following ones must merge into it). Region events (drop edge, capture, pocket exit,

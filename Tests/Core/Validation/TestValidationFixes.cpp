@@ -9,6 +9,8 @@
 //    rest both coincide (B.5 unchanged); for a moving ball running sideways into the tip they are opposite. Every re-contact is
 //    dissipative and leaves the pair separating along the normal.
 //  * A-VAL-4: the facing's bottom edge over the pocket's hole (found by the WP-10 scan on TABLE_9FT_TIGHT).
+//  * A-VAL-5 (WP-10 review): a table-feature seed whose ball is off the cloth over a pocket's opening becomes a rigid off-cloth
+//    island member (SimIsland.cpp StartIslandImpl), so the island holds it instead of flying it out at the first step.
 
 #include "Validation/ValidationUtil.h"
 
@@ -260,4 +262,185 @@ RB_TEST(Integ_ARCH_VAL4_FacingBottomEdge)
 	RB_CHECK(!AtLine.Found || AtLine.Time >= AtEnd.Time);
 	std::printf("  A-VAL-4: bottom edge hit after %.4f s at distance R (%.3g m off), dispatcher %.4f s; corner: end edge at %.4f s\n", Hit.Time,
 		Length(P - OnLine) - kR, D.Contact.Time, AtEnd.Time);
+}
+
+// A-VAL-4b (WP-10 review, adversarial): the facing's back-end and bottom edges against brute force. Random ballistic segments
+// (gravity, 0.1 - 3 m/s, from anywhere within a few centimetres of the edges, never starting inside) around every facing of
+// three presets (9-ft pro, 9-ft tight: the bottom edge over the hole, 7-ft true: sloped cushion tops, the upper segment ends at
+// WallTopZ); each is sampled every 5 us for 0.1 s. Where the edge is the contact feature - for the end edge a center beyond the
+// facing's end (s >= L), or above h on the pocket side of the plan line (Detect.h PredictFacingEndEdge); for the bottom edge a
+// center below the face along [0, L] - a sample more than 1e-7 m inside distance R of the edge must come no earlier than the
+// predicted contact (no missed contact), and a predicted contact lies at distance R of the edge (no phantom contact), with the
+// fixed-contact normal pointing from the nearest edge point to the center.
+RB_TEST(ARCH_VAL4b_FacingEdgesAgainstBruteForce)
+{
+	const TableSpec* Specs[3] = {&kTableNineFootPro, &kTableNineFootTight, &kTableSevenFootTrue};
+	const NumericsConfig N{};
+	const BallSpec Spec = MakeBallSpec(kR, kDefaultBallMass);
+	Rng Random(0xED6Eu);
+#if defined(RB_DEBUG_ASSERTS) && RB_DEBUG_ASSERTS
+	constexpr int kPerFacing = 20;
+#else
+	constexpr int kPerFacing = 200;
+#endif
+	constexpr double kHorizon = 0.1;
+	constexpr double kStep = 5e-6;
+	int Segments = 0;
+	int EndContacts = 0;
+	int BottomContacts = 0;
+	int Missed = 0;
+	int Phantom = 0;
+	int BadNormal = 0;
+	double WorstLate = 0.0;
+	for (const TableSpec* S : Specs)
+	{
+		const TableGeometry& T = simtest::Table(*S);
+		for (int f = 0; f < T.Facings.Size(); ++f)
+		{
+			const Facing& Face = T.Facings[f];
+			const double TopZ = FacingEndEdgeTop(T, Face);
+			const FacingEndEdge E = MakeFacingEndEdge(Face, TopZ);
+			const Vec3 Side = ToVec3(Face.Direction);
+			const Vec3 Front = ToVec3(Face.PocketNormal);
+			const Vec3 Up{Face.PocketNormal.x * Sin(Face.Backdraft), Face.PocketNormal.y * Sin(Face.Backdraft), Cos(Face.Backdraft)};
+			const Vec3 Bottom = FacingBottomEdgeStart(Face);
+			// Distance to the end polyline and to the bottom line, and whether the edge is the contact feature there.
+			const auto EndDistance = [&](const Vec3& P, Vec3& Nearest)
+			{
+				const Vec3 OnLower = E.Lower + E.LowerDirection * Clamp(Dot(P - E.Lower, E.LowerDirection), 0.0, E.LowerLength);
+				const Vec3 OnUpper = E.Joint + Vec3::UnitZ() * Clamp(P.z - E.Joint.z, 0.0, E.UpperLength);
+				Nearest = LengthSquared(P - OnUpper) < LengthSquared(P - OnLower) ? OnUpper : OnLower;
+				return Length(P - Nearest);
+			};
+			const auto EndRegion = [&](const Vec3& P)
+			{
+				const Vec3 W = P - E.Joint;
+				return Dot(Side, W) >= 0.0 || (W.z > 0.0 && Dot(Front, W) >= 0.0);
+			};
+			const auto BottomDistance = [&](const Vec3& P, bool& Region)
+			{
+				const double Along = Dot(P - Bottom, Side);
+				Region = Along >= 0.0 && Along <= Face.Length && Dot(P - Bottom, Up) < 0.0;
+				return Length(P - (Bottom + Side * Clamp(Along, 0.0, Face.Length)));
+			};
+			for (int k = 0; k < kPerFacing; ++k)
+			{
+				// Around the end edge (even k) or the bottom edge (odd k).
+				const Vec3 Anchor = (k & 1) == 0 ? E.Joint + Vec3::UnitZ() * Random.NextUniform(-E.Joint.z, E.UpperLength)
+												 : Bottom + Side * Random.NextUniform(0.0, Face.Length);
+				const Vec3 Offset{Random.NextUniform(-0.06, 0.06), Random.NextUniform(-0.06, 0.06), Random.NextUniform(-0.06, 0.06)};
+				MotionSegment Seg;
+				Seg.State = MotionState::PocketFall;
+				Seg.Radius = kR;
+				Seg.T0 = Random.NextUniform(0.0, 5.0);
+				Seg.Pos0 = Anchor + Offset;
+				const Vec3 Aim = Normalized(Anchor + Vec3{Random.NextUniform(-0.01, 0.01), Random.NextUniform(-0.01, 0.01), Random.NextUniform(-0.01, 0.01)} -
+					Seg.Pos0);
+				Seg.Vel0 = Aim * Random.NextUniform(0.1, 3.0);
+				Seg.Accel2 = {0.0, 0.0, -0.5 * simtest::kGVal};
+				Seg.TauEnd = kInfinity;
+				Vec3 Nearest;
+				bool BottomRegion = false;
+				if (EndDistance(Seg.Pos0, Nearest) <= kR + 1e-3 || BottomDistance(Seg.Pos0, BottomRegion) <= kR + 1e-3)
+				{
+					continue; // starts touching or inside: not a prediction case
+				}
+				++Segments;
+				const ContactPrediction AtEnd = PredictFacingEndEdge(Seg, kR, Face, TopZ, Seg.T0 + kHorizon, N);
+				const ContactPrediction AtBottom = PredictFacingBottomEdge(Seg, kR, Face, Seg.T0 + kHorizon, N);
+				// No missed contact: where the distance first falls below R - 1e-7 m (sampled) with the center in the edge's region on both
+				// sides of that step, the prediction comes no later. (A center entering the region already inside R - across the plan
+				// line below h, or from the face's range - met the face first: that is the face's contact, not the edge's.)
+				double FirstEndInside = kInfinity;
+				double FirstBottomInside = kInfinity;
+				bool EndDone = false;
+				bool BottomDone = false;
+				Vec3 Before = Seg.Pos0;
+				for (double Tau = kStep; Tau <= kHorizon && !(EndDone && BottomDone); Tau += kStep)
+				{
+					const Vec3 P = PositionAt(Seg, Tau);
+					if (!EndDone && EndDistance(P, Nearest) < kR - 1e-7)
+					{
+						EndDone = true;
+						FirstEndInside = EndRegion(P) && EndRegion(Before) ? Seg.T0 + Tau : kInfinity;
+					}
+					bool RegionBefore = false;
+					BottomDistance(Before, RegionBefore);
+					if (!BottomDone && BottomDistance(P, BottomRegion) < kR - 1e-7)
+					{
+						BottomDone = true;
+						FirstBottomInside = BottomRegion && RegionBefore ? Seg.T0 + Tau : kInfinity;
+					}
+					Before = P;
+				}
+				if (FirstEndInside < kInfinity && !(AtEnd.Found && AtEnd.Time <= FirstEndInside + 1e-12))
+				{
+					++Missed;
+					WorstLate = Max(WorstLate, AtEnd.Found ? AtEnd.Time - FirstEndInside : kInfinity);
+				}
+				if (FirstBottomInside < kInfinity && !(AtBottom.Found && AtBottom.Time <= FirstBottomInside + 1e-12))
+				{
+					++Missed;
+					WorstLate = Max(WorstLate, AtBottom.Found ? AtBottom.Time - FirstBottomInside : kInfinity);
+				}
+				// No phantom contact: at the predicted time the center is at distance R of the edge; the fixed contact's normal.
+				if (AtEnd.Found)
+				{
+					++EndContacts;
+					const Vec3 P = PositionAt(Seg, AtEnd.Time - Seg.T0);
+					Phantom += Abs(EndDistance(P, Nearest) - kR) > 1e-7 ? 1 : 0;
+					BallState B;
+					B.Position = P;
+					B.State = MotionState::PocketFall;
+					const FixedContact C = MakeFixedContact({TableFeatureKind::FacingTopEdge, static_cast<std::uint8_t>(f), kFacingEndEdge}, T, B, Spec, DetectOptions{});
+					BadNormal += Dot(C.Normal, Normalized(P - Nearest)) < 1.0 - 1e-9 ? 1 : 0;
+				}
+				if (AtBottom.Found)
+				{
+					++BottomContacts;
+					const Vec3 P = PositionAt(Seg, AtBottom.Time - Seg.T0);
+					Phantom += Abs(BottomDistance(P, BottomRegion) - kR) > 1e-7 ? 1 : 0;
+					BallState B;
+					B.Position = P;
+					B.State = MotionState::PocketFall;
+					const FixedContact C = MakeFixedContact({TableFeatureKind::FacingTopEdge, static_cast<std::uint8_t>(f), kFacingBottomEdge}, T, B, Spec, DetectOptions{});
+					const Vec3 OnLine = Bottom + Side * Clamp(Dot(P - Bottom, Side), 0.0, Face.Length);
+					BadNormal += Dot(C.Normal, Normalized(P - OnLine)) < 1.0 - 1e-9 ? 1 : 0;
+				}
+			}
+		}
+	}
+	std::printf("  A-VAL-4b: %d segments, %d end-edge and %d bottom-edge contacts predicted; missed %d (worst late %.3g s), phantom %d, normals off %d\n",
+		Segments, EndContacts, BottomContacts, Missed, WorstLate, Phantom, BadNormal);
+	RB_CHECK(Segments > 18 * kPerFacing); // 36 facings; a fifth of the draws start touching and are skipped
+	RB_CHECK(EndContacts > kPerFacing && BottomContacts > kPerFacing / 2);
+	RB_CHECK(Missed == 0);
+	RB_CHECK(Phantom == 0);
+	RB_CHECK(BadNormal == 0);
+}
+
+// A-VAL-5 (WP-10 review): TABLE_7FT_TRUE B1 seed 13 038 951 of the review scan (100 000 B1 shots and 3 000 + 3 000 breaks per
+// table preset). The cue ball bounces out of the head-right corner pocket onto the sloped cushion top, slides along it into the
+// facing's back-end edge (WP-10) and hops on the edge, over the pocket's cut disc. Its Zeno contacts went to a cloth island whose
+// member left at the first step (MemberExit: over the pocket opening, off the cloth -> Fly), the contact came back at the same
+// instant, and the shot alternated between one-step islands and GRI until the event cap: SimStatus::Aborted, the only abort WP-10
+// introduced in the scan (before WP-10 the edge did not exist and the shot ended Ok). The ball now joins as a rigid off-cloth
+// member (like a pocket-state or rail-top ball), leaves once clear of the edge and drops into the pocket. The sloped cushion top's
+// cut rim still costs it a series of one-step rail-top islands with overlap diagnostics (architecture O-24 b), so only the outcome
+// is checked here: status Ok, far below the event cap, pocketed, everything at rest.
+RB_TEST(Integ_ARCH_VAL5_OffClothPocketSeedIsHeld)
+{
+	const TableGeometry& T = simtest::Table(kTableSevenFootTrue);
+	SimInput& In = simtest::InputSlot();
+	ShotResult& R = simtest::ResultSlot();
+	e2e::MakeB1Shot(13038951u, T, In);
+	Simulator Sim;
+	const SimStatus Status = Sim.Run(In, R);
+	std::printf("  A-VAL-5 7ft-true B1 13038951: status %d, events %d, islands %d, overlaps %d, cue ball final status %d\n", static_cast<int>(Status),
+		R.Diagnostics.EventsProcessed, R.Diagnostics.Islands, R.Diagnostics.OverlapWarnings, static_cast<int>(R.Finals[0].Status));
+	RB_CHECK(Status == SimStatus::Ok);
+	RB_CHECK(R.Diagnostics.EventsProcessed < 2000);
+	RB_CHECK(!R.Diagnostics.IslandBudgetExceeded);
+	RB_CHECK(R.Finals[0].Status == BallFinalStatus::Pocketed);
+	RB_CHECK(e2e::AllAtRest(R));
 }

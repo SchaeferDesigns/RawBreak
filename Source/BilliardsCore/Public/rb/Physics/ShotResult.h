@@ -36,7 +36,8 @@ namespace rb
 		BallBall,           // A < B; Normal = n_hat (A -> B); NormalSpeed = v_n; impulses; CutAngle (if one is the cue ball)
 		BallCushion,        // A; Feature = CushionId (nose line)
 		BallJaw,            // A; Feature = PocketId; SubFeature = JawSide | (element << 4), element 0 arc, 1 facing face, 2 facing edge
-		                    //   (the top edge, or the back-end edge at the cushion back, Detect.h PredictFacingEndEdge)
+		                    //   (the top edge, the back-end edge at the cushion back or the bottom edge over the hole, Detect.h
+		                    //   PredictFacingEndEdge / PredictFacingBottomEdge)
 		BallRailTop,        // A; Feature = CushionId (0xFF pocket surround); SubFeature = RailTopKind; Value = polygon index
 		BallSlate,          // A hit the slate/shelf from the air; NormalSpeed = -v_z; SubFeature = bounce index
 		BallAirborne,       // A left the cloth (strike hop, rail, ball-ball); Value = apex center height [m]
