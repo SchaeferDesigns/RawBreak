@@ -21,7 +21,6 @@
 namespace RbCheatUtil
 {
 	constexpr double QueueExpirySeconds = 60.0;
-	constexpr double StrokeTimeoutSeconds = 10.0;
 	constexpr double StrokeLeadSeconds = 0.25;      // first scripted sample after the get-down completes
 	constexpr double StandBehindRailM = 0.35;       // pawn capsule (25 cm) + margin outside the table's outer boundary
 	constexpr double MaxStandDistanceM = 1.40;      // < URbStrokeComponent::MaxReach (1.5 m)
@@ -180,6 +179,7 @@ bool URbCheatManager::IsBusy() const
 
 void URbCheatManager::Enqueue(const TCHAR* Name, TFunction<void()> Run)
 {
+	ExpireStroke(); // a scripted stroke past its deadline is ended before anything else runs (Commit released, delegates unbound)
 	if (Queue.Num() == 0 && !IsBusy())
 	{
 		Run();
@@ -190,6 +190,11 @@ void URbCheatManager::Enqueue(const TCHAR* Name, TFunction<void()> Run)
 	Command.Run = MoveTemp(Run);
 	Command.EnqueueTime = FPlatformTime::Seconds();
 	UE_LOG(LogRawBreak, Display, TEXT("RbCheat: %s queued (%d waiting)"), Name, Queue.Num());
+	EnsureQueueTimer();
+}
+
+void URbCheatManager::EnsureQueueTimer()
+{
 	UWorld* World = GetWorld();
 	if (World && !World->GetTimerManager().IsTimerActive(QueueTimer))
 	{
@@ -197,12 +202,23 @@ void URbCheatManager::Enqueue(const TCHAR* Name, TFunction<void()> Run)
 	}
 }
 
-void URbCheatManager::DrainQueue()
+bool URbCheatManager::IsQueueTimerActive() const
+{
+	const UWorld* World = GetWorld();
+	return World && World->GetTimerManager().IsTimerActive(QueueTimer);
+}
+
+void URbCheatManager::ExpireStroke()
 {
 	if (bStrokeInFlight && (FPlatformTime::Seconds() >= StrokeDeadline || !StrokeInFlight.IsValid()))
 	{
 		EndScriptedStroke(TEXT("timed out"));
 	}
+}
+
+void URbCheatManager::DrainQueue()
+{
+	ExpireStroke();
 	while (Queue.Num() > 0 && !IsBusy())
 	{
 		FQueuedCommand Command = MoveTemp(Queue[0]);
@@ -214,7 +230,10 @@ void URbCheatManager::DrainQueue()
 		}
 		Command.Run();
 	}
-	if (Queue.Num() == 0)
+	// The timer also watches a scripted stroke's deadline: it stops only when nothing waits AND no stroke is in flight
+	// (UE-7 review: clearing it with a stroke in flight left Commit held and the delegates bound after a stroke that never
+	// reached the ball).
+	if (Queue.Num() == 0 && !bStrokeInFlight)
 	{
 		if (UWorld* World = GetWorld())
 		{
@@ -319,6 +338,10 @@ bool URbCheatManager::StartScriptedStroke(float SpeedMps, float AzimuthDeg)
 		return Refuse(TEXT("could not get down on the shot (out of reach?)"));
 	}
 
+	// A previous scripted stroke still tracked (a queued RbStroke cannot overlap one, but a direct call can): end it first,
+	// so its delegate bindings never outlive it.
+	EndScriptedStroke(TEXT("replaced"));
+
 	// Live stroke: Commit held, the scripted hand samples start after the get-down (earlier samples would be dropped).
 	Stroke->SetCommitHeld(true);
 	const double Now = FPlatformTime::Seconds();
@@ -336,14 +359,7 @@ bool URbCheatManager::StartScriptedStroke(float SpeedMps, float AzimuthDeg)
 	StrokeDeadline = Now + StrokeTimeoutSeconds;
 	ContactHandle = Stroke->OnStrokeContact.AddUObject(this, &URbCheatManager::OnScriptedStrokeContact);
 	AbortHandle = Stroke->OnStrokeAborted.AddUObject(this, &URbCheatManager::OnScriptedStrokeAborted);
-	if (UWorld* World = GetWorld())
-	{
-		// The queue timer also watches the stroke's timeout.
-		if (!World->GetTimerManager().IsTimerActive(QueueTimer))
-		{
-			World->GetTimerManager().SetTimer(QueueTimer, FTimerDelegate::CreateUObject(this, &URbCheatManager::DrainQueue), 0.02f, true);
-		}
-	}
+	EnsureQueueTimer(); // the queue timer also watches the stroke's timeout (it stays active until the stroke ends)
 	UE_LOG(LogRawBreak, Display, TEXT("RbCheat: RbStroke %.3f m/s phi %.3f: %d samples from %.3f s after now (address %u)"), SpeedMps, AzimuthDeg,
 		Samples.Num(), Start - Now, Stroke->GetAddressIndex());
 	return true;
@@ -506,11 +522,7 @@ void URbCheatManager::RbWait(float Seconds)
 {
 	Enqueue(TEXT("RbWait"), [this, Seconds]() {
 		WaitUntil = FPlatformTime::Seconds() + FMath::Max(0.0f, Seconds);
-		UWorld* World = GetWorld();
-		if (World && !World->GetTimerManager().IsTimerActive(QueueTimer))
-		{
-			World->GetTimerManager().SetTimer(QueueTimer, FTimerDelegate::CreateUObject(this, &URbCheatManager::DrainQueue), 0.02f, true);
-		}
+		EnsureQueueTimer();
 		UE_LOG(LogRawBreak, Display, TEXT("RbCheat: RbWait %.2f s"), Seconds);
 	});
 }

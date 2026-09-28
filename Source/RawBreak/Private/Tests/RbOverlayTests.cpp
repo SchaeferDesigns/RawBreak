@@ -33,7 +33,8 @@
 
 namespace RbOverlayTest
 {
-	TStrongObjectPtr<URbMatchDirector> MakeOverlayDirector(FAutomationTestBase& Test, ERbMatchMode Mode, int64 Seed, int32 RaceTo = 5)
+	TStrongObjectPtr<URbMatchDirector> MakeOverlayDirector(FAutomationTestBase& Test, ERbMatchMode Mode, int64 Seed, int32 RaceTo = 5,
+		ERbDiscipline Discipline = ERbDiscipline::NineBall)
 	{
 		FString Error;
 		const TSharedPtr<const FRbTableContext> Table = FRbTableContext::Create(FRbTableSetup{}, Error);
@@ -50,6 +51,7 @@ namespace RbOverlayTest
 		Setup.Mode = Mode;
 		Setup.Seed = Seed;
 		Setup.RaceTo = RaceTo;
+		Setup.Discipline = Discipline;
 		Setup.NoiseScale = 0.0;
 		if (!Director->StartMatch(Setup))
 		{
@@ -269,7 +271,49 @@ bool FRbOverlayDecisionOptions::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbOverlayRackAndMatchOver, "RawBreak.Unit.Overlay.RackAndMatchOver", RB_UNIT_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbOverlayDeciderFouls, "RawBreak.Unit.Overlay.DeciderFouls", RB_UNIT_TEST_FLAGS)
+bool FRbOverlayDeciderFouls::RunTest(const FString& Parameters)
+{
+	// UE-7 review: the player who comes to the table to DECIDE sees their own foul counter (Reg 8). 10-ball: player 1 fouls,
+	// player 2 pockets the 1 in a pocket other than the called one (R 6.6, not a foul) -> player 1, on one foul, decides.
+	namespace T = RbOverlayTest;
+	TStrongObjectPtr<URbMatchDirector> D = T::MakeOverlayDirector(*this, ERbMatchMode::HotSeat, 51, 3, ERbDiscipline::TenBall);
+	if (!D.IsValid())
+	{
+		return false;
+	}
+	T::SetBalls(*D, {{0, rb::Vec2(-0.8, -0.3)}, {1, rb::Vec2(0.6, 0.3)}, {10, rb::Vec2(0.7, -0.3)}});
+	TestTrue(TEXT("foul stroke (touches nothing)"), D->SubmitScriptedStrike(0.4, PI, 0.0, 0.0, 0.0));
+	if (!TestEqual(TEXT("player 1 on one foul"), D->GetMatchState().Game.Players[0].ConsecutiveFouls, 1))
+	{
+		AddInfo(T::Model(*D).ToDebugString());
+		return false;
+	}
+	if (D->GetPhase() == ERbDirectorPhase::AwaitPlacement)
+	{
+		TestTrue(TEXT("ball in hand placement"), D->PlaceCueBall(rb::Vec2(-0.8, 0.3)));
+	}
+	const rb::PocketGeometry& Corner = D->GetTableContext()->Geometry.Pockets[static_cast<int32>(rb::PocketId::FootRight)];
+	const rb::Vec2 One = Corner.MouthMid - Corner.Axis * 0.3;
+	T::SetBalls(*D, {{0, One - Corner.Axis * 0.25}, {1, One}, {10, rb::Vec2(-0.9, 0.4)}});
+	D->SetCalledShot(1, static_cast<int32>(rb::PocketId::HeadLeft)); // called elsewhere: a wrongly pocketed ball
+	TestTrue(TEXT("player 2 shoots"), D->SubmitScriptedStrike(2.0, FMath::Atan2(Corner.Axis.y, Corner.Axis.x), 0.0, 0.0, -0.35));
+	const FRbOverlayModel M = T::Model(*D);
+	AddInfo(M.ToDebugString());
+	if (!TestEqual(TEXT("wrongly pocketed -> decision"), D->GetPhase(), ERbDirectorPhase::AwaitDecision))
+	{
+		return false;
+	}
+	TestEqual(TEXT("player 1 decides"), D->GetMatchState().Decider, 0);
+	TestTrue(TEXT("decision line"), T::HasLine(M.MandatoryLines, TEXT("Player 1 decides:")));
+	int32 Index = -1;
+	TestTrue(TEXT("the decider's foul counter is on screen"), T::HasLine(M.MandatoryLines, TEXT("Player 1: on 1 foul"), &Index));
+	TestEqual(TEXT("as a warning"), M.MandatoryTone(Index), ERbOverlayTone::Warning);
+	TestFalse(TEXT("not the counter of the player who just shot"), T::HasLine(M.MandatoryLines, TEXT("Player 2: on")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbOverlayRackAndMatchOver,"RawBreak.Unit.Overlay.RackAndMatchOver", RB_UNIT_TEST_FLAGS)
 bool FRbOverlayRackAndMatchOver::RunTest(const FString& Parameters)
 {
 	namespace T = RbOverlayTest;

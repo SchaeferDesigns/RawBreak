@@ -10,6 +10,7 @@
 #include "Replay/RbReplayCamera.h"
 #include "Table/RbTable.h"
 
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
@@ -245,10 +246,17 @@ void URbReplaySubsystem::RestoreLive()
 		{
 			PC->SetViewTarget(Back);
 		}
+		// Back to the live view with the balls jumping to FRbTableState: a cut for TSR / motion blur.
+		MarkCameraCut(PC);
 	}
 	ViewController.Reset();
 	SavedViewTarget.Reset();
 	bRigModeSaved = false;
+	// The camera idles during live play (a Follow view would otherwise keep tracing its ball every frame).
+	if (ARbReplayCamera* Cam = Camera.Get())
+	{
+		Cam->SetActorTickEnabled(false);
+	}
 
 	const TSharedPtr<const FRbShot> Ended = ReplayShot;
 	bReplaying = false;
@@ -305,6 +313,7 @@ void URbReplaySubsystem::ApplyView()
 		Cam->ShooterFovDeg = PawnRig->GetParams().VerticalFovDeg; // the player's own preset
 	}
 	Cam->SetFollowTarget(Balls ? Balls->GetBallComponent(Struck) : nullptr);
+	Cam->SetActorTickEnabled(true); // Follow tracks its ball every tick (idle again after the replay)
 	Cam->SetView(CurrentView, Table, ShooterView);
 
 	if (!PC)
@@ -327,6 +336,17 @@ void URbReplaySubsystem::ApplyView()
 	if (PC->GetViewTarget() != Cam)
 	{
 		PC->SetViewTarget(Cam); // a cut, broadcast style
+	}
+	// Every ApplyView is a discontinuity (new view, or the shot restarted with its balls jumping back): tell the renderer, or
+	// TSR reprojects the previous view's history and motion blur smears the whole first frame with the camera jump.
+	MarkCameraCut(PC);
+}
+
+void URbReplaySubsystem::MarkCameraCut(APlayerController* PC)
+{
+	if (PC && PC->PlayerCameraManager)
+	{
+		PC->PlayerCameraManager->SetGameCameraCutThisFrame();
 	}
 }
 

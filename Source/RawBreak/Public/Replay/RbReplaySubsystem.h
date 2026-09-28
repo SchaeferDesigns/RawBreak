@@ -14,9 +14,11 @@
 //    declarations and Confirm meanwhile), the ball set shows Request.Input's balls (a jump: motion history dropped), the
 //    playback plays the stored shot from StartShotTime with its own clock (bAnchorToContact = false), the cue follows the
 //    stored tip path, the local player views through ARbReplayCamera (a cut, broadcast style) and the pawn's camera rig idles
-//    (ERbCameraRigMode::External).
+//    (ERbCameraRigMode::External). Every view change / restart and the way back flag a camera cut on the player camera
+//    manager (UE-7 review): SetViewTarget alone does not, so TSR would reproject the old view and motion blur would smear
+//    the first frame with the camera jump.
 //  * End: the replay's OnFinished holds the final frame EndHoldSeconds (world timer), then restores: cue hidden, rig mode and
-//    view target back, SetReplayActive(false) (the director shows FRbTableState again and re-arms the stroke component).
+//    view target back, the replay camera's tick off (on again with the next view), SetReplayActive(false) (the director shows FRbTableState again and re-arms the stroke component).
 //    StopReplay restores at once. Nothing here writes match state; ARbGameMode's director is optional (dev maps without a
 //    match: the balls then stay at the replay's end).
 //  * R key (HandleReplayInput): the last shot from the Shooter view at 1x; while a replay runs, the same shot again from the
@@ -111,8 +113,10 @@ private:
 	APlayerController* FindLocalController() const;
 	ARbReplayCamera* EnsureCamera();
 	void BindPlayback(URbShotPlaybackComponent* Playback);
-	// Places the replay camera for CurrentView and makes it the local player's view target.
+	// Places the replay camera for CurrentView and makes it the local player's view target (with a camera cut).
 	void ApplyView();
+	// Flags a camera cut for this frame's render (TSR history / motion blur must not bridge a view jump).
+	static void MarkCameraCut(APlayerController* PC);
 	void EndHold();
 	// Back to the live table: cue hidden, view target and rig mode restored, the director re-arms.
 	void RestoreLive();

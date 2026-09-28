@@ -23,8 +23,8 @@
 //
 // Text rules of BuildModel (balls by NUMBER, never by colour - plan 12.22; names only in hot-seat, practice is one human):
 //   mandatory  replay tag | lag turn | pending decision with every option (the highlighted one in brackets) | ball in hand
-//              for the incoming shooter with its region | the shooter's consecutive fouls while > 0 ("TWO FOULS" = the
-//              mandatory warning, Reg 8) | rack over / match over with the Confirm prompt
+//              for the incoming shooter with its region | the consecutive fouls of the player at the table (shooter, or the
+//              decider of a pending decision) while > 0 ("TWO FOULS" = the mandatory warning, Reg 8) | rack over / match over with the Confirm prompt
 //   title      discipline + mode; subtitle: score and race (hot-seat) or rack number (practice)
 //   match      shooter / phase, both foul counters (always displayed, rules.md 16 item 12), push-out window, call
 //   last shot  pocketed balls, first contact, the ENFORCED foul with its rule reference (rules.md 16 item 2) and every other
@@ -309,17 +309,22 @@ FRbOverlayModel URbOverlayComponent::BuildModel(const URbMatchDirector* Director
 			WithName(D, Shooter, FText::Format(LOCTEXT("BallInHand", "ball in hand {0}"), RegionName(Constraints.PlacementRegion))),
 			ERbOverlayTone::Info);
 	}
-	if (IsShooterAtTable(Phase) && Shooter >= 0 && Shooter <= 1)
+	// The foul counter of the player coming to the table: the shooter, or the DECIDER of a pending decision (UE-7 review: a
+	// 10-ball decider after a wrongly pocketed ball, R 6.6, may be on two fouls and must be warned before choosing to shoot,
+	// Reg 8 / rules.md 16 item 12).
+	const bool bDeciding = Phase == ERbDirectorPhase::AwaitDecision;
+	const int32 AtTable = bDeciding ? S.Decider : Shooter;
+	if ((IsShooterAtTable(Phase) || bDeciding) && AtTable >= 0 && AtTable <= 1)
 	{
-		const int32 Fouls = G.Players[Shooter].ConsecutiveFouls;
-		if (Constraints.ThreeFoulWarning || Fouls >= 2)
+		const int32 Fouls = G.Players[AtTable].ConsecutiveFouls;
+		if ((!bDeciding && Constraints.ThreeFoulWarning) || Fouls >= 2)
 		{
 			Add(M.MandatoryLines, M.MandatoryTones,
-				WithName(D, Shooter, FText::Format(LOCTEXT("TwoFouls", "ON TWO FOULS  \u2013  {0}"), ThirdFoulConsequence(D))), ERbOverlayTone::Warning);
+				WithName(D, AtTable, FText::Format(LOCTEXT("TwoFouls", "ON TWO FOULS  \u2013  {0}"), ThirdFoulConsequence(D))), ERbOverlayTone::Warning);
 		}
 		else if (Fouls == 1)
 		{
-			Add(M.MandatoryLines, M.MandatoryTones, WithName(D, Shooter, LOCTEXT("OneFoul", "on 1 foul")), ERbOverlayTone::Warning);
+			Add(M.MandatoryLines, M.MandatoryTones, WithName(D, AtTable, LOCTEXT("OneFoul", "on 1 foul")), ERbOverlayTone::Warning);
 		}
 	}
 	if (Phase == ERbDirectorPhase::RackOver)

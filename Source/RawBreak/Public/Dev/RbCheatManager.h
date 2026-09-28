@@ -12,6 +12,8 @@
 //    -ExecCmds batch can play several shots: "RbPlaybackRate 0, RbPlaceCueBall -0.8 0, RbStrike 3 0, RbReplay 1 0.25". A command
 //    issued while nothing is pending runs at once. Queued commands expire after 60 s. RbPlaybackRate, RbOverlay and
 //    RbStopReplay never wait. A match command stops a running replay first.
+//  * A scripted stroke that has not reached the ball after StrokeTimeoutSeconds is ended (Commit released, delegates unbound)
+//    by the queue timer, which keeps running while the stroke is in flight.
 //  * Log lines "RbCheat: <command> ..." report the outcome; RbDumpState prints ONE grep-able line:
 //      RbState: phase=<ERbDirectorPhase> mode=<Practice|HotSeat> game=<9-ball..> rack=<n> shot=<match shot index> shooter=<p>
 //      wins=<a>:<b> scores=<a>:<b> fouls=<a>:<b> inhand=<0|1> placed=<0|1> region=<CueBallNext> decider=<p> options=[<Option>,..]
@@ -82,6 +84,13 @@ public:
 	// Commands waiting in the queue (tests).
 	int32 GetQueuedCount() const { return Queue.Num(); }
 
+	// A scripted stroke (RbStroke) is on its way to the ball / the queue timer runs (it also watches the stroke's deadline).
+	bool IsStrokeInFlight() const { return bStrokeInFlight; }
+	bool IsQueueTimerActive() const;
+
+	// Seconds a scripted stroke may take to reach the ball before it is ended (Commit released).
+	double StrokeTimeoutSeconds = 10.0;
+
 private:
 	struct FQueuedCommand
 	{
@@ -96,6 +105,10 @@ private:
 	// Runs Run now when nothing is pending, else queues it (Name for the log).
 	void Enqueue(const TCHAR* Name, TFunction<void()> Run);
 	void DrainQueue();
+	// The 20 ms queue timer (drains the queue, watches a stroke's deadline); started when needed.
+	void EnsureQueueTimer();
+	// Ends a scripted stroke whose deadline passed (or whose component is gone).
+	void ExpireStroke();
 	void StopReplayForMatchCommand();
 
 	bool StartScriptedStroke(float SpeedMps, float AzimuthDeg);

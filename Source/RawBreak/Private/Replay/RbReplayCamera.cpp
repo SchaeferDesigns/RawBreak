@@ -51,6 +51,9 @@ ARbReplayCamera::ARbReplayCamera(const FObjectInitializer& ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bTickEvenWhenPaused = true;
+	// After the playback (URbShotPlaybackComponent, TG_PrePhysics) has placed this frame's balls and before the player camera
+	// manager reads the view (after the tick groups up to PostPhysics): Follow aims at the ball of THIS frame, not the last one.
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
 	Tags.AddUnique(CameraTag);
 	SetActorEnableCollision(false);
 }

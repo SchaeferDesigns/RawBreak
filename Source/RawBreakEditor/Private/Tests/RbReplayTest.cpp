@@ -10,6 +10,10 @@
 //     replay END STATE == the live END STATE bitwise (same stored result, never re-simulated); the last frame is held, then the
 //     live table returns: no shot committed, history unchanged, balls at FRbTableState, view and stroke component back;
 //     R-key cycling (Shooter -> Overhead), StopReplay, a frozen Follow view aimed at the cue ball.
+//   UE-7 review: EVERY shown frame of the live shot and of its replay == the stored result at the shown shot time (rb::StateAt /
+//     OrientationAt, bitwise; the end-state check alone compares Result.Finals with itself); every replay view jump and the
+//     way back flag a camera cut; the replay camera ticks after the playback; the queue timer watches a scripted stroke's
+//     deadline until contact, and a stroke that misses its deadline is ended (Commit released: no shot).
 // Owner: UE-7.
 
 #include "Editor.h"
@@ -18,6 +22,7 @@
 #include "Tests/AutomationCommon.h"
 #include "Tests/AutomationEditorCommon.h"
 
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/WorldSettings.h"
@@ -41,6 +46,7 @@
 #include "Table/RbTable.h"
 #include "UI/RbOverlayComponent.h"
 
+#include "rb/Physics/Playback.h"
 #include "rb/Rules/TableRules.h"
 
 #include <initializer_list>
@@ -138,6 +144,32 @@ namespace RbReplayFlow
 		return SameBits(Da, Db, 4);
 	}
 
+	// Every ball the playback shows this frame == the stored result evaluated by random access at the same shot time
+	// (rb::StateAt / OrientationAt), bitwise. Returns the number of balls compared; OutMismatch counts the differing ones.
+	int32 CheckFrameAgainstResult(const URbShotPlaybackComponent& Playback, const FRbShot& Shot, int32& OutMismatch)
+	{
+		const double T = Playback.GetShotTime();
+		int32 Compared = 0;
+		for (int32 Ball = 0; Ball < rb::kMaxBalls; ++Ball)
+		{
+			rb::BallState Shown;
+			rb::Quat ShownQ;
+			if (!Playback.GetBallStateCore(Ball, Shown, ShownQ))
+			{
+				continue;
+			}
+			rb::BallState Expect;
+			rb::Quat ExpectQ;
+			if (!rb::StateAt(Shot.Result, Ball, T, Expect) || !rb::OrientationAt(Shot.Result, Ball, T, ExpectQ))
+			{
+				continue;
+			}
+			++Compared;
+			OutMismatch += SameState(Shown, Expect) && SameOrientation(ShownQ, ExpectQ) ? 0 : 1;
+		}
+		return Compared;
+	}
+
 	// Log lines of one console command (RbDumpState is grep-able).
 	class FLineCapture : public FOutputDevice
 	{
@@ -218,6 +250,7 @@ public:
 		{
 			return true;
 		}
+		SampleFrame();
 		bool bDone = false;
 		switch (Stage)
 		{
@@ -228,7 +261,9 @@ public:
 		case 4: bDone = StageWaitRestore(); break;
 		case 5: bDone = StageFollowCheck(); break;
 		case 6: bDone = StageWaitStroke(); break;
-		case 7: bDone = StageDecisionRerackNewMatch(); break;
+		case 7: bDone = StageStrokeTimeout(); break;
+		case 8: bDone = StageWaitStrokeTimeout(); break;
+		case 9: bDone = StageDecisionRerackNewMatch(); break;
 		default: bDone = true; break;
 		}
 		if (bDone)
@@ -272,6 +307,37 @@ private:
 	void Cmd(const TCHAR* Command)
 	{
 		PC->ConsoleCommand(Command);
+	}
+
+	// Every frame the live shot or its replay is on screen: the shown core states == the stored result at the shown shot time,
+	// bitwise (the live playback and the replay evaluate the same trajectories; the end-state check alone compares
+	// Result.Finals with itself). The finished / held end frame is not sampled (the playback no longer plays).
+	void SampleFrame()
+	{
+		if (!LiveShot.IsValid() || !Playback->IsPlaying() || Playback->GetShot() != LiveShot)
+		{
+			return;
+		}
+		const bool bReplayFrame = Replay->IsReplaying() && Replay->GetReplayShot() == LiveShot;
+		const double T = Playback->GetShotTime();
+		double& LastT = bReplayFrame ? LastReplaySampleTime : LastLiveSampleTime;
+		if (T == LastT)
+		{
+			return; // same shown frame (paused / frozen / no tick since the last sample)
+		}
+		LastT = T;
+		int32 Mismatch = 0;
+		const int32 Compared = RbReplayFlow::CheckFrameAgainstResult(*Playback, *LiveShot, Mismatch);
+		if (Compared > 0)
+		{
+			(bReplayFrame ? ReplayFramesChecked : LiveFramesChecked) += 1;
+		}
+		if (Mismatch > 0)
+		{
+			FrameMismatches += Mismatch;
+			Test->AddError(FString::Printf(TEXT("%s frame at t = %.9f s: %d ball(s) differ from the stored result"), bReplayFrame ? TEXT("replay") : TEXT("live"),
+				T, Mismatch));
+		}
 	}
 
 	void Unbind()
@@ -486,20 +552,40 @@ private:
 		}
 		Test->TestEqual(TEXT("balls at FRbTableState after the replay"), Wrong, 0);
 
-		// R key: the last shot from the Shooter view, again = the next view (restart); StopReplay at once.
+		// Every shown frame of the live shot and of its replay was the stored result at the shown time (SampleFrame).
+		Test->AddInfo(FString::Printf(TEXT("frames checked bitwise against the stored result: live %d, replay %d"), LiveFramesChecked, ReplayFramesChecked));
+		Test->TestTrue(TEXT("live frames checked"), LiveFramesChecked >= 3);
+		Test->TestTrue(TEXT("replay frames checked"), ReplayFramesChecked >= 3);
+		Test->TestEqual(TEXT("every live and replay frame == the stored result (bitwise)"), FrameMismatches, 0);
+
+		// R key: the last shot from the Shooter view, again = the next view (restart); StopReplay at once. Every view jump is a
+		// camera cut for the renderer (TSR history / motion blur), also the way back to the pawn.
+		APlayerCameraManager* CameraManager = PC->PlayerCameraManager;
+		const auto CutAfter = [CameraManager](TFunctionRef<void()> Action) {
+			if (!CameraManager)
+			{
+				return false;
+			}
+			CameraManager->bGameCameraCutThisFrame = false;
+			Action();
+			return CameraManager->bGameCameraCutThisFrame != 0;
+		};
 		ToShotPhase(*Director);
-		Test->TestTrue(TEXT("R: replay"), Replay->HandleReplayInput() && Replay->IsReplaying() && Replay->GetView() == ERbReplayView::Shooter);
-		Test->TestTrue(TEXT("R again: next view"), Replay->HandleReplayInput() && Replay->GetView() == ERbReplayView::Overhead &&
-			Playback->GetShot() == Replay->GetReplayShot());
-		Replay->CycleView();
+		bool bStarted = false;
+		Test->TestTrue(TEXT("R: camera cut to the replay view"), CutAfter([&]() { bStarted = Replay->HandleReplayInput(); }));
+		Test->TestTrue(TEXT("R: replay"), bStarted && Replay->IsReplaying() && Replay->GetView() == ERbReplayView::Shooter);
+		Test->TestTrue(TEXT("R again: camera cut"), CutAfter([&]() { bStarted = Replay->HandleReplayInput(); }));
+		Test->TestTrue(TEXT("R again: next view"), bStarted && Replay->GetView() == ERbReplayView::Overhead && Playback->GetShot() == Replay->GetReplayShot());
+		Test->TestTrue(TEXT("CycleView: camera cut"), CutAfter([&]() { Replay->CycleView(); }));
 		Test->TestEqual(TEXT("CycleView"), Replay->GetView(), ERbReplayView::Rail);
 		if (ARbReplayCamera* Camera = Replay->GetCamera())
 		{
 			const ARbTable* TableActor = Mode->GetTable();
 			const rb::Vec3 Eye = TableActor->WorldToCore(Camera->GetActorLocation());
 			Test->TestTrue(TEXT("rail camera behind the head rail, above the cloth"), Eye.x < TableActor->GetContext().Geometry.OuterBoundary.Lo.x && Eye.z > 0.2);
+			Test->TestTrue(TEXT("replay camera ticks after the playback placed the balls"), Camera->PrimaryActorTick.TickGroup == TG_PostPhysics);
 		}
-		Cmd(TEXT("RbStopReplay"));
+		Test->TestTrue(TEXT("RbStopReplay: camera cut back to the pawn"), CutAfter([&]() { Cmd(TEXT("RbStopReplay")); }));
 		Test->TestTrue(TEXT("RbStopReplay restores at once"), !Replay->IsReplaying() && !Director->IsReplayActive() && PC->GetViewTarget() == PC->GetPawn());
 		// Follow, frozen at 0.3 s (rate 0): the camera aims at the struck ball after a frame.
 		Test->TestTrue(TEXT("frozen follow replay"), Replay->PlayReplayFrom(0, ERbReplayView::Follow, 0.0f, 0.3));
@@ -521,8 +607,13 @@ private:
 			const FVector ToBall = (Cue->GetComponentLocation() - Camera->GetActorLocation()).GetSafeNormal();
 			Test->TestTrue(TEXT("follow camera aims at the cue ball"), FVector::DotProduct(ToBall, Camera->GetActorForwardVector()) > 0.999);
 			Test->TestTrue(TEXT("frozen at 0.3 s"), FMath::IsNearlyEqual(Playback->GetShotTime(), 0.3, 1.0e-9));
+			Test->TestTrue(TEXT("the follow camera ticks during its replay"), Camera->IsActorTickEnabled());
 		}
 		Replay->StopReplay();
+		if (Camera)
+		{
+			Test->TestFalse(TEXT("the replay camera idles during live play (no per-frame follow trace)"), Camera->IsActorTickEnabled());
+		}
 
 		// RbStroke: the human layer through the pawn's stroke component (get down, Commit, scripted hand samples).
 		ToShotPhase(*Director);
@@ -531,6 +622,8 @@ private:
 		IndexBefore = Director->GetMatchShotIndex();
 		Cmd(TEXT("RbStroke 2 0"));
 		Test->TestTrue(TEXT("RbStroke: the pawn got down on the shot"), Stroke->GetPhase() == ERbStrokePhase::GettingDown || Stroke->GetPhase() == ERbStrokePhase::Down);
+		URbCheatManager* Cheats = Cast<URbCheatManager>(PC->CheatManager);
+		Test->TestTrue(TEXT("RbStroke: a scripted stroke in flight"), Cheats && Cheats->IsStrokeInFlight());
 		Stage = 6;
 		return false;
 	}
@@ -538,11 +631,19 @@ private:
 	bool StageWaitStroke()
 	{
 		using namespace RbReplayFlow;
+		URbCheatManager* Cheats = Cast<URbCheatManager>(PC->CheatManager);
 		if (Director->GetMatchShotIndex() == IndexBefore)
 		{
+			// The queue timer watches the stroke's deadline for as long as the stroke is in flight (it used to stop after 20 ms).
+			if (Cheats && Cheats->IsStrokeInFlight() && !Cheats->IsQueueTimerActive())
+			{
+				++WatchdogGaps;
+			}
 			CollectShot(*Director, Simulation);
 			return false;
 		}
+		Test->TestEqual(TEXT("the stroke's deadline watched until contact"), WatchdogGaps, 0);
+		Test->TestTrue(TEXT("contact ends the scripted stroke"), Cheats && !Cheats->IsStrokeInFlight());
 		const TSharedPtr<const FRbShot> Shot = Director->GetLastCommittedShot();
 		if (Test->TestTrue(TEXT("RbStroke committed a human-layer shot"), Shot.IsValid() && Shot->Request.Stroke.bHuman))
 		{
@@ -557,7 +658,53 @@ private:
 		return false;
 	}
 
-	// --- stage 7: push-out decision (RbDeclare, RbChoose), RbRerack, RbNewMatch ---------------------------------------------
+	// --- stages 7-8: a scripted stroke that does not reach the ball in time is ended (Commit released): no shot ----------------
+	bool StageStrokeTimeout()
+	{
+		using namespace RbReplayFlow;
+		URbCheatManager* Cheats = Cast<URbCheatManager>(PC->CheatManager);
+		if (!Test->TestNotNull(TEXT("cheat manager"), Cheats))
+		{
+			return true;
+		}
+		ToShotPhase(*Director);
+		if (Director->GetPhase() == ERbDirectorPhase::AwaitPlacement)
+		{
+			Director->PlaceCueBall(rb::Vec2(Director->GetMatchConfig().Table.HeadStringX - 0.12, 0.0)); // legal in every region
+		}
+		Layout(*Director, {{0, rb::Vec2(-0.5, 0.0)}, {1, rb::Vec2(0.3, 0.05)}, {9, rb::Vec2(0.6, -0.3)}});
+		if (!Test->TestEqual(TEXT("timeout case: a stroke is expected"), Director->GetPhase(), ERbDirectorPhase::AwaitStroke))
+		{
+			return true;
+		}
+		IndexBefore = Director->GetMatchShotIndex();
+		// The scripted samples start 0.25 s after the get-down (>= 1 s): a 0.05 s deadline passes long before the cue moves.
+		Cheats->StrokeTimeoutSeconds = 0.05;
+		Cmd(TEXT("RbStroke 2 0"));
+		Cheats->StrokeTimeoutSeconds = 10.0;
+		Test->TestTrue(TEXT("timeout case: stroke in flight"), Cheats->IsStrokeInFlight());
+		TimeoutStart = FPlatformTime::Seconds();
+		Stage = 8;
+		return false;
+	}
+
+	bool StageWaitStrokeTimeout()
+	{
+		URbCheatManager* Cheats = Cast<URbCheatManager>(PC->CheatManager);
+		// Long enough for the get-down (GetDownSeconds) and the whole scripted stroke to run as a practice stroke.
+		if (FPlatformTime::Seconds() - TimeoutStart < Stroke->GetDownSeconds + 2.5)
+		{
+			return false;
+		}
+		Test->TestTrue(TEXT("the timed-out stroke was ended by the queue timer"), Cheats && !Cheats->IsStrokeInFlight());
+		Test->TestTrue(TEXT("the queue timer stops afterwards"), Cheats && !Cheats->IsQueueTimerActive());
+		Test->TestEqual(TEXT("Commit released: the scripted samples ran as a practice stroke, no shot"), Director->GetMatchShotIndex(), IndexBefore);
+		Test->TestEqual(TEXT("still the same turn"), Director->GetPhase(), ERbDirectorPhase::AwaitStroke);
+		Stage = 9;
+		return false;
+	}
+
+	// --- stage 9: push-out decision (RbDeclare, RbChoose), RbRerack, RbNewMatch ---------------------------------------------
 	bool StageDecisionRerackNewMatch()
 	{
 		using namespace RbReplayFlow;
@@ -636,6 +783,13 @@ private:
 	int32 LastStage = -1;
 	double StageStart = 0.0;
 	int32 FollowFrames = 0;
+	int32 WatchdogGaps = 0;
+	double TimeoutStart = 0.0;
+	int32 LiveFramesChecked = 0;
+	int32 ReplayFramesChecked = 0;
+	int32 FrameMismatches = 0;
+	double LastLiveSampleTime = -1.0;
+	double LastReplaySampleTime = -1.0;
 
 	UWorld* World = nullptr;
 	ARbGameMode* Mode = nullptr;
