@@ -1,9 +1,14 @@
 // rbsim - run one shot through BilliardsCore and write JSON (event log + sampled trajectories) for
 // debugging, visualisation (viewer/index.html), calibration (motion spec implementation note 14) and replays.
 // Owner: WP-7 (output, playback & tools). Interface and JSON schema: Docs/architecture.md, section "rbsim".
+// --hash (UE-6a, ROB-10 / Docs/ue-architecture.md A5): InputHash + ResultHash of the run, compared by the UE module.
 
 #include "JsonWriter.h"
 #include "SimInputJson.h"
+
+// ROB-10 result hash: the ONE definition of the core tests (ResultHash with the FNV-1a Mix / Bits / MixState); the UE
+// module's RbShot::ResultHash is a verbatim copy, checked against the value printed here (Tools/rbsim/examples/break9.hash).
+#include "../../Tests/Core/Simulator/SimTestUtil.h"
 
 #include "rb/Core/Constants.h"
 #include "rb/Core/Error.h"
@@ -89,6 +94,7 @@ namespace
 		int Bench = 0;
 		bool Compact = false;
 		bool Geometry = false;
+		bool Hash = false;
 	};
 
 	void PrintUsage()
@@ -123,6 +129,7 @@ namespace
 			"Output:\n"
 			"  --out FILE        JSON file (default stdout)     --dt S   sample interval (default 0.01, 0 = none)\n"
 			"  --no-trajectories --no-states --record --facts --compact --bench N --geometry\n"
+			"  --hash            print coreVersion, inputHash and resultHash (ROB-10); the JSON is then written only with --out\n"
 			"Exit code: 0 = SimStatus::Ok, 2 = usage / setup error, 3 = simulation not Ok, 1 = I/O\n"
 			"Viewer: open Tools/rbsim/viewer/index.html in a browser and load the JSON (--geometry adds the full outline)\n",
 			rb::CoreVersion());
@@ -301,6 +308,7 @@ namespace
 			else if (Is(Arg, "--compact")) { O.Compact = true; }
 			else if (Is(Arg, "--bench")) { O.Bench = std::atoi(Next()); }
 			else if (Is(Arg, "--geometry")) { O.Geometry = true; }
+			else if (Is(Arg, "--hash")) { O.Hash = true; }
 			else
 			{
 				std::fprintf(stderr, "rbsim: unknown option %s\n", Arg);
@@ -1047,6 +1055,158 @@ namespace
 		J.EndObject();
 	}
 
+	// Hash of every simulator input field (ROB-10, --hash). SAME definition (field order, Mix) as RbShot::InputHash in
+	// Source/RawBreak/Private/Simulation/RbShot.cpp; the field order is documented in Source/RawBreak/Public/Simulation/RbShot.h.
+	void MixReal(std::uint64_t& H, double V) { simtest::Mix(H, simtest::Bits(V)); }
+	void MixBool(std::uint64_t& H, bool V) { simtest::Mix(H, V ? 1u : 0u); }
+	void MixBall(std::uint64_t& H, rb::BallId Id) { simtest::Mix(H, static_cast<std::uint64_t>(static_cast<std::uint8_t>(Id))); }
+
+	void MixPocketSpec(std::uint64_t& H, const rb::PocketSpec& P)
+	{
+		MixReal(H, P.Mouth);
+		MixReal(H, P.CutAngle);
+		MixReal(H, P.Shelf);
+		MixReal(H, P.JawRadius);
+		MixReal(H, P.CaptureRadius);
+	}
+
+	std::uint64_t InputHash(const rb::SimInput& In)
+	{
+		using simtest::Mix;
+		std::uint64_t H = 0xCBF29CE484222325ull;
+
+		// 1. table (the geometry is BuildTableGeometry(Spec))
+		if (In.Table == nullptr)
+		{
+			Mix(H, 0);
+		}
+		else
+		{
+			const rb::TableSpec& S = In.Table->Spec;
+			Mix(H, 1);
+			Mix(H, static_cast<std::uint64_t>(S.Preset));
+			MixReal(H, S.Length);
+			MixReal(H, S.Width);
+			MixReal(H, S.BedHeight);
+			MixReal(H, S.CushionNoseHeight);
+			MixReal(H, S.CushionWidth);
+			MixReal(H, S.CushionNoseProfileRadius);
+			MixReal(H, S.RailWidthTotal);
+			MixReal(H, S.RailTopZ);
+			MixReal(H, S.SlateThickness);
+			MixReal(H, S.SightInset);
+			MixReal(H, S.SightDiameter);
+			MixPocketSpec(H, S.Corner);
+			MixPocketSpec(H, S.Side);
+			MixReal(H, S.Backdraft);
+			MixReal(H, S.DropPointRadius);
+			MixReal(H, S.FacingThickness);
+			MixReal(H, S.LinerUndercut);
+			MixBool(H, S.HasPockets);
+			Mix(H, static_cast<std::uint64_t>(S.Cloth));
+			MixReal(H, S.FacingRestitutionScale);
+			MixReal(H, S.LinerRestitution);
+			MixReal(H, S.LinerFriction);
+		}
+
+		// 2. environment
+		MixReal(H, In.Environment.LampUndersideZ);
+		MixReal(H, In.Environment.LampFootprint.Lo.x);
+		MixReal(H, In.Environment.LampFootprint.Lo.y);
+		MixReal(H, In.Environment.LampFootprint.Hi.x);
+		MixReal(H, In.Environment.LampFootprint.Hi.y);
+
+		// 3. params: every ParamTable key in table order
+		const int ParamCount = rb::PhysicsParamCount();
+		Mix(H, static_cast<std::uint64_t>(ParamCount));
+		for (int i = 0; i < ParamCount; ++i)
+		{
+			double Value = 0.0;
+			rb::GetPhysicsParam(In.Params, rb::PhysicsParamAt(i).Key, Value);
+			MixReal(H, Value);
+		}
+
+		// 4. balls in play
+		for (int Id = 0; Id < rb::kMaxBalls; ++Id)
+		{
+			const rb::SimBall& B = In.Balls[Id];
+			if (!B.InPlay)
+			{
+				continue;
+			}
+			Mix(H, static_cast<std::uint64_t>(Id));
+			MixReal(H, B.Spec.Radius);
+			MixReal(H, B.Spec.Mass);
+			MixReal(H, B.Spec.Inertia);
+			simtest::MixState(H, B.State);
+			MixReal(H, B.Orientation.w);
+			MixReal(H, B.Orientation.x);
+			MixReal(H, B.Orientation.y);
+			MixReal(H, B.Orientation.z);
+			Mix(H, static_cast<std::uint64_t>(B.ChalkMarks.Size()));
+			for (const rb::ChalkMark& M : B.ChalkMarks)
+			{
+				MixReal(H, M.BodyDir.x);
+				MixReal(H, M.BodyDir.y);
+				MixReal(H, M.BodyDir.z);
+				MixReal(H, M.Strength);
+				MixReal(H, M.Radius);
+			}
+		}
+
+		// 5. strikes
+		Mix(H, static_cast<std::uint64_t>(In.Strikes.Size()));
+		for (const rb::StrikeRequest& S : In.Strikes)
+		{
+			MixBall(H, S.Ball);
+			MixReal(H, S.Input.Speed);
+			MixReal(H, S.Input.Elevation);
+			MixReal(H, S.Input.Azimuth);
+			MixReal(H, S.Input.OffsetA);
+			MixReal(H, S.Input.OffsetB);
+			MixReal(H, S.Input.LambdaOverride);
+			MixBool(H, S.Input.SquirtEnabled);
+			MixBool(H, S.Input.TipTouchesCloth);
+			const rb::CueSpec& C = S.Input.Cue;
+			MixReal(H, C.Mass);
+			MixReal(H, C.EndMass);
+			MixReal(H, C.TipRestitution);
+			MixReal(H, C.TipFriction);
+			MixReal(H, C.TipFrictionKinetic);
+			MixReal(H, C.TipDomeRadius);
+			MixReal(H, C.TipDiameter);
+			MixReal(H, C.Length);
+			MixReal(H, C.ContactTime);
+			MixReal(H, C.FollowThroughDistance);
+			MixBool(H, C.JumpCue);
+		}
+
+		// 6. context
+		const rb::ShotContext& X = In.Context;
+		Mix(H, static_cast<std::uint64_t>(X.InHand));
+		MixReal(H, X.PlacedPosition.x);
+		MixReal(H, X.PlacedPosition.y);
+		MixBool(H, X.TemplatePresent);
+		MixReal(H, X.ShotClockElapsed);
+		MixBool(H, X.FootOnFloor);
+		MixReal(H, X.FrozenTolerance);
+		Mix(H, static_cast<std::uint64_t>(X.NonTipContacts.Size()));
+		for (const rb::NonTipContact& N : X.NonTipContacts)
+		{
+			MixBall(H, N.Ball);
+			Mix(H, static_cast<std::uint64_t>(N.Source));
+			MixReal(H, N.Time);
+		}
+
+		// 7. record options
+		MixBool(H, In.Record.Trajectories);
+		MixBool(H, In.Record.EventStates);
+		MixBool(H, In.Record.LogTransitions);
+		MixBool(H, In.Record.LogObservers);
+		MixBool(H, In.Record.ShotRecord);
+		return H;
+	}
+
 	bool WriteTextFile(const char* Path, const std::string& Text)
 	{
 		std::FILE* File = Path != nullptr ? std::fopen(Path, "wb") : stdout;
@@ -1158,11 +1318,21 @@ int main(int Argc, char** Argv)
 			Micros[std::min(N - 1, (N * 99) / 100)], Micros[N - 1], Result.Diagnostics.EventsProcessed);
 	}
 
-	rbsim::JsonWriter J(!O.Compact);
-	WriteJson(O, Input, Result, J);
-	if (!WriteTextFile(O.OutPath, J.Text()))
+	if (O.Hash)
 	{
-		return 1;
+		// The hashes of this run (--bench reruns are bitwise identical). Parsed by the UE ROB-10 test: one "key value"
+		// pair per line, lines starting with '#' are comments.
+		std::printf("coreVersion %s\ninputHash %016llx\nresultHash %016llx\n", rb::CoreVersion(), static_cast<unsigned long long>(InputHash(Input)),
+			static_cast<unsigned long long>(simtest::ResultHash(Result)));
+	}
+	if (!O.Hash || O.OutPath != nullptr)
+	{
+		rbsim::JsonWriter J(!O.Compact);
+		WriteJson(O, Input, Result, J);
+		if (!WriteTextFile(O.OutPath, J.Text()))
+		{
+			return 1;
+		}
 	}
 	return Result.Status == rb::SimStatus::Ok ? 0 : 3;
 }

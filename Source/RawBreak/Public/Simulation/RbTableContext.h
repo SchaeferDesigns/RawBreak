@@ -22,7 +22,10 @@ struct FRbTableSetup
 	ERbBallSetPreset BallSet = ERbBallSetPreset::StandardPool;
 	uint64 BallSetSeed = 0;          // BuildBallSet seed (venue ball sets: rb::human::VenueBallSetSeed)
 	rb::TableCondition Condition;    // level, clean balls in M1 (venues: rb::human::MakeVenueTableCondition)
-	double LampUndersideZ = rb::kInfinity; // [m] above the cloth; the lamp footprint defaults to the whole table
+	double LampUndersideZ = rb::kInfinity; // [m] above the cloth (> 0; infinity = no lamp); ARbTable::LampUndersideHeight
+	// Plan area [m, core frame] the lamp covers (off-table apex check). Default: everywhere, i.e. the lamp footprint
+	// covers the whole table (the M1 room's WPA lamp does); a room may narrow it to the lamp's real extent.
+	rb::Aabb2 LampFootprint = rb::EnvironmentSpec{}.LampFootprint;
 };
 
 struct RAWBREAK_API FRbTableContext
@@ -35,7 +38,10 @@ struct RAWBREAK_API FRbTableContext
 	rb::BallSet Balls;                  // BuildBallSet(Setup.BallSet, Setup.BallSetSeed)
 	rb::rules::RulesTable RulesTable;   // BuildRulesTable(Geometry, object-ball radius, per-ball radii)
 
-	// Builds and validates everything; nullptr with OutError on any core error (invalid table, ball set).
+	// Builds and validates everything; nullptr with OutError on any error: table geometry rejected, physics parameters
+	// of the table condition rejected (ValidatePhysicsParams, e.g. a venue slope beyond the rolling-resistance limit),
+	// lamp height / footprint invalid, ball set not buildable or not physical (fewer than 2 balls, a radius / mass /
+	// inertia factor outside (0, 2/3] or non-finite).
 	static TSharedPtr<const FRbTableContext> Create(const FRbTableSetup& Setup, FString& OutError);
 
 	// Radius [m] of ball Id (0 = cue ball); the standard radius for ids beyond the set.
