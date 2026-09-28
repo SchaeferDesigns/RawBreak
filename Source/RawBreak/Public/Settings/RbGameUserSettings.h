@@ -8,7 +8,8 @@
 // How a preset plugs in (plan 9.4):
 //   1. the UE scalability groups (sg.*): every group at the preset level, Low 0 .. Cinematic 4 (= UE's Cine level, "Epic +
 //      extras"); Config/DefaultScalability.ini overrides the engine's group sections where the plan differs (Lumen Lite on
-//      Low, HWRT surface-cache reflections on Medium, texture pools 1000-4500 MB, 16x anisotropy for the grazing cloth);
+//      Low, VSM shadows kept on Low, HWRT surface-cache reflections on Medium, texture pools 1000-4500 MB, 16x anisotropy
+//      for the grazing cloth);
 //   2. the resolution (upscaler input) from [RawBreak.Preset@<level>] ScreenPercentage (TSR now, DLSS later);
 //   3. the RAW BREAK rows [RawBreak.<Option>@<level>] of DefaultScalability.ini, applied at ECVF_SetByGameOverride after the
 //      groups: they follow each option's own level (so a Custom mix stays consistent) and outrank project settings, e.g.

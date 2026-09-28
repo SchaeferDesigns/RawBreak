@@ -1,7 +1,7 @@
 // M1 test room, lux probe (E4) and look-dev camera tests (Docs/ue-architecture.md 8.3, 12 A7 / A8, 13 UE-8). Owner: UE-8.
 //   RawBreak.Unit.Room.LuxProbe_*   the analytic probe against closed forms (T22 Lambertian source, parallel-rectangle form
-//                                   factor, UE's barn-door clipping against the vertical-louvre geometry)
-//   RawBreak.Unit.Room.E4_*         the room's WPA lamp: >= 520 lux on bed and rails, uniformity, ~50 lux ambient, the lamp
+//                                   factor, UE's barn-door clipping against the vertical-louvre geometry, point / spot lights in UE's units)
+//   RawBreak.Unit.Room.E4_*         the room's WPA lamp: >= 520 lux on bed and rails, uniformity, ~50 lux ambient, no blinding at the eye, the lamp
 //                                   follows a moved / yawed table, physical light setup (lumens, source size, 4000 K)
 //   RawBreak.Unit.Room.Validator    the M1 level validator on a complete layout built in a test world (and a broken one)
 //   RawBreak.Unit.LookDev.*         chin-on-cue placement (plan 4.2) and the R-06 optics of the look-dev camera
@@ -14,7 +14,9 @@
 #include "Tests/RbTestFlags.h"
 
 #include "CineCameraComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/RectLightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -187,7 +189,67 @@ bool FRbRoomLuxProbeBarnDoors::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbRoomE4Lamp, "RawBreak.Unit.Room.E4_LampCompliance", RB_UNIT_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbRoomLuxProbePointSpot, "RawBreak.Unit.Room.LuxProbe_PointSpot", RB_UNIT_TEST_FLAGS)
+bool FRbRoomLuxProbePointSpot::RunTest(const FString& Parameters)
+{
+	using namespace RbRoomTestsPrivate;
+	FTestWorld TestWorld;
+	// Point / spot lights 1.5 m above the receiver, photometric units as UE converts them (PointLightComponent.cpp,
+	// SpotLightComponent.cpp): lumens -> Phi / 4 pi (point) or Phi / (2 pi (1 - cos outer)) (spot), nits over the capsule area
+	// 4 pi r (r + l / 2); E = I cos / d^2; spot falloff Square(saturate((cos - cos outer) / (cos inner - cos outer))) on UE's
+	// clamped cone angles (the inner cone wins when it is set wider than the outer one).
+	const double H = 150.0;
+	auto Make = [&TestWorld](UClass* Class, ELightUnits Units, double Intensity) -> UPointLightComponent*
+	{
+		AActor* Holder = TestWorld.World->SpawnActor<AActor>();
+		UPointLightComponent* Light = NewObject<UPointLightComponent>(Holder, Class);
+		Holder->SetRootComponent(Light);
+		Light->SetMobility(EComponentMobility::Movable);
+		Light->SetWorldLocationAndRotation(FVector(0.0, 0.0, 150.0), FRotator(-90.0, 0.0, 0.0));
+		Light->IntensityUnits = Units;
+		Light->Intensity = static_cast<float>(Intensity);
+		Light->AttenuationRadius = 1.0e6f;
+		Light->RegisterComponent();
+		return Light;
+	};
+	auto At = [](const UPointLightComponent* Light, double X) { return ARbTestRoom::IlluminanceFromLight(*Light, FVector(X, 0.0, 0.0), FVector::UpVector); };
+	const double D2Off = (H * H + 80.0 * 80.0) * 1e-4, CosOff = H / FMath::Sqrt(H * H + 80.0 * 80.0);
+
+	const UPointLightComponent* Lumens = Make(UPointLightComponent::StaticClass(), ELightUnits::Lumens, 1000.0);
+	TestNearlyEqual(TEXT("point, 1000 lm: E below = Phi / 4 pi / h^2"), At(Lumens, 0.0), 1000.0 / (4.0 * UE_DOUBLE_PI) / 2.25, 1e-6);
+	TestNearlyEqual(TEXT("point, 1000 lm: cosine law off axis"), At(Lumens, 80.0), 1000.0 / (4.0 * UE_DOUBLE_PI) * CosOff / D2Off, 1e-6);
+	const UPointLightComponent* Candelas = Make(UPointLightComponent::StaticClass(), ELightUnits::Candelas, 300.0);
+	TestNearlyEqual(TEXT("point, 300 cd"), At(Candelas, 0.0), 300.0 / 2.25, 1e-6);
+	UPointLightComponent* Nits = Make(UPointLightComponent::StaticClass(), ELightUnits::Nits, 20000.0);
+	Nits->SourceRadius = 5.0f;
+	Nits->SourceLength = 10.0f;
+	const double NitsCd = 20000.0 * 4.0 * UE_DOUBLE_PI * 5.0 * (5.0 + 5.0) * 1e-4;
+	TestNearlyEqual(TEXT("point, nits over the capsule area (UE)"), At(Nits, 0.0), NitsCd / 2.25, 1e-6);
+
+	USpotLightComponent* Spot = Cast<USpotLightComponent>(Make(USpotLightComponent::StaticClass(), ELightUnits::Lumens, 1000.0));
+	Spot->InnerConeAngle = 10.0f;
+	Spot->OuterConeAngle = 30.0f;
+	const double SpotCd = 1000.0 / (2.0 * UE_DOUBLE_PI * (1.0 - FMath::Cos(FMath::DegreesToRadians(30.0))));
+	TestNearlyEqual(TEXT("spot, 1000 lm in a 30 deg cone: E below"), At(Spot, 0.0), SpotCd / 2.25, 1e-5 * SpotCd); // UE's cone angles are float
+	const double X20 = H * FMath::Tan(FMath::DegreesToRadians(20.0)), D20 = (H * H + X20 * X20) * 1e-4, Cos20 = FMath::Cos(FMath::DegreesToRadians(20.0));
+	const double Fall20 = FMath::Square((Cos20 - FMath::Cos(FMath::DegreesToRadians(30.0))) / (FMath::Cos(FMath::DegreesToRadians(10.0)) - FMath::Cos(FMath::DegreesToRadians(30.0))));
+	TestNearlyEqual(TEXT("spot: penumbra falloff at 20 deg"), At(Spot, X20), SpotCd * Cos20 / D20 * Fall20, 1e-5 * SpotCd);
+	TestEqual(TEXT("spot: nothing outside the outer cone"), At(Spot, H * FMath::Tan(FMath::DegreesToRadians(31.0))), 0.0);
+
+	// Inner cone set wider than the outer one: UE lights up to the inner angle (outer = inner + 0.001 rad).
+	Spot->InnerConeAngle = 40.0f;
+	Spot->OuterConeAngle = 20.0f;
+	const FVector2f Cone = Spot->GetClampedConeAngles();
+	const double CosI = FMath::Cos(static_cast<double>(Cone.X)), CosO = FMath::Cos(static_cast<double>(Cone.Y));
+	const double WideCd = 1000.0 / (2.0 * UE_DOUBLE_PI * (1.0 - CosO));
+	const double X30 = H * FMath::Tan(FMath::DegreesToRadians(30.0)), D30 = (H * H + X30 * X30) * 1e-4, Cos30 = FMath::Cos(FMath::DegreesToRadians(30.0));
+	const double Expected30 = WideCd * Cos30 / D30 * FMath::Square(FMath::Clamp((Cos30 - CosO) / (CosI - CosO), 0.0, 1.0));
+	TestTrue(FString::Printf(TEXT("inverted cone: lit at 30 deg like UE (%.3f vs %.3f lux)"), At(Spot, X30), Expected30),
+		Expected30 > 1.0 && FMath::IsNearlyEqual(At(Spot, X30), Expected30, 1e-5 * Expected30));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbRoomE4Lamp,"RawBreak.Unit.Room.E4_LampCompliance", RB_UNIT_TEST_FLAGS)
 bool FRbRoomE4Lamp::RunTest(const FString& Parameters)
 {
 	using namespace RbRoomTestsPrivate;
@@ -211,7 +273,34 @@ bool FRbRoomE4Lamp::RunTest(const FString& Parameters)
 	TestTrue(TEXT("5 cm grid over bed and rails"), Lamp.BedPoints > 1000 && Lamp.RailPoints > 500);
 	TestTrue(FString::Printf(TEXT("E4: the lamp alone >= 520 lux on bed and rails (min %.1f)"), Lamp.TableMin()), Lamp.TableMin() >= ARbTestRoom::WpaMinLux);
 	TestTrue(FString::Printf(TEXT("uniformity: max / min over bed and rails <= 1.5 (%.2f)"), Lamp.TableUniformity()), Lamp.TableUniformity() <= 1.5);
-	TestTrue(TEXT("no blinding level on the table (< 5000 lux, WPA)"), All.TableMax() < 5000.0);
+	// WPA "blinding" (5000 lux) is about the direct view of the fixture: the illuminance AT THE EYE facing the lamp, from the
+	// places a player looks up from (standing at the head end, down on a shot at the head rail and at the side rail, bent over
+	// the middle of the bed under the canopy). The worst normal is searched over the directions to every section and straight up.
+	{
+		const FVector Bed = Table->GetBedCenterWorld();
+		const FVector Eyes[] = {FVector(-205.0, 0.0, 170.0 - Bed.Z), FVector(-150.0, 0.0, 25.0), FVector(0.0, -90.0, 30.0), FVector(40.0, 20.0, 35.0)};
+		double WorstEye = 0.0;
+		for (const FVector& Local : Eyes)
+		{
+			const FVector Eye = Bed + Local;
+			TArray<FVector> Normals = {FVector::UpVector};
+			for (const URectLightComponent* Light : Room->GetLampLights())
+			{
+				Normals.Add((Light->GetComponentLocation() - Eye).GetSafeNormal());
+			}
+			for (const FVector& Normal : Normals)
+			{
+				double E = 0.0;
+				for (const URectLightComponent* Light : Room->GetLampLights())
+				{
+					E += ARbTestRoom::IlluminanceFromLight(*Light, Eye, Normal);
+				}
+				WorstEye = FMath::Max(WorstEye, E);
+			}
+		}
+		AddInfo(FString::Printf(TEXT("worst illuminance at a player's eye facing the lamp: %.0f lux"), WorstEye));
+		TestTrue(FString::Printf(TEXT("no blinding direct view of the lamp (eye %.0f lux < 5000, WPA)"), WorstEye), WorstEye > 0.0 && WorstEye < 5000.0);
+	}
 	TestTrue(FString::Printf(TEXT("room >= 50 lux everywhere on the walkway (min %.1f)"), All.FloorMin), All.FloorMin >= 50.0);
 	TestTrue(FString::Printf(TEXT("ambient panels ~50 lux (avg %.1f)"), Ambient.FloorAvg),
 		Ambient.FloorAvg >= ARbTestRoom::AmbientMinLux && Ambient.FloorAvg <= ARbTestRoom::AmbientMaxLux);

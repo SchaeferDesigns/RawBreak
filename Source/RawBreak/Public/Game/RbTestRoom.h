@@ -188,8 +188,9 @@ public:
 	FRbLuxReport ComputeLux(double GridCm = 5.0, ERbLuxSources Sources = ERbLuxSources::All) const;
 
 	// Illuminance [lux] at a world point on a surface with the given unit normal from one light: rect lights as Lambertian
-	// emitters with UE's barn-door clipping (RectLight.ush GetRect), point / spot lights as point sources (spot cone
-	// smoothstep); the inverse-square window of the attenuation radius; lights in Lumens / Candelas / Nits (other units -> 0).
+	// emitters with UE's barn-door clipping (RectLight.ush GetRect), point / spot lights as point sources (spot cone falloff on
+	// UE's clamped cone angles); the inverse-square window of the attenuation radius; lights in Lumens / Candelas / Nits (point /
+	// spot Nits over the capsule area, like UE); other units (EV, unitless) and exponent falloff -> 0.
 	static double IlluminanceFromLight(const ULocalLightComponent& Light, const FVector& WorldPoint, const FVector& Normal);
 
 	// The M1 level validator (ue-architecture 13 UE-8): one table at the origin, one room, a PlayerStart at the head end facing

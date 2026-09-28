@@ -1,7 +1,7 @@
 // Quality presets and user settings (Docs/ue-architecture.md 8.1, 13 UE-8; ue5-realism-plan 9.4). Owner: UE-8.
 //   RawBreak.Unit.Settings.PresetLevels     every preset fills every option (Low 0 .. Cinematic 4), screen percentages, Custom
 //   RawBreak.Unit.Settings.Rows_R03         applying a preset sets the renderer: hit-lit reflections from High up (review R-03),
-//                                           surface cache on Low / Medium, Lumen Lite on Low, texture pools, row clean-up
+//                                           surface cache on Low / Medium, Lumen Lite on Low, shadows on Low, texture pools, row clean-up
 //   RawBreak.Unit.Settings.Persistence      the config properties survive a save / load round trip; Custom keeps its options
 //   RawBreak.Unit.Settings.DefaultsHigh     a fresh settings object is High (M1 default) with the Eyes camera
 // The renderer tests change global console variables of the editor process and restore them at the end.
@@ -119,6 +119,7 @@ bool FRbSettingsRows::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Medium: HWRT Lumen reflections (plan 9.4, engine: SSR)"), CVarInt(TEXT("r.Lumen.Reflections.Allow")), 1);
 	TestEqual(TEXT("Medium: Lumen Lite (irradiance field gather)"), CVarInt(TEXT("r.Lumen.FinalGatherMethod")), 0);
 	TestEqual(TEXT("Medium: texture pool 1500 MB"), CVarInt(TEXT("r.Streaming.PoolSize")), 1500);
+	TestTrue(TEXT("Medium: VSM page pool for the room's 14 shadowed lights (>= 1024 pages)"), CVarInt(TEXT("r.Shadow.Virtual.MaxPhysicalPages")) >= 1024);
 
 	S->ApplyQualityPreset(ERbQualityPreset::Low);
 	TestEqual(TEXT("Low: surface cache"), CVarInt(LightingMode), 0);
@@ -127,6 +128,10 @@ bool FRbSettingsRows::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Low: irradiance field gather"), CVarInt(TEXT("r.Lumen.FinalGatherMethod")), 0);
 	TestEqual(TEXT("Low: volumetric fog off"), CVarInt(TEXT("r.VolumetricFog")), 0);
 	TestEqual(TEXT("Low: texture pool 1000 MB"), CVarInt(TEXT("r.Streaming.PoolSize")), 1000);
+	// Plan 9.4 Low = VSM at a lower resolution, not the engine's Low (r.ShadowQuality 0 = no dynamic shadows: floating balls).
+	TestTrue(TEXT("Low: dynamic shadows on (plan 9.4)"), CVarInt(TEXT("r.ShadowQuality")) > 0);
+	TestEqual(TEXT("Low: local-light VSM one level coarser"), CVarInt(TEXT("r.Shadow.Virtual.ResolutionLodBiasLocal")), 1);
+	TestTrue(TEXT("Low: VSM page pool for the room's 14 shadowed lights (>= 1024 pages)"), CVarInt(TEXT("r.Shadow.Virtual.MaxPhysicalPages")) >= 1024);
 	TestNearlyEqual(TEXT("Low: ~55 % internal resolution"), CVarFloat(TEXT("r.ScreenPercentage")), 55.0f, 1e-3f);
 
 	S->ApplyQualityPreset(ERbQualityPreset::Epic);

@@ -197,6 +197,10 @@ namespace RbTestRoomPrivate
 			Intensity = Spot ? Light.Intensity / (2.0 * UE_DOUBLE_PI * (1.0 - Spot->GetCosHalfConeAngle())) : Light.Intensity / (4.0 * UE_DOUBLE_PI);
 			break;
 		case ELightUnits::Candelas: Intensity = Light.Intensity; break;
+		case ELightUnits::Nits:
+			// UE: luminance over the capsule area 4 pi r (r + l / 2) [cm^2] (PointLightComponent / SpotLightComponent.cpp).
+			Intensity = Light.Intensity * 4.0 * UE_DOUBLE_PI * Light.SourceRadius * (Light.SourceRadius + 0.5 * Light.SourceLength) * 1e-4;
+			break;
 		default: return 0.0;
 		}
 		const FVector3d ToPoint = FVector3d(Point) - FVector3d(Light.GetComponentLocation());
@@ -214,9 +218,12 @@ namespace RbTestRoomPrivate
 		double Cone = 1.0;
 		if (Spot)
 		{
-			const double CosOuter = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(static_cast<double>(Spot->OuterConeAngle), 0.0, 89.0)));
-			const double CosInner = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(static_cast<double>(Spot->InnerConeAngle), 0.0, 89.0)));
-			const double InvDiff = 1.0 / FMath::Max(CosInner - CosOuter, 1e-4);
+			// The renderer's cone (GetClampedConeAngles: inner 0..88.9 deg, outer at least 0.001 rad beyond the inner cone), so an
+			// inner cone wider than the outer one is lit like UE lights it, not cut at the smaller outer angle.
+			const FVector2f ConeAngles = Spot->GetClampedConeAngles();
+			const double CosInner = FMath::Cos(static_cast<double>(ConeAngles.X));
+			const double CosOuter = FMath::Cos(static_cast<double>(ConeAngles.Y));
+			const double InvDiff = 1.0 / FMath::Max(CosInner - CosOuter, 1e-9);
 			const double C = FMath::Clamp((FVector3d::DotProduct(Dir, FVector3d(Spot->GetForwardVector())) - CosOuter) * InvDiff, 0.0, 1.0);
 			Cone = C * C;
 		}
