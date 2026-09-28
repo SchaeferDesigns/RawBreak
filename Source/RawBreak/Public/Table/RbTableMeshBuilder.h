@@ -105,7 +105,8 @@ namespace RbTableMeshBuilder
 	// Object path <package>.SM_Table_<Part> (for soft references / LoadObject).
 	RAWBREAK_API FString GetBakedMeshObjectPath(ERbTablePreset Preset, ERbTablePart Part);
 
-	// Bake / runtime policy per part: complex-as-simple collision (pawn, cue sweeps) and Nanite (not on the thin sights).
+	// Bake / runtime policy per part: complex-as-simple collision (pawn, cue sweeps, traces; every part, so the collision surface is
+	// the rendered one) and Nanite (not on the thin sights).
 	RAWBREAK_API bool PartHasCollision(ERbTablePart Part);
 	RAWBREAK_API bool PartUsesNanite(ERbTablePart Part);
 }

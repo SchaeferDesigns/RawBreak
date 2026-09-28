@@ -30,6 +30,25 @@ namespace RbTablePrivate
 		}
 		return Cast<T>(Path.TryLoad());
 	}
+
+	// The table frame is translation + yaw only (Docs/ue-architecture.md 4: ClothOrigin = translation + yaw, scale 1): the physics
+	// knows no tilted table (gravity along -z) and FRbCoords maps table-local centimetres 1:1, so a scaled or tilted actor would
+	// put the rendered balls, cue and aim somewhere else than the simulation. Such a placement is reset (with a warning).
+	void KeepUprightAndUnscaled(ARbTable& Table)
+	{
+		const FTransform& Transform = Table.GetActorTransform();
+		const FRotator Rotation = Transform.Rotator();
+		const bool bScaled = !Transform.GetScale3D().Equals(FVector::OneVector, 1e-9);
+		const bool bTilted = !FMath::IsNearlyZero(Rotation.Pitch, 1e-6) || !FMath::IsNearlyZero(Rotation.Roll, 1e-6);
+		if (!bScaled && !bTilted)
+		{
+			return;
+		}
+		UE_LOG(LogRawBreak, Warning, TEXT("ARbTable %s: a table is placed upright and unscaled (was rotation %s, scale %s); reset to yaw %.4f deg, scale 1"),
+			*Table.GetName(), *Rotation.ToString(), *Transform.GetScale3D().ToString(), Rotation.Yaw);
+		Table.SetActorScale3D(FVector::OneVector);
+		Table.SetActorRotation(FRotator(0.0, Rotation.Yaw, 0.0));
+	}
 }
 
 ARbTable::ARbTable()
@@ -160,15 +179,18 @@ void ARbTable::RebuildMeshes()
 				continue;
 			}
 			UDynamicMeshComponent* DynamicComponent = NewObject<UDynamicMeshComponent>(this, Name, RF_Transient);
+			// Complex-as-simple BEFORE the mesh: SetMesh cooks the body right away with the component's collision type (the
+			// default, simple-as-complex, cooks nothing for a mesh without simple shapes), and a later switch only marks the
+			// body dirty - the part would have no collision at all (RawBreak.Unit.Table.Collision).
+			if (RbTableMeshBuilder::PartHasCollision(Part))
+			{
+				DynamicComponent->SetComplexAsSimpleCollisionEnabled(true, false);
+			}
 			DynamicComponent->SetMesh(MoveTemp(Mesh));
 			DynamicComponent->SetTangentsType(EDynamicMeshComponentTangentsMode::ExternallyProvided);
 			if (Material)
 			{
 				DynamicComponent->SetMaterial(0, Material);
-			}
-			if (RbTableMeshBuilder::PartHasCollision(Part))
-			{
-				DynamicComponent->SetComplexAsSimpleCollisionEnabled(true, false);
 			}
 			Component = DynamicComponent;
 		}
@@ -241,6 +263,7 @@ bool ARbTable::IsPartBaked(ERbTablePart Part) const
 void ARbTable::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	RbTablePrivate::KeepUprightAndUnscaled(*this);
 	// The editor re-runs construction on every move / property edit: rebuild only when something the table depends on
 	// changed (or the transient parts are gone, e.g. after a duplication).
 	if (!Context.IsValid() || BuiltKey != MakeBuildKey() || PartComponents.Num() == 0)
@@ -252,6 +275,7 @@ void ARbTable::OnConstruction(const FTransform& Transform)
 void ARbTable::BeginPlay()
 {
 	Super::BeginPlay();
+	RbTablePrivate::KeepUprightAndUnscaled(*this);
 	// Loaded / PIE-duplicated tables carry neither the context (plain C++) nor the transient part components.
 	if (!Context.IsValid() || BuiltKey != MakeBuildKey() || PartComponents.Num() == 0)
 	{

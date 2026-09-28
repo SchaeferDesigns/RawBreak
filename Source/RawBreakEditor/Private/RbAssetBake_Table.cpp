@@ -1,7 +1,7 @@
 // Table bake (Owner: UE-1): FRbTableContext for Preset -> RbTableMeshBuilder::BuildAll -> WriteStaticMesh per part to
 // <RbAssetPaths::TableMeshDir>/<Preset>/SM_Table_<Part> (RbTableMeshBuilder::GetBakedMeshPackagePath) with the part's
 // default material (RbAssetPaths, when it exists), Nanite with a 100 % fallback on every part but the thin sights
-// (review R-02), complex-as-simple collision on everything but the sights. The same builder and options feed the
+// (review R-02), complex-as-simple collision on every part (RbTableMeshBuilder::PartHasCollision). The same builder and options feed the
 // runtime UDynamicMeshComponent path of ARbTable, so a baked part has exactly the runtime triangle count (checked here
 // and by RawBreak.Unit.Table.BakedMatchesRuntime).
 

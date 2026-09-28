@@ -5,12 +5,15 @@
 // It is also the ONLY place that maps the table-local core frame into the world (FRbCoords + the ClothOrigin
 // transform). Owner: UE-1 (the header is a UE-0 contract: additions allowed, no signature changes).
 //
+// Placement: translation + yaw only (the physics has no tilted table and FRbCoords maps centimetres 1:1); a scaled or tilted
+// actor is reset to upright and unscaled at construction / BeginPlay, with a warning.
 // Components:  Root (floor, actor location) -> ClothOrigin (bed centre on the cloth, +BedHeight, no rotation /
 // scale relative to the actor) -> one mesh component per ERbTablePart: a UStaticMeshComponent with the baked asset
 // <RbAssetPaths::TableMeshDir>/<Preset>/SM_Table_<Part> when it exists and bUseBakedMeshes, otherwise a
 // UDynamicMeshComponent built at runtime by RbTableMeshBuilder (same data; baked = Nanite / Lumen cards / HWRT).
-// Collision: complex-as-simple on the cloth, cushions, caps and apron (pawn walking, cue sweeps); balls never use
-// Chaos (plan pitfall 23).
+// Collision: complex-as-simple on every part (the render triangles; pawn walking, traces - UE-4's cue sweep ignores the table,
+// whose rails it handles analytically); baked parts get the body cooked at bake time, runtime parts when the mesh is set.
+// Balls never use Chaos (plan pitfall 23).
 // The part components are TRANSIENT (RF_Transient, tagged PartComponentTag): OnConstruction builds them in the editor,
 // BeginPlay rebuilds them in PIE / -game, and a saved level never stores (stale) meshes - a changed TableSpec shows up
 // on the next load.

@@ -2,13 +2,18 @@
 //   ClosedBoundaries   every part of every preset is a set of closed, consistently oriented solids
 //   OutwardNormals     every solid has positive volume with UE's triangle-normal convention (outward in UE space) and
 //                      the shading normals agree with the faces
-//   NoseLine           the cushion nose line / jaw arcs at z = h are exactly BuildNoseOutline (0.01 mm)
+//   NoseLine           the cushion nose line / jaw arcs at z = h are exactly BuildNoseOutline (0.01 mm); the facings lie in the
+//                      physics' undercut facing planes
 //   PocketCuts         capture cylinder r_p through bed, cushions, caps and apron; slate drop rounding r_d (torus)
 //   Sights             18 flush sights at Sight::Position with SightDiameter, caps drilled for them
 //   BedAndBounds       bed top z = 0, slate thickness, part bounds = cushion-back rectangle / OuterBoundary (+ apron)
 //   PhysicsSurfaces    the top surfaces seen from above = cloth plane over the playing area, RailTopPolygon planes on the rails
-//   BakedMatchesRuntime  the baked SM_Table_* assets carry exactly the runtime meshes (triangles, bounds, Nanite 100 %)
-//   Frames             CoreToWorld / WorldToCore / directions / orientations / azimuth round trips (translated + yawed)
+//   BakedMatchesRuntime  the baked SM_Table_* assets carry exactly the runtime meshes (triangles, vertices = no geometry drift,
+//                      bounds, Nanite 100 %)
+//   Frames             CoreToWorld / WorldToCore / directions / orientations / azimuth round trips (translated + yawed); a
+//                      scaled / tilted placement is reset to upright and unscaled
+//   Collision          every part collides complex-as-simple (baked AND runtime components); the collision triangles are the
+//                      render triangles: ray casts hit cloth, cushion top, rail caps, a sight and the apron on the physics surfaces
 //   TransientParts     part components are transient, rebuilt at BeginPlay; a saved + reloaded level stores no meshes
 // Tolerances: 0.01 mm = 1e-3 cm for geometry (the builder reproduces the physics surfaces to 1e-6 cm).
 
@@ -18,6 +23,7 @@
 #include "Table/RbTableMeshBuilder.h"
 #include "Tests/RbTestFlags.h"
 
+#include "Components/DynamicMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DynamicMesh/DynamicMesh3.h"
@@ -29,6 +35,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/WorldSettings.h"
 #include "HAL/FileManager.h"
+#include "Interfaces/Interface_CollisionDataProvider.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -449,6 +456,39 @@ bool FRbTableNoseLine::RunTest(const FString& Parameters)
 		const FAxisAlignedBox3d Box = Bounds(Mesh);
 		TestNearlyEqual(Name + TEXT(" top = RailTopZ"), Box.Max.Z, FRbCoords::CmPerMeter * G.Spec.RailTopZ, 1e-6);
 		TestNearlyEqual(Name + TEXT(" bottom on the cloth"), Box.Min.Z, 0.0, 1e-6);
+
+		// (4) the rendered facings ARE the physics' undercut facing planes: every cushion triangle facing along a Facing's
+		// normal (PocketNormal tilted down by the back draft) near that facing lies in its plane (through the plan line at h).
+		for (const rb::Facing& Fa : G.Facings)
+		{
+			const rb::Vec3 N(Fa.PocketNormal.x * FMath::Cos(Fa.Backdraft), Fa.PocketNormal.y * FMath::Cos(Fa.Backdraft), -FMath::Sin(Fa.Backdraft));
+			const rb::Vec3 S(Fa.Start.x, Fa.Start.y, H);
+			const FVector3d MidUE = ToUECm((Fa.Start + Fa.End) * 0.5, 0.5 * H);
+			double FacingArea = 0.0;
+			int32 OffPlane = 0;
+			for (const int32 Tid : Mesh.TriangleIndicesItr())
+			{
+				FVector3d A;
+				FVector3d B;
+				FVector3d C;
+				Mesh.GetTriVertices(Tid, A, B, C);
+				const FVector3d Centroid = (A + B + C) / 3.0;
+				const rb::Vec3 Normal = FRbCoords::DirectionToCore(VectorUtil::Normal(A, B, C));
+				if (FVector3d::Dist(Centroid, MidUE) > 10.0 || Normal.x * N.x + Normal.y * N.y + Normal.z * N.z < 1.0 - 1e-9)
+				{
+					continue;
+				}
+				FacingArea += VectorUtil::Area(A, B, C);
+				for (const FVector3d& V : {A, B, C})
+				{
+					const rb::Vec3 P = FRbCoords::PositionToCore(V);
+					OffPlane += FMath::Abs((P.x - S.x) * N.x + (P.y - S.y) * N.y + (P.z - S.z) * N.z) * FRbCoords::CmPerMeter > kTolCm ? 1 : 0;
+				}
+			}
+			const FString FacingName = Name + FString::Printf(TEXT(" facing of pocket %d side %d"), static_cast<int32>(Fa.Pocket), static_cast<int32>(Fa.Side));
+			TestTrue(FacingName + TEXT(" is rendered"), FacingArea > 0.5); // cm^2
+			TestEqual(FacingName + TEXT(" vertices off the physics facing plane"), OffPlane, 0);
+		}
 	}
 	return true;
 }
@@ -954,6 +994,52 @@ bool FRbTableBakedMatchesRuntime::RunTest(const FString& Parameters)
 #if WITH_EDITORONLY_DATA
 			const FMeshDescription* Source = Mesh->GetMeshDescription(0);
 			TestTrue(Name + TEXT(" source triangles == runtime"), Source && Source->Triangles().Num() == Runtime.TriangleCount());
+			if (Source)
+			{
+				// Geometry drift (plan pitfall 16): a bake from an older TableSpec / builder can keep every triangle count and even
+				// the bounds (e.g. a changed mouth width moves only the jaws). Every baked vertex must be a current runtime vertex.
+				TestEqual(Name + TEXT(" source vertices == runtime"), Source->Vertices().Num(), Runtime.VertexCount());
+				TMap<FIntVector, TArray<int32>> Cells;
+				const double Cell = 0.01; // cm
+				auto CellOf = [Cell](const FVector3d& P) {
+					return FIntVector(FMath::FloorToInt32(P.X / Cell), FMath::FloorToInt32(P.Y / Cell), FMath::FloorToInt32(P.Z / Cell));
+				};
+				for (const int32 Vid : Runtime.VertexIndicesItr())
+				{
+					Cells.FindOrAdd(CellOf(Runtime.GetVertex(Vid))).Add(Vid);
+				}
+				const TVertexAttributesConstRef<FVector3f> Positions = Source->GetVertexPositions();
+				int32 Drifted = 0;
+				double WorstDrift = 0.0;
+				for (const FVertexID VertexID : Source->Vertices().GetElementIDs())
+				{
+					const FVector3d P(Positions[VertexID]);
+					double Best = TNumericLimits<double>::Max();
+					const FIntVector Key = CellOf(P);
+					for (int32 Dz = -1; Dz <= 1; ++Dz)
+					{
+						for (int32 Dy = -1; Dy <= 1; ++Dy)
+						{
+							for (int32 Dx = -1; Dx <= 1; ++Dx)
+							{
+								if (const TArray<int32>* Bucket = Cells.Find(Key + FIntVector(Dx, Dy, Dz)))
+								{
+									for (const int32 Vid : *Bucket)
+									{
+										Best = FMath::Min(Best, FVector3d::Dist(Runtime.GetVertex(Vid), P));
+									}
+								}
+							}
+						}
+					}
+					Drifted += Best > kTolCm ? 1 : 0;
+					WorstDrift = FMath::Max(WorstDrift, FMath::Min(Best, 1e9));
+				}
+				if (Drifted > 0)
+				{
+					AddError(FString::Printf(TEXT("%s: %d baked vertices are not runtime vertices (worst %.6g cm) - re-run rb_bake_table.py"), *Name, Drifted, WorstDrift));
+				}
+			}
 #endif
 			const FAxisAlignedBox3d RuntimeBox = Bounds(Runtime);
 			const FBox BakedBox = Mesh->GetBoundingBox();
@@ -1071,6 +1157,200 @@ bool FRbTableFrames::RunTest(const FString& Parameters)
 		const FBoxSphereBounds B = BedComponent->Bounds;
 		TestNearlyEqual(TEXT("bed top at the world cloth height"), B.Origin.Z + B.BoxExtent.Z, Location.Z + BedCm, 1e-3);
 		TestTrue(TEXT("bed attached to ClothOrigin"), BedComponent->GetAttachParent() == Table->GetClothOrigin());
+	}
+
+	// The frame is translation + yaw, scale 1: a scaled / tilted placement is reset (FRbCoords maps centimetres 1:1, the physics
+	// has no tilted table), so CoreToWorld stays exact.
+	AddExpectedMessage(TEXT("a table is placed upright and unscaled"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 0);
+	const FTransform Bad(FRotator(10.0, 37.0, -5.0), Location, FVector(2.0, 2.0, 0.5));
+	ARbTable* Tilted = TestWorld.World->SpawnActor<ARbTable>(ARbTable::StaticClass(), Bad);
+	if (TestNotNull(TEXT("tilted + scaled table spawned"), Tilted))
+	{
+		const FTransform Fixed = Tilted->GetTableToWorld();
+		TestTrue(TEXT("reset to scale 1"), Fixed.GetScale3D().Equals(FVector::OneVector, 1e-9));
+		TestTrue(TEXT("reset to yaw only"), Fixed.GetRotation().Equals(Rotation.Quaternion(), 1e-9));
+		TestTrue(TEXT("cloth origin BedHeight above the actor"), Fixed.GetLocation().Equals(Location + FVector(0.0, 0.0, BedCm), 1e-6));
+		TestTrue(TEXT("core +z -> world up"), Tilted->CoreDirectionToWorld(rb::Vec3(0.0, 0.0, 1.0)).Equals(FVector::UpVector, 1e-9));
+	}
+	return true;
+}
+
+// Collision of the part components (pawn walking, cue sweeps, traces), for the baked static meshes AND the runtime dynamic
+// meshes, in a translated + yawed table: every part with collision blocks with complex-as-simple collision (so SIMPLE
+// queries - a character capsule, a cue sweep - use the triangles), and the triangle data the physics cooks from
+// (IInterface_CollisionDataProvider) is the render mesh: ray casts against it hit the cloth, cushion tops, rail caps and
+// the apron exactly where the physics surfaces are. (The data is checked directly: a never-ticking test world creates the
+// bodies of freshly loaded meshes late, which says nothing about the table.)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbTableCollision, "RawBreak.Unit.Table.Collision", RB_UNIT_TEST_FLAGS)
+bool FRbTableCollision::RunTest(const FString& Parameters)
+{
+	using namespace RbTableTestsPrivate;
+	for (const bool bBaked : {true, false})
+	{
+		for (const ERbTablePreset Preset : kBakedPresets)
+		{
+			const FString Name = RbTableMeshBuilder::GetPresetName(Preset) + (bBaked ? TEXT(" baked") : TEXT(" runtime"));
+			FTestWorld TestWorld;
+			ARbTable* Table = TestWorld.World->SpawnActor<ARbTable>(FVector(-210.0, 75.0, 3.0), FRotator(0.0, -23.0, 0.0));
+			if (!TestNotNull(Name + TEXT(" table spawned"), Table))
+			{
+				continue;
+			}
+			Table->Preset = Preset;
+			Table->bUseBakedMeshes = bBaked;
+			Table->RebuildTable();
+			if (!TestTrue(Name + TEXT(" context"), Table->HasContext()))
+			{
+				continue;
+			}
+			TestEqual(Name + TEXT(" part kind"), Table->IsPartBaked(ERbTablePart::Bed), bBaked);
+			const FBuiltTable* Built = GetBuilt(*this, Preset);
+			const rb::TableGeometry& G = Table->GetContext().Geometry;
+			const rb::TableSpec& Spec = G.Spec;
+			const double Cm = FRbCoords::CmPerMeter;
+
+			// World-space collision triangles of every part with collision.
+			struct FCollisionTri
+			{
+				FVector A, B, C;
+				ERbTablePart Part;
+			};
+			TArray<FCollisionTri> Tris;
+			for (int32 PartIndex = 0; PartIndex < static_cast<int32>(ERbTablePart::Count); ++PartIndex)
+			{
+				const ERbTablePart Part = static_cast<ERbTablePart>(PartIndex);
+				UPrimitiveComponent* Component = Table->GetPartComponent(Part);
+				const FString PartName = Name + TEXT(" ") + RbTypes::ToString(Part);
+				if (!TestNotNull(PartName + TEXT(" component"), Component))
+				{
+					continue;
+				}
+				const bool bCollision = RbTableMeshBuilder::PartHasCollision(Part);
+				TestEqual(PartName + TEXT(" query and physics collision"), Component->GetCollisionEnabled() == ECollisionEnabled::QueryAndPhysics, bCollision);
+				if (!bCollision)
+				{
+					continue;
+				}
+				TestEqual(PartName + TEXT(" blocks pawns"), Component->GetCollisionResponseToChannel(ECC_Pawn), ECR_Block);
+				UBodySetup* Body = Component->GetBodySetup();
+				TestTrue(PartName + TEXT(" complex-as-simple body"), Body && Body->CollisionTraceFlag == ECollisionTraceFlag::CTF_UseComplexAsSimple);
+				IInterface_CollisionDataProvider* Provider = nullptr;
+				int32 RenderTriangles = 0;
+				if (UStaticMeshComponent* Static = Cast<UStaticMeshComponent>(Component))
+				{
+					Provider = Static->GetStaticMesh();
+					RenderTriangles = Static->GetStaticMesh() ? Static->GetStaticMesh()->GetNumTriangles(0) : 0;
+				}
+				else if (UDynamicMeshComponent* Dynamic = Cast<UDynamicMeshComponent>(Component))
+				{
+					Provider = Dynamic;
+					RenderTriangles = Dynamic->GetMesh()->TriangleCount();
+					// The runtime body is cooked synchronously when the mesh is set: its triangle mesh must exist.
+					TestTrue(PartName + TEXT(" cooked triangle mesh"), Body && Body->TriMeshGeometries.Num() > 0);
+				}
+				if (!TestTrue(PartName + TEXT(" provides complex collision"), Provider && Provider->ContainsPhysicsTriMeshData(true)))
+				{
+					continue;
+				}
+				FTriMeshCollisionData Data;
+				TestTrue(PartName + TEXT(" collision triangles"), Provider->GetPhysicsTriMeshData(&Data, true));
+				// The physics drops (or its cooker cleans away) degenerate slivers - the few thin ears of the finely sampled jaw
+				// arcs (< 0.002 mm^2); every other render triangle is a collision triangle.
+				const FDynamicMesh3* Source = Built ? &Built->Meshes.Get(Part) : nullptr;
+				int32 SourceSolid = 0;
+				if (Source)
+				{
+					for (const int32 Tid : Source->TriangleIndicesItr())
+					{
+						FVector3d A;
+						FVector3d B;
+						FVector3d C;
+						Source->GetTriVertices(Tid, A, B, C);
+						SourceSolid += FVector3f::CrossProduct(FVector3f(A - B), FVector3f(A - C)).SizeSquared() >= UE_SMALL_NUMBER ? 1 : 0;
+					}
+					TestEqual(PartName + TEXT(" render triangles == builder"), RenderTriangles, Source->TriangleCount());
+				}
+				int32 DataSolid = 0;
+				for (const FTriIndices& T : Data.Indices)
+				{
+					DataSolid += FVector3f::CrossProduct(Data.Vertices[T.v0] - Data.Vertices[T.v1], Data.Vertices[T.v0] - Data.Vertices[T.v2]).SizeSquared() >= UE_SMALL_NUMBER ? 1 : 0;
+				}
+				TestEqual(PartName + TEXT(" collision triangles == render triangles (without slivers)"), DataSolid, SourceSolid);
+				const FTransform ToWorld = Component->GetComponentTransform();
+				for (const FTriIndices& T : Data.Indices)
+				{
+					Tris.Add({ToWorld.TransformPosition(FVector(Data.Vertices[T.v0])), ToWorld.TransformPosition(FVector(Data.Vertices[T.v1])),
+						ToWorld.TransformPosition(FVector(Data.Vertices[T.v2])), Part});
+				}
+			}
+
+			// Nearest ray hit (Moeller-Trumbore) over the collision triangles.
+			auto RayCast = [&Tris](const FVector& Start, const FVector& End, FVector& OutPoint, ERbTablePart& OutPart) {
+				const FVector D = End - Start;
+				double Best = 1.0 + 1e-9;
+				for (const FCollisionTri& T : Tris)
+				{
+					const FVector E1 = T.B - T.A;
+					const FVector E2 = T.C - T.A;
+					const FVector P = D.Cross(E2);
+					const double Det = E1.Dot(P);
+					if (FMath::Abs(Det) < 1e-12)
+					{
+						continue;
+					}
+					const FVector S = Start - T.A;
+					const double U = S.Dot(P) / Det;
+					const FVector Q = S.Cross(E1);
+					const double V = D.Dot(Q) / Det;
+					const double Tt = E2.Dot(Q) / Det;
+					if (U >= -1e-9 && V >= -1e-9 && U + V <= 1.0 + 1e-9 && Tt >= 0.0 && Tt < Best)
+					{
+						Best = Tt;
+						OutPart = T.Part;
+					}
+				}
+				OutPoint = Start + D * Best;
+				return Best <= 1.0;
+			};
+			struct FProbe
+			{
+				const TCHAR* What;
+				rb::Vec3 From;
+				rb::Vec3 To;
+				double Expected; // expected core coordinate [m] (z, or x for the horizontal probe)
+				bool bHorizontal;
+				ERbTablePart Part;
+			};
+			const double Hl = G.HalfLength;
+			const double Hw = G.HalfWidth;
+			const double K = (Spec.RailTopZ - Spec.CushionNoseHeight) / Spec.CushionWidth;
+			const double Mid = 0.5 * (Spec.CushionWidth + Spec.RailWidthTotal); // rail cap, between the cushion back and the outer edge
+			const double OuterX = G.OuterBoundary.Hi.x;
+			const rb::Vec3 Sight = G.Sights[2].Position;
+			const FProbe Probes[] = {
+				{TEXT("bed centre"), rb::Vec3(0.0, 0.0, 0.5), rb::Vec3(0.0, 0.0, -0.5), 0.0, false, ERbTablePart::Bed},
+				{TEXT("bed near the foot spot"), rb::Vec3(0.5 * Hl, -0.3 * Hw, 0.5), rb::Vec3(0.5 * Hl, -0.3 * Hw, -0.5), 0.0, false, ERbTablePart::Bed},
+				{TEXT("cushion top"), rb::Vec3(0.25 * Hl, Hw + 0.5 * Spec.CushionWidth, 0.5), rb::Vec3(0.25 * Hl, Hw + 0.5 * Spec.CushionWidth, -0.5),
+					Spec.CushionNoseHeight + K * 0.5 * Spec.CushionWidth, false, ERbTablePart::CushionCloth},
+				{TEXT("rail cap"), rb::Vec3(-0.3 * Hl, -Hw - Mid, 0.5), rb::Vec3(-0.3 * Hl, -Hw - Mid, -0.5), Spec.RailTopZ, false, ERbTablePart::RailCaps},
+				{TEXT("end rail cap"), rb::Vec3(Hl + Mid, 0.1 * Hw, 0.5), rb::Vec3(Hl + Mid, 0.1 * Hw, -0.5), Spec.RailTopZ, false, ERbTablePart::RailCaps},
+				{TEXT("apron from outside"), rb::Vec3(OuterX + 1.0, 0.05, -0.08), rb::Vec3(0.0, 0.05, -0.08), OuterX, true, ERbTablePart::Apron},
+				{TEXT("sight (flush, the cap is drilled under it)"), rb::Vec3(Sight.x + 0.001, Sight.y + 0.0015, 0.5), rb::Vec3(Sight.x + 0.001, Sight.y + 0.0015, -0.5),
+					Spec.RailTopZ, false, ERbTablePart::Sights},
+			};
+			for (const FProbe& Probe : Probes)
+			{
+				FVector Point;
+				ERbTablePart Part = ERbTablePart::Count;
+				if (!TestTrue(Name + TEXT(" collision under the ") + Probe.What, RayCast(Table->CoreToWorld(Probe.From), Table->CoreToWorld(Probe.To), Point, Part)))
+				{
+					continue;
+				}
+				const rb::Vec3 Core = Table->WorldToCore(Point);
+				TestNearlyEqual(Name + TEXT(" collision surface at the ") + Probe.What, Cm * (Probe.bHorizontal ? Core.x : Core.z), Cm * Probe.Expected, 1e-3);
+				TestEqual(Name + TEXT(" collision part at the ") + Probe.What, static_cast<int32>(Part), static_cast<int32>(Probe.Part));
+			}
+		}
 	}
 	return true;
 }

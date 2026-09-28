@@ -4,7 +4,7 @@
   python Tools/unreal/rbue.py py Tools/unreal/editor/rb_bake_table.py NINE_FOOT_PRO ...     # explicit presets
 
 Writes /Game/Generated/Tables/<Preset>/SM_Table_<Part> for every ERbTablePart (Docs/ue-architecture.md 5.3): Nanite with a
-100 % fallback on every part but the thin sights (review R-02), complex-as-simple collision (pawn, cue sweeps), the part's
+100 % fallback on every part but the thin sights (review R-02), complex-as-simple collision on every part, the part's
 generated material when UE-3's materials exist. Idempotent: every run overwrites the assets from the current TableSpec, so
 the assets are caches of code (pitfall 16). ARbTable loads them when present and falls back to the runtime dynamic meshes.
 The C++ side already checks that each asset carries exactly the runtime mesh; this script re-checks what Python can see

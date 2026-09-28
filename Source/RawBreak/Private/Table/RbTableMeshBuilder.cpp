@@ -357,8 +357,9 @@ namespace RbTableMeshBuilderPrivate
 		}
 
 	private:
-		static FV3 ToUE(const FV3& P) { return FV3(FRbCoords::CmPerMeter * P.X, -FRbCoords::CmPerMeter * P.Y, FRbCoords::CmPerMeter * P.Z); }
-		static FV3 DirToUE(const FV3& D) { return FV3(D.X, -D.Y, D.Z).GetSafeNormal(); }
+		// The one core <-> UE mirror (Docs/ue-architecture.md 4): FRbCoords, never a local copy of it.
+		static FV3 ToUE(const FV3& P) { return FRbCoords::PositionToUE(rb::Vec3(P.X, P.Y, P.Z)); }
+		static FV3 DirToUE(const FV3& D) { return FRbCoords::DirectionToUE(rb::Vec3(D.X, D.Y, D.Z)).GetSafeNormal(); }
 
 		int32 Weld(const FV3& P)
 		{
@@ -2624,7 +2625,9 @@ namespace RbTableMeshBuilder
 
 	bool PartHasCollision(ERbTablePart Part)
 	{
-		return Part != ERbTablePart::Sights;
+		// Every part, the flush sights included: the rail caps are drilled through for them, so without the sights the collision
+		// surface would have 18 holes CapThickness deep in the rail top (traces 2 cm too low there; RawBreak.Unit.Table.Collision).
+		return Part != ERbTablePart::Count;
 	}
 
 	bool PartUsesNanite(ERbTablePart Part)

@@ -68,6 +68,9 @@ def cameras() -> list:
 	# Pocket mouth from the bed (cut angle, jaws, facings, shelf, drop rounding, liner collar).
 	out.append(("PocketMouth", table_point(n, n["hl"] - 12.0, -n["hw"] + 12.0, 9.0), table_point(n, n["hl"] + 6.0, -n["hw"] - 6.0, -4.0), 60.0))
 	out.append(("Bar_PocketMouth", table_point(b, b["hl"] - 12.0, -b["hw"] + 12.0, 9.0), table_point(b, b["hl"] + 6.0, -b["hw"] - 6.0, -4.0), 60.0))
+	# Corner pocket straight from above (plan outline: jaw arcs, facings, capture circle r_p, collar ring, bar liner strips).
+	out.append(("PocketTop", table_point(n, n["hl"] - 2.0, -n["hw"] + 2.0, 45.0), None, 40.0))
+	out.append(("Bar_PocketTop", table_point(b, b["hl"] - 2.0, -b["hw"] + 2.0, 45.0), None, 40.0))
 	# Three-quarter views: rails, apron, legs / cabinet.
 	out.append(("ThreeQuarter", table_point(n, -290.0, 250.0, 110.0), table_point(n, 0.0, 0.0, -25.0), 45.0))
 	out.append(("Bar_ThreeQuarter", table_point(b, -240.0, 230.0, 100.0), table_point(b, 0.0, 0.0, -25.0), 45.0))
@@ -100,6 +103,11 @@ def spawn_table(t: dict, label: str, mats: list) -> unreal.Actor:
 	table.set_editor_property("use_baked_meshes", True)
 	table.set_editor_property("part_materials", mats)
 	table.rebuild_table()
+	# The camera placements above use the preset's numbers: check them against the table's own geometry (bed height).
+	bed = table.get_bed_center_world()
+	ox, oy, oz = t["origin"]
+	if abs(bed.x - ox) > 1e-3 or abs(bed.y - oy) > 1e-3 or abs(bed.z - (oz + t["bed"])) > 1e-3:
+		rb.fail(f"{label}: bed centre {bed} does not match the dev-map numbers (origin {t['origin']}, bed {t['bed']} cm)")
 	return table
 
 
