@@ -1,0 +1,15 @@
+// RAW BREAK - analytic ball occlusion on the cloth (ue5-realism-plan 6.5, test T19; Docs/ue-architecture.md 8.3).
+// Occ(rho) = R^3 / (rho^2 + R^2)^(3/2) for a sphere of radius R resting on the plane, rho = horizontal distance
+// from the contact point. The cloth multiplies ambient / indirect light by prod_i (1 - Occ_i) over the balls,
+// whose positions arrive through the material parameter collection MPC_RbBalls (RbAssetPaths.h).
+// Units: world centimetres everywhere (pitfall 24).
+//
+// TODO(UE-3): implement RbBallOcclusion over up to 16 balls read from the MPC.
+
+#pragma once
+
+float RbSphereOcclusion(float Rho, float R)
+{
+	const float D2 = Rho * Rho + R * R;
+	return (R * R * R) / (D2 * sqrt(D2));
+}

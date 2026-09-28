@@ -45,3 +45,6 @@ build-*/
 
 # Claude Code agent worktrees / local state
 .claude/
+
+# Scratch UE content made by pipeline checks / per-WP dev maps (generated content lives in Content/Generated)
+Content/Dev/

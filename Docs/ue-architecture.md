@@ -1,0 +1,568 @@
+# RAW BREAK — Unreal Architecture (road to the first playable, M1)
+
+| | |
+|---|---|
+| Document | `Docs/ue-architecture.md` |
+| Status | v1.1 (2026-09-27), UE-0 delivered and adversarially reviewed (section 16): module layout, compiling skeleton of every class (TODO(UE-x) markers), config, headless pipeline proven on the dev PC (build, Python level + bake, PIE tests, headless screenshot). Frozen for the parallel work packages UE-1..UE-8. |
+| Scope | The Unreal Engine 5.8.3 side of RAW BREAK up to milestone **M1 "first playable"**. The engine-agnostic core `BilliardsCore` (Docs/architecture.md) is complete and stays untouched. |
+| Sources of truth | `Docs/specs/ue5-realism-plan.md` (**UE** below: camera 4.x, body/input/cue 5.x, adapter 5.6, playback 5.7, rendering 6.x, settings 9.4, tests 13), `Docs/specs/human-factors.md` (**HF**, layers UG/UA/US), `Docs/specs/rules.md` (**RUL**, what the match UI must show), `Docs/decisions.md`, `Docs/architecture.md` sections 7 and 13 (the core API and the integration contract). |
+| Code | `Source/RawBreak/**` (game module), `Source/RawBreakEditor/**` (editor tools), `Source/RawBreakShaders/**` + `Shaders/**` (shader directory), `Tools/unreal/**` (headless pipeline), `Config/*.ini`, `RawBreak.uproject` |
+
+---
+
+## 0. Where this sits in the plan
+
+| Round | Content | State |
+|---|---|---|
+| 1-2 | `BilliardsCore`: physics, geometry, rules, player model, playback, rbsim (WP-0..WP-9, WP-11), 896 tests | done, merged |
+| (parallel) | WP-10 validation & benchmarks of the core (pooltool cross-checks, performance) | pending, independent of Unreal |
+| **3 = this document (UE-0)** | Unreal architecture, compiling skeleton, headless pipeline proof | **done** |
+| 4 = UE wave A + B | implementation of UE-1..UE-8 (UE-6 split into 6a/6b; section 13) in worktrees + reviewers | next |
+| 5 = UE integration | merge, cross-package fixes, M1 acceptance (section 12), **user playtest** | then |
+
+There is no extra round between the core and the playable version: round 3 *is* the start of the Unreal phase. M1 is
+reached when the work packages of section 13 are merged and the acceptance checks of section 12 pass.
+
+---
+
+## 1. Goals and hard constraints
+
+| Constraint | How the architecture meets it |
+|---|---|
+| Claude drives Unreal headless; no human opens the editor | Everything is created by code or scripts: C++ via UBT, assets/levels via editor Python in a commandlet, procedural geometry in C++ (`FDynamicMesh3`) baked to assets by C++ functions called from Python, Enhanced Input created at runtime, UI in code (Slate). Verification by headless automation tests and headless screenshots (section 9). |
+| Core stays engine-agnostic and untouched | The UE side only includes `rb/...` headers; the mirror to UE axes lives in `FRbCoords` (section 4). `BilliardsCore.Build.cs` unchanged. |
+| UObjects only on the game thread | The simulation worker sees plain data (`FRbShotRequest`, `TSharedPtr<const FRbTableContext>`) and returns an immutable `FRbShot` (section 7). |
+| Determinism | The simulation runs inside the BilliardsCore module (FP precise, unity off); replays play the stored `ShotResult` bitwise; ROB-10 compares the UE module's input and result hashes with the standalone build (UE-6a, A5). |
+| Single source of truth for geometry | Table/pocket/cushion/rail/sight meshes are generated from `rb::TableGeometry` (UE 6.7, pitfall 16). Nothing is modelled by eye. |
+| Quality first (decisions 2026-09-27) | Baked static meshes (Nanite, distance fields, Lumen cards), Substrate Adaptive GBuffer, HWRT Lumen; presets Low..Cinematic, Epic/Cinematic never capped to the dev PC (section 8.1). |
+| Render time decoupled from physics time | Playback evaluates the exact analytic state at any clock value (slow motion, scrubbing, replays, trailer) — section 5.5. |
+| UBT path limit 260 chars | Build roots stay short (`C:\Users\Colin\Desktop\.00000\RawBreak`); worktrees under `.claude/worktrees/<short-name>`. |
+
+---
+
+## 2. Module layout
+
+```
+RawBreak.uproject            modules + plugins (PythonScriptPlugin, EditorScriptingUtilities, EnhancedInput; AndroidFileServer OFF)
+Config/DefaultEngine.ini     HWRT Lumen, VSM, Nanite, Substrate (Adaptive), TSR, PSO precaching, near clip 1 cm,
+                             MaintainYFOV, GameUserSettingsClassName, default maps          (UE-0)
+Config/DefaultInput.ini      Enhanced Input classes, mouse capture                          (UE-0)
+Config/DefaultScalability.ini  quality preset rows (plan 9.4)                                (UE-8, new)
+Shaders/Private/*.ush        analytic ball surface, ball occlusion (included by material Custom nodes)   (UE-3)
+Source/
+  BilliardsCore/             engine-agnostic core (unchanged)
+  RawBreakShaders/           Runtime, LoadingPhase PostConfigInit: maps /RawBreak -> <Project>/Shaders   (UE-0)
+  RawBreak/                  Runtime game module (everything below)
+    Public/  Core/ Math/ Simulation/ Table/ Balls/ Cue/ Input/ Player/ Camera/ Game/ UI/ Replay/ Settings/ Dev/
+    Private/ same areas + Tests/ (unit tests, RawBreak.Unit.*)
+  RawBreakEditor/            Editor module: asset bake library (called from Python), PIE functional tests
+                             (RawBreak.Functional.*, need UnrealEd)
+Tools/unreal/                headless pipeline: rbue.py (host runner) + editor/*.py (run inside Unreal)
+Content/Generated/**         generated assets (materials, baked meshes, M1 level) - committed via LFS, never hand-edited
+Content/Dev/**               scratch content of pipeline checks and per-WP dev maps - git-ignored
+```
+
+### 2.1 Build.cs dependencies (and why)
+
+| Module | Dependency | Why |
+|---|---|---|
+| RawBreak | Core, CoreUObject, Engine, InputCore | basics |
+| | EnhancedInput | input actions + mapping context created at runtime (no input assets) |
+| | BilliardsCore | the core |
+| | **GeometryCore, GeometryFramework** | procedural meshes as `UE::Geometry::FDynamicMesh3` shown by `UDynamicMeshComponent`. Chosen over ProceduralMeshComponent: engine modules (no plugin), normals/tangents/UV/material-id overlays and polygroups, complex collision for cue sweeps, and the **same mesh converts to MeshDescription -> UStaticMesh** in the editor bake (Nanite, distance fields, Lumen cards, HWRT). PMC is a legacy runtime-only path without that conversion. |
+| | CinematicCamera | `UCineCameraComponent` (sensor, focal length, aperture = pupil, UE 4.5) |
+| | Slate, SlateCore | code-only info overlay (no widget blueprints); UMG not needed |
+| | DeveloperSettings | settings classes |
+| | ApplicationCore (private) | `IWindowsMessageHandler` for timestamped raw mouse input (UE 5.4) |
+| | ImageCore, RenderCore (private) | PNG writing of the headless capture |
+| RawBreakEditor | RawBreak, BilliardsCore, GeometryCore (public); UnrealEd, AssetRegistry, AssetTools, MeshConversion, MeshDescription, StaticMeshDescription, GeometryFramework (private) | `FDynamicMesh3 -> FMeshDescription -> UStaticMesh`, saving packages, PIE automation helpers |
+| RawBreakShaders | Core, RenderCore, Projects | `AddShaderSourceDirectoryMapping` at PostConfigInit |
+
+Targets: `RawBreakEditor.Target.cs` builds RawBreak, BilliardsCore, RawBreakShaders, RawBreakEditor; `RawBreak.Target.cs` (game) the first three.
+
+### 2.2 Config decisions made in UE-0
+
+* **Substrate on with the Adaptive GBuffer** (`r.Substrate=True`, `r.Substrate.ProjectGBufferFormat=1`): project-wide, decided before the first material exists (UE 6.0, pitfall 14).
+* `NearClipPlane=1.0` (pitfall 2), `AspectRatioAxisConstraint=AspectRatio_MaintainYFOV` (pitfall 7), `r.PSOPrecaching=1`, `r.DefaultFeature.MotionBlur=True`.
+* `r.Lumen.HardwareRayTracing.LightingMode=2` (Hit Lighting for Reflections; the 5.8 default is 0 = surface cache): plan 6.2 / 6.6 / 9.4 require hit-lit ball reflections from High up, and High is the M1 default. Low / Medium lower it at runtime (UE-8).
+* Baked Nanite meshes keep a **full-detail fallback** (`FallbackTarget = PercentTriangles`, 100 %): in 5.8 ray tracing traces the Nanite fallback (`r.RayTracing.Nanite.Mode=0`, RT proxies off), so a decimated fallback would put a coarser table into ball reflections, Lumen HWRT hits and complex collision (`RbAssetBake_Common.cpp`).
+* `GameDefaultMap` / `EditorStartupMap` = `/Game/Generated/Maps/L_M1_TestRoom` (created by UE-8); `GlobalDefaultGameMode` stays `GameModeBase` — the M1 map sets `ARbGameMode` in its World Settings, so other maps (pipeline proof, dev maps) are unaffected.
+* `AndroidFileServer` plugin disabled: the editor otherwise appends a section with a random security token to `DefaultEngine.ini` on every headless run.
+
+---
+
+## 3. Class catalogue
+
+Every class exists as a compiling skeleton. "Owner" = the work package that implements it (section 13). Lifetime: *level* = placed/spawned actor of the world; *world* = world subsystem; *GI* = game-instance subsystem.
+
+| Class (header) | Kind / lifetime | Responsibility | Owner |
+|---|---|---|---|
+| `FRbCoords` (Core/RbCoords.h) | static helpers | the ONLY core <-> UE mirror (section 4); **implemented + tested** | UE-0 |
+| `ERbTablePreset`, `ERbBallSetPreset`, `ERbCuePreset`, `ERbDiscipline`, `ERbMatchMode`, `ERbCameraPreset`, `ERbQualityPreset`, `ERbTablePart`, `RbTypes::ToCore` (Core/RbTypes.h) | enums | BP/config mirrors of core enums | UE-0 |
+| `RbAssetPaths` (Core/RbAssetPaths.h) | constants | paths of every generated asset + material parameter names + capture-camera tags (contract between C++ and the Python generators) | UE-0 |
+| `RbStrokeMath` (Math/RbStrokeMath.h) | pure functions | gain curve, quadratic-fit velocity at the crossing, steering, bridge height (T9-T12) | UE-5a |
+| `RbCameraMath` (Math/RbCameraMath.h) | pure functions | FOV/overscan/DoF (T2-T5, T8: UE-5b), F0/EV/grain/AO/tessellation/lux (T1, T6, T7, T19-T22: UE-3); the header is a UE-0 frozen contract, each owner implements its own .cpp | UE-5b / UE-3 |
+| `FRbTableContext` (Simulation/RbTableContext.h) | immutable, `TSharedPtr<const>` owned by `ARbTable` | TableSpec, TableGeometry, PhysicsParams (`MakePhysicsParams(Spec, Condition)`), BallSet, RulesTable (`BuildRulesTable`) — built once per table | UE-6a |
+| `FRbShotRequest`, `FRbShot`, `FRbStrokeRecord`, `RbShot::ResultHash/InputHash/CopyCompact/InitSimInput` (Simulation/RbShot.h) | plain data, `TSharedRef<const FRbShot>` after simulation | one shot: SimInput, human-layer record (replay header), compact ShotResult, hashes | UE-6a |
+| `URbSimulationSubsystem` (Simulation/RbSimulationSubsystem.h) | world, tickable | runs `rb::Simulator::Run` on a UE::Tasks worker, same-frame hand-off, `OnShotSimulated`; `RunShotBlocking` for tests | UE-6a |
+| `RbTableMeshBuilder` (Table/RbTableMeshBuilder.h) | pure functions | `rb::TableGeometry` -> one `FDynamicMesh3` per `ERbTablePart` in table-local UE cm | UE-1 |
+| `ARbTable` (Table/RbTable.h) | level actor | owns the table context; Root (floor) -> ClothOrigin (bed centre on the cloth) -> part meshes (baked static or runtime dynamic); frame conversions core <-> world | UE-1 |
+| `RbBallMeshBuilder` (Balls/RbBallMeshBuilder.h) | pure function | unit sphere, 128 segments | UE-2 |
+| `ARbBallSet` (Balls/RbBallSet.h) | level actor, attached to ClothOrigin | one static-mesh component + MID per ball, no-teleport updates, `MPC_RbBalls` for cloth occlusion; pure presentation | UE-2 |
+| `URbShotPlaybackComponent` (Balls/RbShotPlaybackComponent.h) | component on `ARbBallSet` | decoupled playback clock, `rb::StateAtCursor`, cue tip path, event firing, `OnFinished` | UE-2 |
+| `RbCueMeshBuilder` (Cue/RbCueMeshBuilder.h) | pure function | lathe cue mesh (sections) from CueSpec + CueBodyState taper | UE-4 |
+| `ARbCue` (Cue/RbCue.h) | level actor, attached to ClothOrigin | cue pose from core terms (tip dome centre + direction); drive Hidden / Input / Playback | UE-4 |
+| `RbCueClearance` (Cue/RbCueClearance.h) | functions | minimum elevation vs balls/rails (T13) + environment capsule sweep -> `StrokeSituation::ElevationFloor` | UE-4 |
+| `FRbRawMouseInput` (Input/RbRawMouseInput.h) | shared object owned by the stroke component; owns an input thread | raw mouse reports timestamped ON ARRIVAL by a dedicated raw-input thread (SPSC ring), deltas forwarded to Slate; pump-time reconstruction fallback; inactive headless (section 6.2.1) | UE-5a |
+| `URbInputSetup` (Input/RbInputSetup.h) | transient UObject owned by the controller | runtime Enhanced Input actions + mapping context (section 6.5) | UE-5a |
+| `URbStrokeComponent`, `FRbStrokeContext` (Player/RbStrokeComponent.h) | component on the pawn | stroke state machine -> `FRbStrokeCommit` (`rb::human::IntendedStroke` at the crossing); cue pose from `rb::human::SampleHand` while down (what you see is what hits), `OnStrokeAborted(bRampShown)`; ball-in-hand placement, scripted strokes | UE-5a |
+| `ARbPlayerCharacter` (Player/RbPlayerCharacter.h) | pawn (one for both hot-seat players) | capsule walking, cine camera, rig + stroke components, input binding | UE-5b |
+| `ARbPlayerController` (Player/RbPlayerController.h) | controller | creates `URbInputSetup`, mapping context, non-pawn actions, owns `URbOverlayComponent`, `CheatClass = URbCheatManager` | UE-5b |
+| `FRbCameraPresetParams`, `URbCameraModel`, `RbCameraModel::Defaults` (Camera/RbCameraModel.h) | data | plan 4.9 parameter table (Eyes default, Headcam, Broadcast) | UE-5b |
+| `URbCameraRigComponent` (Camera/RbCameraRigComponent.h) | component on the pawn | eye placement (standing / down on the shot / ball in hand), transitions, vertical FOV, DoF, exposure, grain | UE-5b |
+| `FRbTableState`, `FRbShooterState` (Game/RbShooterState.h) | plain data in the director | physics mirror of the balls (core units) between shots, rebuilt from the rules' GameState + Finals (5.2 step 10); per shooter attributes, TipState, ChalkCube, CueBodyState, NoiseHistory, indices | UE-6b |
+| `URbMatchDirector` (Game/RbMatchDirector.h) | UObject owned by the game mode | rb::rules match + rb::human stroke execution + shot pipeline (section 7); `MakeStrokeContext`, `OnStrokeAborted`, `SetLivePlaybackRate`, `IsReplayAllowed` | UE-6b |
+| `ARbGameMode` (Game/RbGameMode.h) | game mode | find/spawn table, ball set, cue; create director; URL options `?Mode=&Game=&Race=&Lag=&Seed=` | UE-6b |
+| `ARbTestRoom` (Game/RbTestRoom.h) | level actor | M1 room + WPA lamp in physical units | UE-8 |
+| `SRbInfoOverlay`, `FRbOverlayModel` (UI/SRbInfoOverlay.h) | Slate widget | corner text panel | UE-7 |
+| `URbOverlayComponent` (UI/RbOverlayComponent.h) | component on the controller | Hidden / Glance / Pinned + debug block; model from the director | UE-7 |
+| `URbReplaySubsystem` (Replay/RbReplaySubsystem.h) | world | last N shots, replay with own clock and views, restore live state | UE-7 |
+| `ARbReplayCamera` (Replay/RbReplayCamera.h) | spawned actor | Shooter / Overhead / Rail / Follow views | UE-7 |
+| `URbGameUserSettings` (Settings/RbGameUserSettings.h) | engine user settings | quality preset, camera preset, FOV, comfort, stroke options | UE-8 |
+| `URbHeadlessCaptureSubsystem` (Dev/RbHeadlessCaptureSubsystem.h) | GI, tickable | `-RBCapture=` headless screenshot (section 9.4); **implemented** | UE-0 |
+| `ARbLookDevCamera` (Dev/RbLookDevCamera.h) | placed actor (ACineCameraActor) | capture camera that applies a RAW BREAK camera preset (`URbCameraRigComponent::ApplyPresetToCamera`) so look-dev screenshots use the game's camera model | UE-8 |
+| `URbCheatManager` (Dev/RbCheatManager.h) | cheat manager | `RbStrike`, `RbStroke`, `RbPlaceCueBall`, `RbChoose`, `RbRerack`, `RbNewMatch`, `RbReplay`, `RbOverlay`, `RbPlaybackRate` (UE-7 adds it; drives `SetLivePlaybackRate`), `RbDumpState` for headless tests | UE-7 |
+| `URbAssetBakeLibrary` (RawBreakEditor) | BP function library | `BakeTableMeshes` (UE-1), `BakeBallMesh` (UE-2), `BakeCueMesh` (UE-4), `BakeSelfTest` + common `WriteStaticMesh` (**implemented**, UE-0) | split by file |
+
+**Header rule.** The public API above is a frozen contract: consumers compile against it in parallel. The owning package may add members/functions and change private parts freely; changing or removing a public signature that another package calls needs that consumer's sign-off (same rule as architecture.md §2 item 11). Every stub is marked `TODO(UE-x)`.
+
+---
+
+## 4. Coordinate adapter (UE 5.6; tests T14-T16 implemented)
+
+Frames, from the physics to the screen:
+
+```
+core frame (rb)          right-handed, metres, origin = bed centre on the cloth, +x foot, +y left, +z up
+   | FRbCoords           mirror M = diag(1, -1, 1), x100
+table-local UE frame     left-handed, cm, X = x, Y = -y, Z = z  (= relative transforms under ARbTable::ClothOrigin)
+   | ClothOrigin transform (translation + yaw, scale 1)
+world
+```
+
+```
+p_UE [cm]       = 100 (x, -y, z)                 FRbCoords::PositionToUE / PositionToCore
+v_UE [cm/s]     = 100 (vx, -vy, vz)              VelocityToUE
+w_UE [rad/s]    = (-wx, wy, -wz)                 AngularVelocityToUE   (pseudovector: w' = det(M) M w)
+q_UE (w,x,y,z)  = (qw, -qx, qy, -qz)             OrientationToUE -> FQuat(X=-qx, Y=qy, Z=-qz, W=qw)
+d_UE            = (dx, -dy, dz)                  DirectionToUE (unit vectors)
+phi             = atan2(-Y, X) of a table-local UE direction          AzimuthFromUEDirection
+cue axis        d = (cos th cos ph, cos th sin ph, -sin th) -> DirectionToUE          CueDirectionToUE
+```
+
+* `ARbTable` owns the world placement: `CoreToWorld`, `WorldToCore`, `CoreDirectionToWorld`, `CoreOrientationToWorld`, `WorldDirectionToAzimuth`. The ball set and the cue are **attached to ClothOrigin**, so their relative transforms are exactly the table-local values from `FRbCoords` and the table can be placed/rotated anywhere.
+* Balls: `SetRelativeLocationAndRotation(PositionToUE(p), OrientationToUE(q), ETeleportType::None)`; never `FRotator` (pitfall 3).
+* Rotation smear (UE 4.6) needs the angular velocity in ball-local axes: `OrientationToUE(q).UnrotateVector(AngularVelocityToUE(w))`.
+* Mesh generation: the mirror flips handedness, so every generated triangle must be wound for an outward normal **in UE space** (UE-1/UE-2/UE-4 tests check normals).
+* Material maths works in world centimetres (pitfall 24); ball radius parameter in cm.
+* Tests (`RawBreak.Unit.Coords.*`): T14 position, T15 quaternion incl. "mirror commutes with rotation" for a random rotation, T16 omega incl. the rolling top-point direction (T24 in UE axes), azimuth/cue-direction round trip.
+
+---
+
+## 5. Data flow
+
+### 5.1 Scene setup (StartPlay)
+
+```
+ARbGameMode::InitGame   parse ?Mode ?Game ?Race ?Lag ?Seed
+ARbGameMode::StartPlay  ARbTable (placed in the map, else spawned) -> FRbTableContext::Create(Setup)  [BuildTableGeometry,
+                        MakePhysicsParams, BuildBallSet, BuildRulesTable] -> meshes (baked or runtime)
+                        spawn ARbBallSet (InitForTable: components per ball, MIDs), ARbCue (InitForTable: CueSpec, CueBodyState)
+                        pawn: stroke component <- table, cue; playback <- cue
+                        URbMatchDirector::Initialize(table, balls, cue, URbSimulationSubsystem) -> StartMatch(setup)
+                        -> SetupRack -> FRbTableState -> ARbBallSet::ShowSimBalls -> AwaitPlacement (break: ball in hand behind the head string)
+```
+
+### 5.2 One shot (the M1 loop)
+
+| # | Thread | Step |
+|---|---|---|
+| 1 | GT | Director publishes `GetShotConstraints` (placement region, call required, push-out, three-foul warning) -> overlay model, stroke component unlocked (`BeginAddress` or `BeginCueBallPlacement`) |
+| 2 | GT | Ball in hand: the cue ball follows the aim point on the cloth; Confirm -> `PlaceCueBall` (`CueBallPlacementLegal` / `ValidateDeclaration` with the placed position) |
+| 3 | GT | Player gets down (camera rig DownOnShot), aims (azimuth), elevation (wheel, floored by `RbCueClearance`), tip offsets, optional Settle; practice strokes stop short. The stroke component holds the director's `FRbStrokeContext` (`MakeStrokeContext`, pushed at `BeginAddress`) and poses the cue every frame with `rb::human::SampleHand(provisional IntendedStroke, context, t)`: drift, tremor and, from the committed forward stroke, the ramped per-shot draws (architecture.md 13 item 4, HF 3.7). A stroke that showed the ramp and ends without contact -> `OnStrokeAborted(true)` -> director spends the draws (`ShooterShotIndex`++, `AdvanceNoiseHistory`, HF-B13) and pushes a new context |
+| 4 | GT (samples timestamped on arrival by the raw-input thread, 6.2.1) | Commit held + final stroke: raw samples -> gain curve -> cue displacement; crossing of the ball surface -> quadratic-fit tip speed at the crossing time -> `FRbStrokeCommit{IntendedStroke, InputLog, ContactTime, AddressIndex, EyeTransform}` |
+| 5 | GT | Director: `rb::human::ExecuteStroke(Intended, attributes, StrokeSituation{bridge, clearance floor, pressure, ...}, TipState, CueBodyState, CueSpec, cue-ball spec/position, other balls, NoiseKey, NoiseHistory, HumanParams)` with the SAME context the stroke component rendered -> `CueStrikeInput`; `SimInput` from `FRbTableState` (+ `ShotContext`: in hand, placed position; `NonTipContacts` stay empty in M1 because the rules run `InputMode::Assisted`, 7.1) |
+| 6 | GT -> worker | `URbSimulationSubsystem::SubmitShot` -> UE::Tasks: `Simulator::Run` into the pooled reserved result -> compact copy -> `ResultHash` |
+| 7 | GT | Subsystem Tick (end of the world tick) waits up to 4 ms -> `OnShotSimulated(TSharedRef<const FRbShot>)` normally in the same frame (a break < 2 ms, UE 9.1) |
+| 8 | GT | Director: playback `Play(shot, bAnchorToContact = true)` (or, with `SetLivePlaybackRate(0)` in headless tests, no playback: commit at once); rules immediately but **not shown**: `DeriveShotFacts(Result.Record, RulesTable, tolerances, clock)` -> `EvaluateShot(Config, RulesTable, GameState@start, Declaration, Facts)` |
+| 9 | GT (every frame) | Playback: `ShotTime = (now - ContactTime) * Rate`; per ball `StateAtCursor` -> ball transforms; cue follows `CueTipAt(strike 0)`; events fire (`OnShotEvent`, later audio/VFX/chalk) |
+| 10 | GT | Playback of THIS pending shot finished (a replay finishing on the same component is ignored) -> director commits: `ApplyShot` (spotting, fouls, turn / decision / rack over / match over), then ONE sync function rebuilds `FRbTableState`: status and plan position from `MatchState.Game.Balls` (authoritative, includes spotted balls), orientation / chalk marks / z = R from `Result.Finals`, cue ball in hand out of play until placed; `ApplyShotToEquipment`, `AdvanceNoiseHistory`, auto-chalk (`PerformChalking`, 7.1), `URbReplaySubsystem::RecordShot`, overlay refresh (auto-glance of the result, 6.6) -> step 1 for the next shooter |
+
+Lag (optional): both players stroke in turn at their own lag ball; the director records both executed strokes first
+and submits ONE `SimInput` with two `StrikeRequest`s at t = 0 (architecture.md 13 item 4, rules.md 4.1) ->
+`DeriveLagBallFacts` / `EvaluateLag` -> `ApplyLagResult` / `ChooseBreaker`. In practice mode the lag is skipped.
+
+### 5.3 Table meshes
+
+`RbTableMeshBuilder::BuildAll(TableGeometry)` produces the parts of `ERbTablePart` (sources in the header: nose outline + cushion profile, RailTop polygons, PocketGeometry circles and front arcs, sights, apron, legs). Two consumers of the **same** meshes:
+
+* runtime: `UDynamicMeshComponent` per part (tests, and any preset that has not been baked) — no Lumen cards, so only for development;
+* editor bake: `URbAssetBakeLibrary::BakeTableMeshes(Preset)` -> `/Game/Generated/Tables/<Preset>/SM_Table_<Part>` (Nanite, distance fields, complex-as-simple collision). `ARbTable` loads these when `bUseBakedMeshes` and they exist.
+
+### 5.4 Balls
+
+`ARbBallSet` (attached to ClothOrigin): one `UStaticMeshComponent` per ball id (mesh `SM_RbBall`, unit sphere scaled by the ball's own radius in cm, so oversized cue balls are exact), Movable, no collision, MID of `M_RbBall` with `BallNumber`, `BallColor`, `BallOmegaLocal`, `ExposureTime`; ball centres into `MPC_RbBalls` (`Ball00..Ball15`) for the analytic cloth occlusion (UE 6.5). The ball set shows state, it never owns it (`FRbTableState` in the director is authoritative).
+
+### 5.5 Playback (render time decoupled from physics time)
+
+* Live: clock anchored at the tip contact (`FPlatformTime::Seconds()` at the crossing): the motion is correct even if the hand-off took a frame (`Play` already shows the state of *now*, not t = 0). Replay: own clock start, any rate (slow motion), pause, seek; the global time dilation never affects it.
+* The one playback component serves live shots and replays: every `OnFinished` listener checks that the finished shot is its own (director: `PendingShot` in phase PlayingBack; replay subsystem: `ReplayShot` while replaying).
+* Evaluation: `rb::StateAtCursor` per ball per frame (O(1) amortised, bitwise equal to random access; orientation law of `rb/Physics/Playback.h`); `Terminal` segments freeze the ball at capture, hidden after `DropHideDelay` (pocket-fall animation later); `CueTipAt` drives the cue until the tip path ends.
+* No teleports (motion vectors for TSR/DLSS and motion blur, pitfall 4). Events fire once, in log order.
+* `OnFinished` at `Result.StopTime` (+ drop delay) -> the director commits the shot.
+
+### 5.6 Cue
+
+The cue pose is always given in core terms (`SetPoseCore(tip dome centre, direction)`); local mesh frame: origin at the tip dome centre, +X toward the tip. Drivers: the stroke component (address + displacement; later `SampleHand` so what you see is what hits, HF 3.7) and the playback (`CueTipAt`). No body/hands in M1.
+
+---
+
+## 6. Player
+
+### 6.1 Character
+
+`ARbPlayerCharacter` (ACharacter): capsule r 25 cm, half height 88 cm, walk 1.4 m/s; the table's meshes block the pawn; `UCineCameraComponent` at standing eye height (1.65 m); `URbCameraRigComponent`, `URbStrokeComponent`. One pawn for both hot-seat players. MetaHuman body later (UE 5.1: world-space body, camera in a head socket, head hidden but reflected).
+
+### 6.2 Stroke state machine (`URbStrokeComponent`)
+
+| Phase | Enter | Input | Leave |
+|---|---|---|---|
+| Locked | not this player's turn, simulating, playing back, replay, decision | — | director unlocks |
+| Walking | unlocked, cue ball in position | Move, Look | GetDown (cue ball in reach) -> GettingDown |
+| PlacingCueBall | ball in hand | Look = placement point on the cloth (analytic bed plane z = 0 of the table frame); Confirm, or a Stroke (left mouse) press, which the component routes to Confirm in this phase | director accepted -> Walking |
+| GettingDown | GetDown | — (camera transition 0.8-1.5 s, cue appears) | -> Down |
+| Down | — | Look = aim (FineAim x0.2), wheel = elevation, arrows = tip offset, Settle held = `SettleStart`, Stroke held = cue follows raw mouse Y through the gain curve, Commit held = live; cue pose = `SampleHand` | tip crosses the ball while live -> Contact; GetDown -> Walking (AddressIndex++); a committed stroke that showed the ramp and stops -> `OnStrokeAborted(true)` |
+| Contact | crossing | — | broadcasts `OnStrokeContact` once -> Watching |
+| Watching | — | GetDown stands up | director locks/unlocks for the next shot |
+
+Rules: practice strokes stop `PracticeStopShort` (4 mm) before the ball unless Commit/Hardcore (UE 14 Q2 proposal); the speed estimator never uses per-frame deltas (pitfall 19); `NoiseKey::AddressIndex` = earlier get-downs on this shot (HF 3.2); `InjectStrokeSamples` feeds scripted strokes through the same path (tests, `RbStroke` cheat). `IntendedStroke` fields from the input log: `TimeDown`, `ForwardStart` (start of the committed forward stroke), `SettleStart`, `PauseDuration` (HF-08), `ContactAcceleration` (quadratic fit, HF-09), `HeadMovedBeforeContact` (look input above a threshold after `ForwardStart`, HF-10).
+
+#### 6.2.1 Raw mouse timestamps (review R-01)
+
+Verified in the 5.8 source (`WindowsApplication.cpp`): UE registers the mouse for raw input on the game window and handles `WM_INPUT` in the once-per-frame message pump, so an `IWindowsMessageHandler` gets every report but all of a frame's reports in one burst; a QPC stamp taken there is the pump time (per-frame quantisation, the exact failure of pitfall 19). UE's optional worker (`WindowsApplication.UseWorkerThreadForRawInput`) queues `RAWMOUSE` without times and bypasses handlers. Design (`FRbRawMouseInput`, UE-5a):
+
+1. A dedicated input thread (pattern of UE's `FWindowsRawInputRunnable`): message-only window, `RegisterRawInputDevices` (page 1, usage 2, flags 0) targeting it, blocking `GetMessage` loop, QPC timestamp at dispatch of each `WM_INPUT`, SPSC ring to the game thread.
+2. Raw input is one window per device class and process, so the thread takes the mouse over; the game thread forwards every drained delta to `FSlateApplication::Get().OnRawMouseMove` (what UE does for its own worker mode), so Enhanced Input look / aim are unchanged. When UE re-registers its window (re-entering high-precision mode), an `IWindowsMessageHandler` sees `WM_INPUT` on the game window and asks the thread to register again; UE's `RIDEV_REMOVE` on leaving high-precision mode ends both registrations (nothing to forward while the cursor is visible).
+3. Fallback (thread registration impossible, e.g. remote desktop; `-RbRawInputThread=0`): handler on the game window with reconstructed report times (the N reports of a pump spaced by the measured report interval, ending at the pump time). `HasTrueTimestamps()` is shown in the F2 block; the A9 playtest must run with true timestamps.
+4. Stopped (`RIDEV_REMOVE`, `WM_QUIT`, join) in the destructor; inactive under `-nullrhi`, commandlets, without a Slate application.
+
+### 6.3 Camera rig
+
+Eyes preset default (decisions): vertical FOV 50 deg authored (MaintainYFOV), pupil 4 mm -> cine lens f/N, focus eased on the aim target, AE 1.5/0.7 EV/s, grain from exposure, head translation 0.3. **Cine camera rule (review R-06, verified in 5.8 `CameraStackTypes.cpp`):** with MaintainYFOV the engine takes the vertical FOV from the lens and the camera's own aspect (the filmback), `V = 2 atan(h_sensor / 2f)`, and the diaphragm DoF scales its circle of confusion by the sensor width. The rig therefore keeps the filmback aspect equal to the viewport aspect (fixed `h_sensor`, `w_sensor = h_sensor * aspect`, updated on resize), sets `f = h_sensor / (2 tan(V/2))` and `N = f / A`. `URbCameraRigComponent::ApplyPresetToCamera` does this for the rig and for the look-dev capture cameras (`ARbLookDevCamera`). Down on the shot: `e = P_axis(s_e) + h_c n_up + y_vc n_side` (UE 4.2) from the cue axis the stroke component reports. Headcam = menu option later (distortion post-process after the upscaler, UE 4.3).
+
+### 6.4 Controller
+
+`ARbPlayerController` creates `URbInputSetup` in `SetupInputComponent` (before the pawn binds), adds the mapping context, handles Glance / ToggleOverlay / ToggleDebug / Replay / CycleOption, owns `URbOverlayComponent`, `CheatClass = URbCheatManager`.
+
+### 6.5 Input (runtime Enhanced Input, M1 defaults)
+
+| Action | Binding | Meaning |
+|---|---|---|
+| Move | W A S D | walk |
+| Look | mouse XY | look; aim while down; placement point while in hand |
+| GetDown | right mouse button | get down / stand up |
+| Stroke | left mouse button (hold) | stroke mode: mouse Y moves the cue (raw input) |
+| Commit | Space (hold) | the stroke is live |
+| Elevation | mouse wheel | butt up/down |
+| TipOffset | arrow keys | cue-axis offset (english, follow, draw) |
+| FineAim | Left Shift (hold) | x0.2 aim |
+| Settle | Left Ctrl (hold) | exhale and hold while down (HF-06, `IntendedStroke::SettleStart`) |
+| Glance | Tab (hold) | glance at the match info |
+| ToggleOverlay / ToggleDebug | F1 / F2 | pin overlay / physics block |
+| Replay | R | replay last shot (again: next view; Esc: back) |
+| Confirm | Enter / F | place cue ball, accept decision, next rack / new match after RackOver / MatchOver. Left click is not bound twice: a Stroke press while PlacingCueBall is routed to Confirm by the stroke component |
+| CycleOption | Q / E | cycle decision options / called pocket |
+
+### 6.6 Info overlay and the "glance" concept
+
+No HUD by default (decisions: diegetic information). M1 stand-in: `SRbInfoOverlay`, a small corner text panel, **Hidden** by default, visible while the glance key is held (fade in/out) or **Pinned** with F1; F2 adds the physics block. **Mandatory lines** (`FRbOverlayModel::MandatoryLines`, review R-05) are shown in every mode, because the rules require them on screen (rules.md 16 item 12: always display the foul counter, the display is the mandatory warning [Reg 8]; item 2: the enforced foul with its rule reference): the shooter's consecutive fouls while > 0 with the two-foul warning, a pending decision with its options, ball in hand for the incoming shooter; after every shot a 4 s auto-glance shows the result. The decisions' "no HUD" is kept for everything else. Content (RUL): discipline + mode, score / race, shooter, consecutive fouls with the mandatory two-foul warning, cue ball in hand (+ region), called ball/pocket where required, pending decision options, last shot (pocketed balls, fouls with rule reference, first contact), debug (tip speed, predicted vs physical miscue, sim ms, events). Later the glance becomes a diegetic scoreboard/chalkboard in the venue.
+
+### 6.7 Replay
+
+`URbReplaySubsystem` keeps the last 32 `FRbShot`s (compact, typically < 1 MB each). `PlayReplay(i, view, rate)`: only when `URbMatchDirector::IsReplayAllowed()` (never while a live shot simulates or plays back), lock input, show the shot's `Request.Input` balls, play with its own clock, `ARbReplayCamera` view (Shooter = stored eye transform, Overhead, Rail, Follow); at the end restore `FRbTableState` and the player view. The stored result is replayed bitwise; re-simulation is only a determinism check. This is the base of the trailer capture kit (slow motion at any rate, arbitrary cameras).
+
+---
+
+## 7. Match bridge and threading
+
+### 7.1 Director phases
+
+`ERbDirectorPhase`: Idle -> (Lag) -> AwaitPlacement / AwaitStroke -> Simulating -> PlayingBack -> AwaitStroke | AwaitPlacement | AwaitDecision | RackOver -> ... -> MatchOver. It wraps `rb::rules::MatchPhase` (Setup, Lag, LagWinnerChooses, RackSetup, AwaitShot, AwaitDecision, RackOver, MatchOver) and adds the simulation/playback/placement steps.
+
+* **Practice**: one human, rules on (fouls shown, ball in hand, pushes), a won rack racks again. No career exists in M1, so the practice shooter also uses the neutral guest profile (50 in every attribute, `HotSeatGuestAttributes`); `?Attr=<0..100>` overrides it for playtests.
+* **Hot-seat**: two humans alternate on one pawn; shooters at 50 in every attribute (`HotSeatGuestAttributes`, HF Q4); overlay names the shooter; the stroke component is re-armed for the new shooter (new `FRbStrokeContext`).
+* **Rules input mode**: `RulesConfig::Input = InputMode::Assisted` (rules.md 16 item 22): no body or bridge hand exists in M1, so fouls 3.4 / 3.6 / 3.10 cannot occur, `ShotContext::NonTipContacts` stays empty (the `ExecutedStroke::ShaftContactCandidates` go to the F2 debug block only) and illegal cue-ball placements are refused by `ValidateDeclaration`.
+* **Pressure** (HF-15): `StrokeSituation::Pressure = ComputePressure({Stakes = kStakesPractice / kStakesFriendly (hot-seat), GameBall = the 9 is the lowest ball on the table, Hill from RackWins}, PressureMode)`; hot-seat may switch it off for both (`PressureMode::Off`, URL `?Pressure=0`). Fatigue 0 (HF-16: off in practice and hot-seat), intoxication 0 (V1 cosmetic).
+* Player-model state per shooter (`FRbShooterState`): attributes, habits, `TipState`, `CueBodyState`, `CueSpec`, `NoiseHistory`, `ShooterShotIndex`, `CuePickupIndex`; match seed -> `NoiseKey`. After each shot `ApplyShotToEquipment` + `AdvanceNoiseHistory` (HF 4.7, architecture 13 item 11). M1 has no chores UI: at the start of each visit the tip is auto-chalked with `rb::human::PerformChalking` (`AutoChalkTwists` twists of the shooter's `ChalkCube`, HF-22), so the tip state, and with it `mu` and the miscue limit, evolves exactly as in the full game; the F2 block shows the tip coverage.
+* Table condition: M1 room table is level with clean balls (`TableCondition{}`); venues later use `MakeVenueTableCondition`.
+
+### 7.2 Threading
+
+| Thread | Work |
+|---|---|
+| Game thread | all UObjects: input, stroke machine, director, `ExecuteStroke` (pure, µs), rules evaluation (µs), playback evaluation, UI, replay |
+| UE::Tasks worker | `rb::Simulator::Run` + compact copy + hash; reads only the request and the shared `const FRbTableContext`; the `Simulator` object is used by one task at a time |
+| RAW BREAK raw-input thread (UE-5a) | owns the raw mouse registration, QPC-stamps every `WM_INPUT` on arrival into an SPSC ring; the game thread drains it once per frame and forwards the deltas to Slate (6.2.1). Stopped and joined in `~FRbRawMouseInput` |
+| Render thread | engine standard; ball/cue transforms are set on the game thread without teleport |
+
+No locks: the in-flight task handle is the only shared state; a shot becomes visible to the game thread only as a finished immutable `TSharedRef<const FRbShot>`. `Deinitialize` waits for an in-flight task (no cancellation needed: `Simulator::Run` is bounded by its MaxEvents / time-horizon guards and takes milliseconds). A table rebuilt while a shot is in flight is harmless: the request holds its own `TSharedPtr<const FRbTableContext>`. Later AI: N simulators (one per worker), rollouts with `RecordOptions` off, reduction on the game thread (architecture 5.2).
+
+---
+
+## 8. Rendering, settings and look-dev hooks
+
+### 8.1 Quality presets (plan 9.4) — how they plug in
+
+* `URbGameUserSettings` (registered via `GameUserSettingsClassName`) stores `ERbQualityPreset` Low / Medium / High / Epic / Cinematic / Custom plus camera and comfort options.
+* `ApplyQualityPreset`: (1) UE scalability groups (`sg.*`) for Low..Epic, Cinematic = Epic + extras; (2) RAW BREAK rows from `Config/DefaultScalability.ini` sections per level (Lumen GI/reflection method and hit lighting, Lumen Lite on Low, texture pool 1000-4500 MB, volumetric fog, VSM resolution bias, screen percentage / upscaler); (3) material quality (`r.MaterialQualityLevel`) drives Quality Switch nodes in the generated materials (ball haze/SSS lobe off on Low); (4) Cinematic enables photo-mode/replay-only features (path tracer via Movie Render Queue later).
+* Every row stays individually adjustable (`Custom`). **Epic and Cinematic are authored for the best image and never capped to the RTX 3070 Ti**, which is the High test tier (decisions 2026-09-27).
+* M1 ships the hook (class, storage, High default) — the full matrix and the menu are post-M1.
+
+### 8.2 Materials
+
+Generated by `Tools/unreal/editor/rb_make_materials.py` (UE-3) as Substrate materials whose non-trivial logic sits in HLSL files under `Shaders/Private` included by Custom nodes (`#include "/RawBreak/Private/RbBall.ush"`; mapping by the RawBreakShaders module): diff-able text, no hand-made graphs. Ball: analytic number circles/stripes from object-space position (no UV seams), rotation smear; cloth: fuzz/sheen for grazing angles + `MPC_RbBalls` occlusion; rails: clear coat over wood; pocket liner, sights, cue, room surfaces, lamp diffuser (hidden from RT reflections, pitfall 9).
+Headless feasibility (verified in 5.8): `UMaterialExpressionCustom::IncludeFilePaths` is an editable property (`set_editor_property("include_file_paths", ...)`), `MaterialExpressionSubstrateSlabBSDF` / `...VerticalLayering` / `...HazinessToSecondaryRoughness` exist, the Substrate root input is `MaterialProperty.MP_FRONT_MATERIAL`. The commandlet runs under `-NullRHI`, so a broken Custom node only shows at the first render, where the engine silently substitutes its default material: `rbue.py capture` therefore fails on material / shader compile errors (review R-10). The ball decal position must come from a node that is valid in ray-tracing hit shaders too (world -> local transform of the position), so the numbers also appear in the hit-lit reflections of other balls (UE-3 checks it in `ball_lineup`).
+
+### 8.3 Test room and light
+
+`ARbTestRoom`: closed room around the table (static cube meshes -> distance fields + Lumen cards), neutral wall/floor, WPA lamp: rect-light sections with real source size (never 0), lumen units, 4000 K, underside 1.016 m above the bed, target ≥ 520 lux on bed and rails (E4, computed with `RbCameraMath::IlluminanceAt`), dim ambient ≈ 50 lux in the room. Single source (review R-14): the room takes the bed height from the level's `ARbTable` (TableSpec), and the generator writes the lamp underside height into `ARbTable::LampUndersideHeight`, so the physics' off-table apex check sees the rendered lamp.
+
+---
+
+## 9. Headless pipeline (proven on this machine, 2026-09-27)
+
+All commands run from the repo root in **PowerShell** (or Git Bash with `MSYS_NO_PATHCONV=1`; `rbue.py` also undoes Git Bash's `/Game/...` -> `C:/Program Files/Git/Game/...` rewrite for `--map`). `Tools/unreal/rbue.py` wraps every step (logs to `Saved/RbLogs/<cmd>-<time>.log`, exit code 0 = success, kills the process tree on timeout).
+
+### 9.1 Build (UBT)
+
+```
+python Tools/unreal/rbue.py build                       # = Build.bat RawBreakEditor Win64 Development -Project=<abs>\RawBreak.uproject -WaitMutex -NoHotReload
+python Tools/unreal/rbue.py build --target RawBreak     # game target (packaging later)
+```
+Measured: full editor build of all four modules 51 s (BilliardsCore) / 29 s (skeleton, 54 actions), incremental 6 s, **0 errors, 0 warnings**. No Unreal process may run while building (DLL locks); `rbue.py` runs steps sequentially.
+
+### 9.2 Editor Python (assets, levels, bakes) — commandlet
+
+```
+python Tools/unreal/rbue.py py Tools/unreal/editor/<script>.py [-- args]
+  = UnrealEditor-Cmd.exe <uproject> -run=pythonscript -script="<abs script> <args>" -unattended -nop4 -nosplash -NoSound -NullRHI -stdout -FullStdOutLogOutput
+```
+The commandlet exits 0 even when the script raised, so `rbue.py` fails on `LogPython: Error` or the explicit marker `RBUE_FAIL` (`rb_common.fail()`). Measured: level creation 22 s cold, bake self-test 6.5 s. `-NullRHI` means materials are not compiled for SM6 here; the first rendering run compiles them.
+
+### 9.3 Script conventions
+
+* Idempotent: every script deletes/overwrites what it generates; never edits hand-made content.
+* Generated assets under `/Game/Generated/**` (paths = `RbAssetPaths.h`), scratch under `/Game/Dev/**` (git-ignored).
+* Geometry is generated in C++ (`URbAssetBakeLibrary`, exposed to Python as `unreal.RbAssetBakeLibrary.bake_*`), materials/levels in Python.
+* Generated assets are committed (LFS) at milestones so a fresh clone plays without regenerating; the scripts remain the source of truth.
+
+### 9.4 Headless screenshot
+
+```
+python Tools/unreal/rbue.py capture --map /Game/... --camera <tag|name> --res 1920x1080 --warmup 120 --out Docs/images/<name>.png
+  = UnrealEditor-Cmd.exe <uproject> <map> -game -RenderOffscreen -Windowed -ResX=1920 -ResY=1080 -ForceRes
+        -RBCapture="<abs png>" -RBCaptureWarmup=120 -RBCaptureCamera="<tag>" -unattended -nosplash -NoSound ...
+```
+`URbHeadlessCaptureSubsystem` (only created when `-RBCapture=` is present): view through the camera actor with that tag/name (hides the pawn), wait until shader + asset compilers are idle, stream everything, render at least `Warmup` frames AND `-RBCaptureWarmupSeconds` (default 4 s) of game time (auto exposure adapts in EV per second, 0.7 EV/s down for Eyes; Lumen, TSR converge; review R-09), capture through `UGameViewportClient::OnScreenshotCaptured`, write the PNG, `RequestExit`. `-ForceRes` is required (without it a windowed 1920x1080 is clamped below the desktop work area; observed 888x500). Full renderer (DX12 SM6, HWRT Lumen, VSM, Substrate) — not a NullRHI approximation.
+Measured: first start with a cold DDC under Substrate: global shaders ~66 s + engine default materials ~85 s (~3 min); warm DDC: 12 s end to end (+ the 4 s warm-up floor). `rbue.py capture` fails when the log reports a material / shader compile error (`Failed to compile Material`, `Default Material will be used`, `LogShaderCompilers: Error`, `LogMaterial: Error`) unless `--allow-shader-errors`. Look-dev and acceptance captures use `ARbLookDevCamera` actors (a cine camera with the game's camera preset), never plain `ACameraActor`s with engine-default exposure / DoF.
+
+### 9.5 Running the game, cheats
+
+```
+python Tools/unreal/rbue.py game [--map /Game/Generated/Maps/L_M1_TestRoom]      # windowed 1920x1080, for the human playtest
+UnrealEditor-Cmd.exe <uproject> <map>?Mode=HotSeat -game -RenderOffscreen -ExecCmds="RbStrike 8 0 0 0 0; RbDumpState"   # scripted
+```
+The editor binary in `-game` mode runs uncooked content; packaging (cook + Game target) is a later milestone.
+
+### 9.6 Automation tests
+
+```
+python Tools/unreal/rbue.py test --filter RawBreak.Unit          # NullRHI, editor process
+python Tools/unreal/rbue.py test --filter RawBreak.Functional    # PIE under NullRHI
+python Tools/unreal/rbue.py test --filter RawBreak.Screenshot --render   # needs -RenderOffscreen
+  = UnrealEditor-Cmd.exe <uproject> -ExecCmds="Automation RunTests <filter>; Quit" -TestExit="Automation Test Queue Empty" -ReportExportPath=... -NullRHI|-RenderOffscreen
+```
+Naming: `RawBreak.Unit.<Area>.<Name>` (module RawBreak, pure logic), `RawBreak.Functional.<Name>` (RawBreakEditor, PIE via `AutomationOpenMap` + `FStartPIECommand` + latent checks + `FEndPlayMapCommand`), `RawBreak.Screenshot.<Name>`; spec test ids in the name (`...Coords.T14_Position`). Measured: 5 tests (4 unit + PIE smoke) in 16.5 s, all passed.
+
+### 9.7 Proof results (UE-0)
+
+| Step | Command | Result |
+|---|---|---|
+| Build | `rbue.py build` | Succeeded, 0 errors, 0 warnings |
+| Python level | `rbue.py py Tools/unreal/editor/rb_pipeline_proof.py` | `/Game/Dev/PipelineProof/L_PipelineProof` created (22 s) |
+| C++ bake from Python | `rbue.py py Tools/unreal/editor/rb_bake_selftest.py` | `SM_BakeSelfTest` saved, extent 50 cm verified (6.5 s) |
+| Screenshot | `rbue.py capture --map /Game/Dev/PipelineProof/L_PipelineProof --camera ProofCam --out Docs/images/pipeline-proof.png` | 1920x1080 PNG, full HWRT/Substrate renderer (12 s warm) |
+| Tests | `rbue.py test --filter RawBreak.` | 5/5 passed (Coords T14/T15/T16/Azimuth, Functional.PieSmoke) |
+| Re-run after the review (section 16) | `rbue.py build`, `build --target RawBreak`, `test`, `py rb_bake_selftest.py`, `capture` | editor 25 s and **game target** 60 s, both 0 errors / 0 warnings; 5/5 tests; bake self-test incl. the Nanite path (full-detail fallback asserted); capture OK in 17.9 s with the 4 s warm-up floor and the strict shader check clean |
+
+![pipeline proof](images/pipeline-proof.png)
+
+### 9.8 Pitfalls found while proving the pipeline
+
+1. Git Bash rewrites `/Game/...` arguments of native programs (MSYS path conversion) -> use PowerShell, `MSYS_NO_PATHCONV=1`, or `rbue.py` (repairs `--map`).
+2. `cmd //c "Build.bat ..."` quoting from Git Bash fails; call Build.bat from PowerShell or via `rbue.py`.
+3. `-game` windowed resolution is clamped to the desktop work area -> `-ForceRes`.
+4. `FTickableGameObject` subsystems: the class default object ticks too -> `Conditional` + `IsTickable()` on an armed flag.
+5. The editor appends `AndroidFileServer` settings with a random token to `DefaultEngine.ini` -> plugin disabled.
+6. The Python commandlet returns 0 on script exceptions -> scan the log (`rbue.py` does).
+7. Never run an Unreal process while UBT links (DLL locks).
+8. Shader DDC is shared across projects (Zen): a content-only warm-up project with the same renderer settings pre-fills it.
+
+---
+
+## 10. Test conventions
+
+* Unit tests beside the code in `Source/RawBreak/Private/Tests/Rb<Area>Tests.cpp` (flags `RB_UNIT_TEST_FLAGS`), functional PIE tests in `Source/RawBreakEditor/Private/Tests/`.
+* Engine-agnostic maths (T1-T13, T19-T22) are plain `RunTest` checks with the tolerances of UE 13.
+* Screenshot checks: each WP renders its own dev map under `/Game/Dev/<WP>/` (script `Tools/unreal/editor/rb_dev_<wp>.py`) with capture cameras and commits the PNGs to `Docs/images/<wp>/` for review (Claude inspects them); pixel-diff regression (E2) comes after M1 once baselines are approved.
+* Headless determinism: every functional test uses fixed seeds (`?Seed=`) and scripted strokes/strikes.
+
+---
+
+## 11. Python tools layout
+
+```
+Tools/unreal/
+  rbue.py                  host runner: build | py | capture | test | game                         UE-0
+  capture_m1.py            host: all M1 acceptance captures (4 cameras, High, 1920x1080)          UE-8
+  editor/                  run INSIDE Unreal (commandlet)
+    rb_common.py           helpers: new_level, spawn, spawn_mesh, save, fail (RBUE_FAIL)          UE-0
+    rb_pipeline_proof.py   proof level                                                            UE-0
+    rb_bake_selftest.py    C++ bake path check                                                    UE-0
+    rb_make_materials.py   M_Rb* materials + MPC_RbBalls                                          UE-3
+    rb_bake_table.py       BakeTableMeshes for the M1 preset(s)                                   UE-1
+    rb_bake_ball.py        BakeBallMesh                                                           UE-2
+    rb_bake_cue.py         BakeCueMesh                                                            UE-4
+    rb_make_test_room.py   L_M1_TestRoom (room, table, PlayerStart, capture cameras, GameMode)   UE-8
+    rb_make_all.py         runs every generator in dependency order                               UE-8
+    rb_dev_<wp>.py         per-WP dev map for screenshot checks under /Game/Dev/<WP>              owner WP
+```
+
+---
+
+## 12. Milestone M1 — first playable
+
+**Scope** (from the product brief): generated test room (clean, lamp in physical units, neutral walls/floor); 9-ft table built procedurally from `rb` geometry (bed/cloth, cushions, rails, pockets, diamonds); 16 balls with the analytic number/stripe material; first-person pawn: walk around the table, get down, aim with the mouse, tip offset/elevation, mouse stroke with timestamped raw input -> tip speed at contact; `ExecuteStroke` -> `Simulator` on a worker -> playback (position + orientation, decoupled clock); 9-ball **practice** and local **hot-seat** through the rules/match flow (optional lag, break, turns, fouls, ball in hand placement, win); toggleable info/debug overlay + glance key; replay of the last shot; simple procedural cue. **Not in M1**: body/hands (MetaHuman), audio, dive-bar venue, AI opponents, settings menu UI, packaging.
+
+**Acceptance checks** (all headless except A9):
+
+| # | Check | How |
+|---|---|---|
+| A1 | Build clean | `rbue.py build` (editor) and `--target RawBreak` succeed with 0 errors, 0 project warnings |
+| A2 | Regenerate from scratch | delete `Content/Generated`, `rbue.py py Tools/unreal/editor/rb_make_all.py` recreates materials, baked 9-ft table, ball, cue and `L_M1_TestRoom`; a second run succeeds and gives the same asset metrics (per-mesh triangle counts and bounds, material parameter values, the level validator's report). Byte-identical packages are NOT required (UE re-saves packages with new GUIDs / timestamps) |
+| A3 | Unit tests | `rbue.py test --filter RawBreak.Unit` green: T1-T16, T19-T22 and the package tests of section 13 |
+| A4 | Functional flow | `rbue.py test --filter RawBreak.Functional` green: PieSmoke, MatchFlow (rack -> scripted break -> turn logic; scratch -> ball in hand to the opponent; illegal placement rejected; 9 pocketed wins), StrokePath (scripted samples -> human layer -> shot), Replay (bitwise end state), M1Flow on `L_M1_TestRoom` |
+| A5 | Determinism (ROB-10, UE half) | the break9 scenario rebuilt in the UE module through the same core calls as `rbsim` (9-ft pro, 9-ball rack, wooden gaps, seed 11, CB (-0.735, 0.12), break cue, 9 m/s, aim -5.006 deg, offset (0, -0.1)): `RbShot::InputHash` and `ResultHash` equal the values `rbsim ... --hash` printed into `Tools/rbsim/examples/break9.hash` (the rounded `break9.json` can never give a bitwise input) |
+| A6 | Performance | logged: break simulation < 2 ms, hand-off in the contact frame for ≥ 95 % of the flow test's shots; capture of `stat unit` during playback on High 1080p: game thread < 6 ms (plan 9.1) |
+| A7 | Look | `python Tools/unreal/capture_m1.py` -> `Docs/images/m1/{overhead,chin_on_cue,ball_closeup,room}.png` through `ARbLookDevCamera`s (Eyes preset), strict capture (no shader errors), inspected: correct table proportions and pocket/diamond positions (overhead vs rb geometry), 16 racked numbered/striped balls, no holes/z-fighting/black Lumen patches, lamp uniform on the bed, cue under the chin, sane exposure |
+| A8 | Lamp compliance (E4) | computed illuminance ≥ 520 lux on bed and rails, room ≈ 50 lux |
+| A9 | **Human playtest (the user)** | `rbue.py game`: walk, get down, aim, stroke with the mouse, 9-ball practice + hot-seat incl. fouls / ball in hand / win, F1/Tab overlay, R replay. The log line of `FRbRawMouseInput` must report true per-report timestamps (6.2.1). The user's verdict closes M1. |
+| A10 | Replay | R replays the last shot bitwise from at least the Shooter and Overhead views and returns to the live table |
+
+---
+
+## 13. Work packages
+
+Same process as the core (memory "Dev process"): one agent per WP in its own worktree (branch `ue/<id>`), an adversarial reviewer-fixer, merge by Claude. Every WP: owns exactly the files listed (disjoint), keeps the build green (`rbue.py build`), replaces its `TODO(UE-x)` stubs, adds its tests, runs `rbue.py test --filter RawBreak.` before handing over, commits screenshots of its dev map where listed. Shared contracts (headers of other areas, `RbAssetPaths.h`, `RbTypes.h`, config) change only through the owner/architect.
+
+| WP | Title | Owned files | Depends on | Acceptance tests |
+|---|---|---|---|---|
+| **UE-0** | Architecture & skeleton (done, reviewed) | `RawBreak.uproject`, `Source/*.Target.cs`, all `Build.cs`, `Config/DefaultEngine.ini`, `Config/DefaultInput.ini`, `Source/RawBreak/Public/RawBreak.h`, `Private/RawBreakModule.cpp`, `Core/*` (RbCoords.h, RbTypes.h/.cpp, RbAssetPaths.h), `Math/RbCameraMath.h` (frozen header), `Dev/RbHeadlessCaptureSubsystem.*`, `Private/Tests/RbTestFlags.h`, `Private/Tests/RbCoordsTests.cpp`, `Source/RawBreakShaders/**`, `Source/RawBreakEditor/Public/RbAssetBakeLibrary.h`, `RawBreakEditorModule.cpp`, `RbAssetBake_Common.cpp`, `RawBreakEditor/Private/Tests/RbPieSmokeTest.cpp`, `Tools/unreal/rbue.py`, `editor/rb_common.py`, `rb_pipeline_proof.py`, `rb_bake_selftest.py`, this document | — | section 9.7 (all green) |
+| **UE-1** | Table geometry -> meshes | `Table/RbTableMeshBuilder.h/.cpp`, `Table/RbTable.h/.cpp`, `RawBreakEditor/Private/RbAssetBake_Table.cpp`, `editor/rb_bake_table.py`, `editor/rb_dev_ue1.py`, `Private/Tests/RbTableTests.cpp` | UE-0 | `RawBreak.Unit.Table.*`: nose line at h and on `BuildNoseOutline` within 0.01 mm; pocket cut radius r_p and drop rounding r_d; 18 sights at `Sight::Position`; bed top z = 0; part bounds = `OuterBoundary` (+ apron); outward normals in UE space; closed boundaries; baked triangle count = runtime; `CoreToWorld`/`WorldToCore`/azimuth round trips with a translated + yawed table; part components are transient and rebuilt at BeginPlay (a saved level never stores stale meshes: reload test); screenshots `Docs/images/ue1/{overhead,pocket_closeup}.png` (strict capture) |
+| **UE-2** | Balls & playback | `Balls/*` (.h/.cpp), `RawBreakEditor/Private/RbAssetBake_Ball.cpp`, `editor/rb_bake_ball.py`, `editor/rb_dev_ue2.py`, `Private/Tests/RbBallTests.cpp`, `Private/Tests/RbPlaybackTests.cpp` | UE-0 | ball mesh sagitta < 0.035 mm at R (T20 bound), closed; playback of a real simulated 2-ball shot: ball transforms == `FRbCoords(rb::StateAt)` within 1e-6 cm at 200 random times, cursor == random access bitwise, seek back, rate/pause without time jumps, anchored `Play` shows the state of now, Terminal hide, snap to finals, each event fired once in order, `ETeleportType::None`; MPC values; screenshot `Docs/images/ue2/rack.png` (fallback material is fine before UE-3) |
+| **UE-3** | Materials & shaders | `Shaders/Private/*.ush`, `editor/rb_make_materials.py`, `editor/rb_dev_ue3.py`, `Private/Math/RbCameraMath_Render.cpp`, `Private/Tests/RbRenderMathTests.cpp` | UE-0 | T1, T6, T7, T19, T20, T21, T22; all `M_Rb*` + `MPC_RbBalls` generated idempotently; the dev-map captures pass `rbue.py capture` in strict mode (no material / shader compile errors); screenshots `Docs/images/ue3/{ball_lineup,cloth_grazing}.png`: 16 correct WPA colours/numbers (6 and 9 underscored), stripes centred, no seams, numbers visible in the hit-lit reflection of a neighbouring ball |
+| **UE-4** | Cue | `Cue/*` (.h/.cpp), `RawBreakEditor/Private/RbAssetBake_Cue.cpp`, `editor/rb_bake_cue.py`, `Private/Tests/RbCueTests.cpp` | UE-0 | T13 (20.787 deg +- 0.01); rail floor case; mesh length / tip + butt radii = CueSpec/CueBodyState; `SetPoseCore` puts the tip dome centre exactly at the given point (1e-4 cm) in a yawed table; environment sweep blocked by a wall placed in a test world |
+| **UE-5a** | Input & stroke | `Input/*` (.h/.cpp), `Math/RbStrokeMath.h/.cpp`, `Player/RbStrokeComponent.h/.cpp`, `Private/Tests/RbStrokeMathTests.cpp`, `Private/Tests/RbStrokeTests.cpp`, `Private/Tests/RbRawInputTests.cpp` | UE-0 (UE-4 clearance and UE-6b's `FRbStrokeContext` through frozen headers) | T9, T10, T11, T12; scripted stroke of known speed -> `Intended.Speed` within 1e-3 m/s and **bitwise identical** when the same samples arrive in 30 / 60 / 144 fps frame splits; practice stop-short; commit; AddressIndex; cue pose = `SampleHand` and, at t_c with the full ramp, equals `ExecuteStroke` (what you see is what hits); abort after the ramp -> `OnStrokeAborted(true)`, before it -> `false`; Settle sets `SettleStart`; a Stroke press in PlacingCueBall confirms; input setup maps every action, no key twice; raw input: SPSC ring order + fallback time reconstruction unit tests, thread start / stop without leaks; startup log states true timestamps in `rbue.py game` (checked in A9) |
+| **UE-5b** | Pawn, camera, controller | `Player/RbPlayerCharacter.h/.cpp`, `Player/RbPlayerController.h/.cpp`, `Camera/*` (.h/.cpp), `Private/Math/RbCameraMath_Camera.cpp`, `Private/Tests/RbCameraMathTests.cpp`, `Private/Tests/RbCameraRigTests.cpp` | UE-0 | T2, T3, T4, T5, T8; eye placement formula (UE 4.2) vs hand-computed; the engine's projection (`FMinimalViewInfo::CalculateProjectionMatrixGivenViewRectangle`, MaintainYFOV) gives V = 50 deg at 16:9 and 21:9 with the filmback `ApplyPresetToCamera` sets; f and N equal `PupilToCineLens` at the viewport aspect; Defaults == plan 4.9 table; functional: pawn cannot walk into the table (PIE, UE-1 table or a box) |
+| **UE-6a** | Simulation service | `Simulation/*` (.h/.cpp), `Private/Tests/RbSimulationTests.cpp`, `Tools/rbsim/Main.cpp` (only a new `--hash` flag printing `InputHash` and `ResultHash`), `Tools/rbsim/examples/break9.hash` | UE-0 | worker hand-off in the same frame, results == `RunShotBlocking` bitwise, compact copy < 1 MB for a break; **ROB-10** as A5 (scenario rebuilt through core calls, both hashes == `break9.hash`); `Deinitialize` with a shot in flight (waits, no crash); `SubmitShot` refuses while busy |
+| **UE-6b** | Match director & game mode | `Game/RbShooterState.h`, `Game/RbMatchDirector.h/.cpp`, `Game/RbGameMode.h/.cpp`, `Private/Tests/RbMatchTests.cpp`, `RawBreakEditor/Private/Tests/RbMatchFlowTest.cpp` | UE-0 (UE-6a through its frozen header; tests run with `SetLivePlaybackRate(0)` and scripted strikes, so they need neither UE-2 nor UE-5a) | headless match flows (A4 list: rack -> scripted break -> turn logic; scratch -> ball in hand to the opponent; illegal placement rejected; 9 pocketed wins; three fouls in hot-seat); `ExecuteStroke` path with NoiseScale 0 == intended stroke; TableState sync after spotting (9 pocketed on a foul -> on the table in GameState and TableState at the same position); an aborted stroke with the ramp advances `ShooterShotIndex` / the history; a replay finishing on the playback component never commits; auto-chalk changes `TipState`; `IsReplayAllowed` per phase; Assisted input mode |
+| **UE-7** | UI, replay, cheats | `UI/*` (.h/.cpp), `Replay/*` (.h/.cpp), `Dev/RbCheatManager.h/.cpp`, `Private/Tests/RbOverlayTests.cpp`, `RawBreakEditor/Private/Tests/RbReplayTest.cpp` | UE-0 | overlay model text for scripted states (two-foul warning, ball in hand, decision options); **mandatory lines present in Hidden mode**; modes Hidden/Glance/Pinned; post-shot auto-glance; replay end state == live end state bitwise; replay refused while a live shot plays; history cap; every cheat drives the director (RbDumpState grep-able; new `RbPlaybackRate <rate>` for tests) |
+| **UE-8** | Room, level, settings, M1 look-dev | `Game/RbTestRoom.h/.cpp`, `Dev/RbLookDevCamera.h/.cpp`, `Settings/*` (.h/.cpp), `Config/DefaultScalability.ini`, `editor/rb_make_test_room.py`, `editor/rb_make_all.py`, `Tools/unreal/capture_m1.py`, `RawBreakEditor/Private/Tests/RbM1FlowTest.cpp`, `Private/Tests/RbRoomTests.cpp`, `Docs/images/m1/*` | UE-0; final checks after UE-1..UE-7 merge | E4 lux >= 520 on bed + rails; level validator (one table at the origin, room, PlayerStart at the head end, 4 `ARbLookDevCamera`s with `RbAssetPaths::CaptureCamera` tags, World Settings GameMode = `ARbGameMode`, table `LampUndersideHeight` == room lamp, room bed height == TableSpec); A2 (metrics, not bytes), A7; settings persist and apply the High preset (Hit Lighting reflections on; Low / Medium lower `r.Lumen.HardwareRayTracing.LightingMode`) |
+
+**Waves.** All WPs depend only on UE-0's frozen headers, so any grouping works. Recommended (usage limits, memory "Dev process"): **Wave A** UE-1, UE-2, UE-5a, UE-6a, UE-6b (the playable core loop); **Wave B** UE-3, UE-4, UE-5b, UE-7, UE-8 (look, cue, pawn, UI, room). Then the **integration round**: merge (order UE-6a, UE-1, UE-2, UE-6b, UE-5a, UE-4, UE-5b, UE-3, UE-7, UE-8), cross-package fixes, `rb_make_all.py`, A1-A10, and the user playtest.
+
+**Test-ID coverage.** T1 UE-3, T2-T5 UE-5b, T6-T7 UE-3, T8 UE-5b, T9-T12 UE-5a, T13 UE-4, T14-T16 UE-0 (done), T17-T18 core (Playback tests, done), T19-T22 UE-3, T23 audio (post-M1), T24 core + UE-0 (UE axes), E1 post-M1 (Gauntlet), E2 post-M1 (baselines from A7), E3 UE-2 (no-teleport functional; velocity-buffer check post-M1), E4 UE-8, E5 audio (post-M1), E6 body (post-M1).
+
+---
+
+## 14. Open risks
+
+| Risk | Mitigation |
+|---|---|
+| Raw mouse timestamps (corrected in review R-01): `WM_INPUT` does reach an `IWindowsMessageHandler`, but in the once-per-frame pump, so handler timestamps are pump times | own raw-input thread with per-report QPC stamps + forwarding to Slate (6.2.1); fallback reconstruction; `HasTrueTimestamps()` logged and checked in A9 |
+| Runtime dynamic meshes have no Lumen cards (black GI / reflections) | look-dev and M1 always use baked static meshes (A2); dynamic path only for tests |
+| Substrate + HWRT shader compile times (cold DDC ~3 min for engine materials; every new material adds more) | generous capture timeouts, warm the DDC after `rb_make_all.py` with one render run; PSO precaching later for players |
+| Headless render path (`-RenderOffscreen`, editor binary, no DLSS) differs from the shipped game | screenshots are for inspection, not pixel baselines, until packaging exists; DLSS plugin later |
+| Mouse stroke feel (gain curve, commit rule) is unproven | A9 playtest with the user; parameters live in settings |
+| Hot-seat on one pawn (camera / stroke state carry-over between players) | director re-arms the stroke component per turn; functional test covers the hand-over |
+| UE 5.8 API drift (e.g. Nanite settings accessors since 5.7, `UE_LOGF`) | skeleton already uses the 5.8 accessors; reviewers build every WP |
+| The editor rewrites config files on headless runs (seen: AndroidFileServer) | review `git diff Config/` on every merge |
+| Generated binary assets in git (LFS size, merge conflicts) | only generators write them; regenerate instead of merging; `/Game/Dev` ignored |
+| Determinism across the UE module vs standalone | ROB-10 check in UE-6a (A5) |
+
+---
+
+## 15. After M1 (hooks already in place)
+
+MetaHuman body with world-space head (UE 5.1) and IK stance (5.3) driven by `SampleHand`; audio from `ShotResult::Events` (UE 8, T23, E5); the dive-bar venue (7-ft bar table, oversized cue ball: `ERbTablePreset::SevenFootBar`, `ERbBallSetPreset::OldBarOversizedCue`, `MakeVenueTableCondition`); AI opponents (`SyntheticHand` + simulator pool); Headcam post-process; full settings menu with the plan 9.4 matrix; trailer capture kit on top of the replay system (Movie Render Queue, path tracer in Cinematic); packaging and Steam.
+
+---
+
+## 16. Review resolution (adversarial review of UE-0, 2026-09-27)
+
+Scope: UE 5.8.3 reality (engine source and plugin files grepped under `C:/Program Files/Epic Games/UE_5.8`), spec compliance (realism plan, human factors UG/UA, rules UI, decisions), threading / lifetime / determinism, work-package cut. Everything below is fixed in this document and, where code was involved, in the skeleton (rebuilt: editor and game target, 0 errors / 0 warnings; tests, bake self-test and capture re-run green, 9.7).
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| R-01 | high | Raw mouse: UE 5.8 handles `WM_INPUT` of its game window in the once-per-frame message pump, so an `IWindowsMessageHandler` gets all reports of a frame in one burst and a QPC stamp taken there is the pump time: the stroke speed would be frame-quantised, the exact failure of pitfall 19. (The risk table assumed the opposite problem.) UE's own worker-thread mode stores no times and bypasses handlers. | `FRbRawMouseInput` owns a dedicated raw-input thread (message-only window, per-report QPC stamp, SPSC ring), forwards deltas to `FSlateApplication::OnRawMouseMove`, re-registers when UE takes the mouse back, reconstructs times as a fallback; `HasTrueTimestamps()` added; 6.2.1, 7.2, 14, UE-5a acceptance, A9. |
+| R-02 | high | In 5.8 ray tracing traces the Nanite FALLBACK mesh (`r.RayTracing.Nanite.Mode=0`, RT proxies off by default) and the Auto fallback decimates: ball reflections, Lumen HWRT hits and complex-as-simple collision would see a coarser table (jaws, noses) than the one rendered. | `WriteStaticMesh` bakes Nanite meshes with a 100 % triangle fallback; `BakeSelfTest` now also bakes and checks a Nanite copy (2.2). |
+| R-03 | high | `r.Lumen.HardwareRayTracing.LightingMode` defaults to 0 (surface cache) in 5.8; plan 6.2 / 6.6 / 9.4 require Hit Lighting for Reflections from High up (balls mirroring lamp, room, balls), and High is the M1 default. | `DefaultEngine.ini`: `r.Lumen.HardwareRayTracing.LightingMode=2`; Low / Medium lower it (UE-8 acceptance). |
+| R-04 | high | Contract gap vs architecture.md 13 item 4 / HF 3.7 / HF-B13: the rendered cue must follow `rb::human::SampleHand` (what you see is what hits) and an aborted stroke that showed the per-shot ramp must spend the draws. UE-0 had deferred SampleHand to "later", so M1 noise would be invisible (HF principle 1) and the stroke component had no access to the inputs. | `FRbStrokeContext` + `SetStrokeContext`, `OnStrokeAborted(bRampShown)`, `GetHandPose` (stroke component); `MakeStrokeContext`, `OnStrokeAborted` (director); 5.2 steps 3 and 5, 6.2; tests in UE-5a / UE-6b. |
+| R-05 | high | Rules UI obligation (rules.md 16 items 2, 12, Reg 8: always display the foul counter, the display IS the mandatory two-foul warning; show the enforced foul with its rule reference) contradicted the Hidden-by-default overlay. | `FRbOverlayModel::MandatoryLines` shown in every mode (fouls > 0 with warning, pending decision + options, ball in hand) plus a 4 s post-shot auto-glance; "no HUD" kept for everything else (6.6, UE-7). |
+| R-06 | medium | Cine camera (verified in 5.8 `CameraStackTypes.cpp`): with MaintainYFOV the vertical FOV comes from the lens and the FILMBACK aspect, and diaphragm DoF scales by the sensor width; the plan's `f = w_sensor / (2 tan(H/2))` is right only if the filmback aspect equals the viewport aspect, otherwise FOV and DoF blur are off at 21:9 (or with a 3:2 back). | Rule in 6.3 and the rig header: filmback aspect = viewport aspect, `f = h_sensor / (2 tan(V/2))`, `N = f / A`; `URbCameraRigComponent::ApplyPresetToCamera`; UE-5b acceptance checks the engine's own projection matrix at 16:9 and 21:9. |
+| R-07 | high | One playback component serves live shots and replays, and the director listened to its `OnFinished` unconditionally: a finished replay would have committed the replayed shot a second time (`ApplyShot` twice); the replay subsystem likewise reacted to live shots. | Guards implemented in the stubs (director commits only its `PendingShot` in PlayingBack; replay acts only on `ReplayShot`); `URbMatchDirector::IsReplayAllowed`; 5.5, 6.7, tests in UE-6b / UE-7. |
+| R-08 | medium | Look-dev / acceptance captures (A7) used plain `ACameraActor`s, i.e. engine-default FOV, exposure and DoF, so "sane exposure" was judged through a camera the game never uses. | New `ARbLookDevCamera` (cine camera applying a RAW BREAK preset, owner UE-8); capture subsystem finds it as a camera actor; 9.4, A7, UE-8. |
+| R-09 | low | Capture warm-up counted only frames; auto exposure adapts in EV per second (0.7 EV/s down for Eyes), so on a fast GPU 90 frames can end before exposure settles. | `-RBCaptureWarmupSeconds` (default 4 s of game time) in `URbHeadlessCaptureSubsystem`, `rbue.py capture --warmup-seconds`; verified (4.6 s warm-up in the re-run). |
+| R-10 | medium | Materials are generated under `-NullRHI`; a broken Custom-node include only shows at the first render, where UE silently substitutes the default material, and the capture still "succeeds". | `rbue.py capture` fails on `Failed to compile Material`, `Default Material will be used`, `LogShaderCompilers: Error`, `LogMaterial: Error` (opt-out `--allow-shader-errors`); UE-3 acceptance uses it; clean re-run passes. |
+| R-11 | medium | The rules input mode for M1 was unspecified (Sim mode would require body / cue colliders that M1 does not have, rules.md 16 item 22). | M1 = `InputMode::Assisted`: no 3.4 / 3.6 / 3.10 fouls, `NonTipContacts` empty, shaft-contact candidates only in the F2 block, illegal placement refused (7.1, director header). |
+| R-12 | high | Two sources of truth for ball positions after a shot: `ApplyShot` spots balls in the rules' `GameState`, while 5.2 rebuilt `FRbTableState` from `Result.Finals` only, so a spotted 9 would be missing / misplaced for the next simulation. | One sync function: status + plan position from `MatchState.Game.Balls` (authoritative, incl. spotted balls), orientation / chalk marks / z from `Finals`, cue ball in hand out of play until placed (`RbShooterState.h`, 5.2 step 10, UE-6b test). |
+| R-13 | high | ROB-10 as planned (`rbsim --in break9.json --hash`) cannot work: `break9.json` is a rounded OUTPUT file (6 significant digits), not an `rbsimInput` dump, so no bitwise input exists; the UE module also has no reader for it. | The UE test rebuilds the break9 scenario through the same core calls rbsim makes and compares `RbShot::InputHash` (added) and `ResultHash` with `Tools/rbsim/examples/break9.hash` written by `rbsim --hash` (UE-6a, A5). |
+| R-14 | low | Duplicate constants: `ARbTestRoom::BedHeight` (76.5 cm) vs `TableSpec::BedHeight`, and `ARbTable::LampUndersideHeight` (1.0 m) vs the room lamp (1.016 m) feeding the physics' off-table apex check. | Single-source rule (room reads the table, generator writes the lamp height into the table), checked by the UE-8 level validator (8.3). |
+| R-15 | medium | UE-6's headless match-flow tests could not pass inside Wave A: shots commit only on the playback's `OnFinished` (UE-2, same wave) and a break plays 11 s of real time. UE-6 was also the largest package (simulation service + director + game mode + ROB-10 + rbsim). | `URbMatchDirector::SetLivePlaybackRate(0)` = commit right after the simulation (tests, `RbPlaybackRate` cheat); UE-6 split into UE-6a (simulation service, ROB-10) and UE-6b (director, game mode, match tests), both Wave A (13). |
+| R-16 | low | `URbShotPlaybackComponent::Play` showed t = 0 in the hand-off frame of a live shot instead of the state at "now - contact". | Fixed in the stub (5.5). |
+| R-17 | medium | Left mouse was bound to both Stroke and Confirm, violating UE-5a's own "no key bound twice" acceptance. | Confirm = Enter / F; a Stroke press while PlacingCueBall is routed to Confirm (6.2, 6.5, input header). |
+| R-18 | medium | HF V1 inputs of `ExecuteStroke` without a source: no Settle input (HF-06, `SettleStart`), no `ChalkCube` in the shooter state (HF-22 chalking needs it), pressure / fatigue / `PauseDuration` / `HeadMovedBeforeContact` undefined for M1. | `Settle` action (Left Ctrl) + handler; `FRbShooterState::Cube` + auto-chalk with `PerformChalking`; pressure via `ComputePressure` (practice / friendly stakes, game ball, hill, `?Pressure=0`), fatigue 0, intoxication 0; input-log derivations in 6.2 (7.1). |
+| R-19 | low | A2 demanded that a second generator run "changes nothing": UE re-saves packages with new GUIDs / timestamps, so byte identity is not achievable. | A2 compares asset metrics and the level validator report instead (12). |
+| R-20 | low | Playtest flow gaps: no input to continue after RackOver / MatchOver, and no attribute profile for practice (no career in M1; `ShooterAttributes` defaults to 25). | Confirm = next rack / new match; practice uses the neutral guest profile (50), `?Attr=` override (6.5, 7.1). |
+| R-21 | info | A1 requires the game target, which UE-0 had never built. | Built: `rbue.py build --target RawBreak` succeeds, 60 s, 0 warnings (9.7). |
+| R-22 | low | Ownership nits: the game mode's TODO claimed the M1Flow test (owned by UE-8's `RbM1FlowTest.cpp`); `RbCameraMath.h` was listed for no package. | Comment fixed; `RbCameraMath.h` is a UE-0 frozen header, each owner implements its own .cpp (3, 13). |
+
+**Verified and unchanged.** Coordinate adapter and its tests (positions, the pseudovector sign rule `w_UE = (-wx, wy, -wz)`, quaternion mirror, azimuth / cue direction); no First Person Rendering FOV or scale anywhere (world-space cue, near clip 1 cm); every engine name the skeleton and the plan rely on exists in 5.8.3: `UInputMappingContext::MapKey`, `UMaterialExpressionCustom::IncludeFilePaths`, `UMaterialExpressionSubstrateSlabBSDF` / `VerticalLayering` / `HazinessToSecondaryRoughness`, `MP_FrontMaterial` (Python-visible `EMaterialProperty`), `FMeshNaniteSettings` fallback fields, `UE::Tasks::TTask::Wait(FTimespan)`, `IWindowsMessageHandler` + `FWindowsApplication::AddMessageHandler`, `FSlateApplication::OnRawMouseMove`, `UDynamicMeshComponent::SetComplexAsSimpleCollisionEnabled`, all `r.*` keys of `DefaultEngine.ini` as `URendererSettings` console variables (`r.Substrate.ProjectGBufferFormat` 1 = Adaptive); threading (the worker sees plain data and a thread-safe `TSharedPtr<const FRbTableContext>`, immutable hand-off, `Deinitialize` waits, no UObject off the game thread); replays play the stored result bitwise; headless screenshots work with the full renderer. Remaining open items stay in section 14 (stroke feel, cold shader cache, headless vs packaged look, config rewrites).
+
+**Final work-package list** (details in section 13):
+
+| WP | Title | Depends on |
+|---|---|---|
+| UE-0 | Architecture & skeleton | done, reviewed |
+| UE-1 | Table geometry -> meshes | UE-0 |
+| UE-2 | Balls & playback | UE-0 |
+| UE-3 | Materials & shaders | UE-0 |
+| UE-4 | Cue | UE-0 |
+| UE-5a | Input & stroke (raw-input thread, SampleHand cue) | UE-0 (UE-4, UE-6b headers) |
+| UE-5b | Pawn, camera, controller | UE-0 |
+| UE-6a | Simulation service + ROB-10 | UE-0 |
+| UE-6b | Match director & game mode | UE-0 (UE-6a header) |
+| UE-7 | UI (mandatory lines), replay, cheats | UE-0 |
+| UE-8 | Room, level, settings, look-dev cameras, M1 captures | UE-0; final checks after UE-1..UE-7 |
+
+Wave A: UE-1, UE-2, UE-5a, UE-6a, UE-6b. Wave B: UE-3, UE-4, UE-5b, UE-7, UE-8. Then the integration round with the user playtest (A9) = M1.
