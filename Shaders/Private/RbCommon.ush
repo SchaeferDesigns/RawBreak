@@ -1,0 +1,113 @@
+// RAW BREAK - shared helpers of the generated materials (Docs/ue-architecture.md 8.2): anti-aliased steps that stay
+// valid in ray-tracing hit shaders, integer hashing and gradient noise with analytic derivatives, footprint-based
+// frequency clamping. Included by RbBall.ush / RbSurfaces.ush through the Custom nodes of rb_make_materials.py.
+//
+// Ray tracing: Common.ush defines ddx / ddy / fwidth as 0 in hit shaders (Lumen hit-lit reflections), so every filter
+// width here has a floor (RB_RT_* below) that keeps reflected detail soft instead of aliased.
+
+#pragma once
+
+#define RB_PI 3.14159265358979
+#define RB_TWO_PI 6.28318530717959
+
+#if RAYHITGROUPSHADER || RAYMISSSHADER || RAYCALLABLESHADER
+	#define RB_IS_RAY_TRACING 1
+#else
+	#define RB_IS_RAY_TRACING 0
+#endif
+
+// Coverage of the region SignedDist > 0 for a pixel footprint FilterWidth (same units): a box filter over the edge.
+float RbAaStep(float SignedDist, float FilterWidth, float MinWidth)
+{
+	return saturate(SignedDist / max(FilterWidth, MinWidth) + 0.5);
+}
+
+// ---- hashing / noise ------------------------------------------------------------------------------------------------
+
+// PCG-style integer hash (Jarzynski & Olano 2020): no sin() hashing, exact for any lattice coordinate.
+uint RbPcgHash(uint V)
+{
+	const uint State = V * 747796405u + 2891336453u;
+	const uint Word = ((State >> ((State >> 28u) + 4u)) ^ State) * 277803737u;
+	return (Word >> 22u) ^ Word;
+}
+
+float RbHash2(int2 C)
+{
+	return float(RbPcgHash(asuint(C.x) + RbPcgHash(asuint(C.y) + 0x9E3779B9u))) * (1.0 / 4294967296.0);
+}
+
+float RbHash3(int3 C)
+{
+	return float(RbPcgHash(asuint(C.x) + RbPcgHash(asuint(C.y) + RbPcgHash(asuint(C.z) + 0x7F4A7C15u)))) * (1.0 / 4294967296.0);
+}
+
+float2 RbLatticeGradient(int2 C)
+{
+	const float A = RbHash2(C) * RB_TWO_PI;
+	return float2(cos(A), sin(A));
+}
+
+// 2D gradient noise with quintic interpolation. Returns (value in ~[-0.7, 0.7], d/dx, d/dy).
+float3 RbGradientNoise(float2 P)
+{
+	const float2 I = floor(P);
+	const float2 F = P - I;
+	const int2 C = int2(I);
+	const float2 U = F * F * F * (F * (F * 6.0 - 15.0) + 10.0);
+	const float2 Du = 30.0 * F * F * (F * (F - 2.0) + 1.0);
+
+	const float2 Ga = RbLatticeGradient(C);
+	const float2 Gb = RbLatticeGradient(C + int2(1, 0));
+	const float2 Gc = RbLatticeGradient(C + int2(0, 1));
+	const float2 Gd = RbLatticeGradient(C + int2(1, 1));
+	const float Va = dot(Ga, F);
+	const float Vb = dot(Gb, F - float2(1.0, 0.0));
+	const float Vc = dot(Gc, F - float2(0.0, 1.0));
+	const float Vd = dot(Gd, F - float2(1.0, 1.0));
+
+	const float Value = Va + U.x * (Vb - Va) + U.y * (Vc - Va) + U.x * U.y * (Va - Vb - Vc + Vd);
+	const float2 Deriv = Ga + U.x * (Gb - Ga) + U.y * (Gc - Ga) + U.x * U.y * (Ga - Gb - Gc + Gd)
+		+ Du * (U.yx * (Va - Vb - Vc + Vd) + float2(Vb, Vc) - Va);
+	return float3(Value, Deriv);
+}
+
+// Weight of a noise octave of spatial frequency Freq [1/unit] for a pixel footprint Footprint [unit]: 1 while the
+// octave is resolved, fading to 0 before it reaches the Nyquist limit (frequency clamping, no shimmer at grazing angles).
+float RbOctaveWeight(float Freq, float Footprint)
+{
+	return 1.0 - smoothstep(0.25, 0.5, Freq * Footprint);
+}
+
+// Band-limited fractal sum (value only). Frequencies Freq * 2^k, amplitudes 0.5^k; octaves above Nyquist fade out.
+float RbFbm(float2 P, int Octaves, float Footprint)
+{
+	float Sum = 0.0;
+	float Amp = 0.5;
+	float Freq = 1.0;
+	for (int K = 0; K < Octaves; ++K)
+	{
+		Sum += Amp * RbGradientNoise(P * Freq + float2(17.3 * K, -9.1 * K)).x * RbOctaveWeight(Freq, Footprint);
+		Freq *= 2.0;
+		Amp *= 0.5;
+	}
+	return Sum;
+}
+
+// Pixel footprint of a 2D coordinate (same units as Coord). In ray-tracing hit shaders there are no derivatives: the
+// caller's floor (a typical reflection footprint) is used.
+float RbFootprint(float2 Coord, float RayTracingFloor)
+{
+	const float2 W = fwidth(Coord);
+	const float F = max(W.x, W.y);
+#if RB_IS_RAY_TRACING
+	return max(F, RayTracingFloor);
+#else
+	return F;
+#endif
+}
+
+float RbLuminance(float3 C)
+{
+	return dot(C, float3(0.2126, 0.7152, 0.0722));
+}

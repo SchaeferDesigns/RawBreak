@@ -1,0 +1,227 @@
+// RAW BREAK - procedural surface detail of the table, cue and room materials (ue5-realism-plan 6.3, 6.4; Docs/ue-architecture.md
+// 8.2). Included by the Custom nodes of rb_make_materials.py; the Substrate topology (slabs, clear coat, fuzz, thin film)
+// lives in the generated graphs, the patterns here. Texture coordinates of the baked table meshes are in METRES (UE-1:
+// 1 UV unit = 1 m; rail caps planar with U along the rail = along the grain; walls / apron / legs box-mapped with U
+// horizontal). Every pattern is band-limited by the pixel footprint (RbOctaveWeight), so grazing views do not shimmer.
+
+#pragma once
+
+#include "/RawBreak/Private/RbCommon.ush"
+
+// ---- cloth (worsted wool, plan 6.3) ---------------------------------------------------------------------------------
+
+// How well the weave (period WeavePeriodM, UV in metres) is resolved by the pixel: 1 while a period spans several
+// pixels, 0 once it approaches the Nyquist limit. The texture mips average the weave too, but upscalers sample with a
+// negative mip bias and turn the residue into moire at grazing angles (plan 6.3, pitfall 15), so the unresolved weave
+// is faded out explicitly and its normal variance moved into the roughness (on top of the composited roughness mips).
+float RbClothWeaveResolved(float2 UV, float WeavePeriodM)
+{
+	return 1.0 - smoothstep(0.08, 0.30, RbFootprint(UV, 0.002) / WeavePeriodM);
+}
+
+// Tangent-space weave normal (strength scaled, faded when unresolved).
+float3 RbClothNormal(float3 NormalTS, float Strength, float Resolved)
+{
+	return normalize(float3(NormalTS.xy * (Strength * Resolved), max(NormalTS.z, 1e-3)));
+}
+
+// Albedo of the cloth from the dye colour, the weave mask (R = cavity between the yarns, B = yarn tone of the weave
+// texture) and a very low-frequency dye / brushing variation over the bed (UV in metres). Unresolved weave -> its mean.
+float3 RbClothAlbedo(float3 ClothColor, float Cavity, float Fibre, float2 UV, float Resolved)
+{
+	const float Footprint = RbFootprint(UV, 0.004);
+	const float Mottle = RbFbm(UV * 3.0, 4, Footprint * 3.0);            // ~30 cm dye / brushing variation
+	const float Yarn = (Fibre - 0.5) * 0.14 * Resolved;                   // yarn-to-yarn tone
+	const float Shade = lerp(0.92, lerp(0.74, 1.0, Cavity), Resolved);    // darker in the weave cavities
+	return ClothColor * Shade * (1.0 + Yarn + 0.05 * Mottle);
+}
+
+// Fuzz (sheen) colour: the albedo slightly desaturated and lightened (plan 6.3: ~1.5x).
+float3 RbClothFuzzColor(float3 Albedo, float Lighten)
+{
+	const float L = RbLuminance(Albedo);
+	return saturate(lerp(Albedo, L.xxx, 0.15) * Lighten);
+}
+
+// ---- wood under lacquer (plan 6.4) ----------------------------------------------------------------------------------
+
+// Flat-sawn board figure: growth rings across the grain (V) whose phase wanders slowly along the grain (the long arches of
+// a flat-sawn face) and whose width varies from year to year, narrow latewood lines with a gradual darkening of the
+// earlywood toward them, fine pores along the grain (U), board-to-board tone. Returns (albedo, roughness) of the wood slab
+// below the clear coat. Light / Dark: earlywood / latewood colours (linear).
+float4 RbWoodSurfaceFootprint(float2 UV, float3 Light, float3 Dark, float RingsPerMetre, float Roughness, float Footprint)
+{
+	const float2 P = UV + float2(3.1, -7.7);
+	// Figure: the ring phase wanders slowly along the grain (arches), plus a finer waviness.
+	const float Figure = RbFbm(float2(P.x * 1.3, P.y * 6.0), 4, Footprint * 6.0) * 0.060
+		+ RbFbm(float2(P.x * 6.0, P.y * 40.0), 3, Footprint * 40.0) * 0.004;
+	const float Base = (P.y + Figure) * RingsPerMetre;
+	// Year-to-year ring width (about +-30 %): the phase is warped by a smooth noise of the ring index itself.
+	const float RingPhase = Base + 0.9 * RbGradientNoise(float2(Base * 0.23, 5.7)).x;
+	const float Ring = frac(RingPhase);
+	// Latewood: a narrow dark line with a soft early side, its strength varying from year to year. Averaged (0.16 is the
+	// ring mean) once the rings are no longer resolved.
+	const float LateLine = smoothstep(0.70, 0.90, Ring) * (1.0 - smoothstep(0.93, 1.0, Ring));
+	const float Year = 0.65 + 0.35 * RbGradientNoise(float2(floor(RingPhase) * 0.61, 2.3)).x * 2.0;
+	const float Resolved = RbOctaveWeight(RingsPerMetre * 1.5, Footprint);
+	const float Late = lerp(0.16, LateLine * saturate(Year), Resolved);
+	// Grain streaks: fine lines of random strength along the grain between the rings (long in U, dense in V).
+	const float Streaks = RbFbm(float2(P.x * 4.0, (P.y + 0.3 * Figure) * 700.0), 3, Footprint * 700.0);
+	// Pores: thin dark dashes along the grain (long in U, narrow in V).
+	const float PoreNoise = RbGradientNoise(float2(P.x * 90.0, P.y * 1800.0)).x;
+	const float Pores = saturate(PoreNoise * 3.0 - 0.9) * RbOctaveWeight(1800.0, Footprint);
+	// Board tone and slight redness variation.
+	const float Board = RbFbm(float2(P.x * 0.35, P.y * 2.5), 3, Footprint);
+	const float T = saturate(0.40 * Late + 0.45 * (Streaks + 0.25) + 0.30 * Pores + 0.20 * Board);
+	float3 Albedo = lerp(Light, Dark, T);
+	Albedo *= 1.0 + 0.10 * Board;
+	const float Rough = saturate(Roughness + 0.12 * Pores - 0.05 * Late);
+	return float4(saturate(Albedo), Rough);
+}
+
+float4 RbWoodSurface(float2 UV, float3 Light, float3 Dark, float RingsPerMetre, float Roughness)
+{
+	return RbWoodSurfaceFootprint(UV, Light, Dark, RingsPerMetre, Roughness, RbFootprint(UV, 0.003));
+}
+
+// ---- mother of pearl (sights, plan 6.4) -----------------------------------------------------------------------------
+
+// Nacre: aragonite platelets in wavy growth lines. Returns (thin-film thickness in the ThinFilm node's unit, 1 = 10 um,
+// covering 300-600 nm; albedo tint weight). UV in metres (sights are ~12 mm).
+float2 RbNacre(float2 UV)
+{
+	const float Footprint = RbFootprint(UV, 0.0005);
+	const float2 P = UV * 1000.0; // millimetres
+	const float Warp = RbFbm(P * 0.35, 3, Footprint * 350.0) * 2.2;
+	const float Lines = 0.5 + 0.5 * sin((P.x * 0.8 + P.y * 1.9 + Warp) * 3.0);
+	const float Cells = RbFbm(P * 1.6 + 5.0, 3, Footprint * 1600.0);
+	const float Mix = saturate(0.55 * lerp(0.5, Lines, RbOctaveWeight(1.0, Footprint * 1000.0)) + 0.45 * (Cells + 0.5));
+	return float2(lerp(0.030, 0.060, Mix), Mix);
+}
+
+// Structural colour of nacre in its diffuse-looking reflection: the aragonite platelets (n ~ 1.53, 300-600 nm) are tilted
+// over a wide range, so their interference colour is seen at every angle, not only in the specular lobe (the thin-film F0
+// of the slab covers the mirror direction). Two-beam interference with one pi phase shift, sampled at 650 / 540 / 450 nm
+// and normalised to a mean of 1: a tint of the albedo that shifts with the viewing angle and the platelet thickness.
+// CosTheta: cosine between the surface normal and the view direction; ThicknessNm: film thickness [nm].
+float3 RbThinFilmTint(float CosTheta, float ThicknessNm, float FilmIor)
+{
+	const float SinT2 = (1.0 - CosTheta * CosTheta) / (FilmIor * FilmIor);
+	const float CosT = sqrt(saturate(1.0 - SinT2));
+	const float3 Phase = RB_TWO_PI * 2.0 * FilmIor * ThicknessNm * CosT / float3(650.0, 540.0, 450.0);
+	const float3 R = 0.5 - 0.5 * cos(Phase);
+	return R / max(dot(R, float3(1.0, 1.0, 1.0) / 3.0), 1e-3);
+}
+
+// Albedo of a mother-of-pearl inlay: base colour tinted by the platelet interference colour (Strength 0 = none). The
+// platelet thickness varies in cloudy patches of a few millimetres and slightly elongated "flames" (UV in metres), so the
+// tint shows as broad pastel patches that shift with the viewing angle, not as bands.
+float3 RbNacreAlbedo(float3 Base, float3 N, float3 V, float2 UV, float FilmIor, float Strength)
+{
+	const float Footprint = RbFootprint(UV, 0.0005);
+	const float2 P = UV * 1000.0; // millimetres
+	const float Cloud = RbFbm(P * 0.45 + 13.0, 4, Footprint * 450.0);
+	const float Flame = RbFbm(float2(P.x * 0.35, P.y * 1.3) + 7.0, 3, Footprint * 1300.0);
+	const float ThicknessNm = 450.0 + 110.0 * Cloud + 35.0 * Flame;
+	const float CosTheta = saturate(abs(dot(normalize(N), normalize(V))));
+	const float3 Tint = RbThinFilmTint(CosTheta, ThicknessNm, FilmIor);
+	return saturate(Base * lerp(float3(1.0, 1.0, 1.0), Tint, Strength));
+}
+
+// ---- leather (pocket liners, plan 6.4) ------------------------------------------------------------------------------
+
+// Pebbled leather grain as a tangent-space normal (xyz) and a cavity term (w), UV in metres.
+float4 RbLeather(float2 UV, float Strength)
+{
+	const float Footprint = RbFootprint(UV, 0.002);
+	const float2 P = UV * 900.0;   // ~1.1 mm pebbles
+	const float W0 = RbOctaveWeight(900.0, Footprint);
+	const float W1 = RbOctaveWeight(2600.0, Footprint);
+	const float3 N0 = RbGradientNoise(P);
+	const float3 N1 = RbGradientNoise(P * 2.9 + 11.0);
+	// Pebbles: ridges of |noise| (creases between rounded cells).
+	const float H = (1.0 - abs(N0.x)) * W0 + 0.35 * (1.0 - abs(N1.x)) * W1;
+	const float2 Grad = (-sign(N0.x) * N0.yz * W0 + 0.35 * 2.9 * -sign(N1.x) * N1.yz * W1) * Strength;
+	return float4(normalize(float3(-Grad, 1.0)), saturate(0.6 + 0.4 * H));
+}
+
+// ---- metal wear (brass fittings) -------------------------------------------------------------------------------------
+
+// Roughness variation of handled brass: smudges and polishing streaks. P in world cm.
+float RbBrassRoughness(float3 P, float BaseRoughness)
+{
+	const float Smudge = RbFbm(P.xy * 0.4 + P.z * 0.13, 4, 0.0);
+	return saturate(BaseRoughness + 0.12 * Smudge);
+}
+
+// ---- room surfaces ---------------------------------------------------------------------------------------------------
+
+// Sealed concrete floor: mottled tone + trowel marks. P in world cm. Returns (albedo scale, roughness).
+float2 RbConcreteFloor(float3 P, float BaseRoughness)
+{
+	const float Footprint = RbFootprint(P.xy, 0.5);
+	const float Large = RbFbm(P.xy * 0.004, 4, Footprint * 0.004);
+	const float Medium = RbFbm(P.xy * 0.03 + 3.3, 4, Footprint * 0.03);
+	const float Fine = RbGradientNoise(P.xy * 0.9).x * RbOctaveWeight(0.9, Footprint);
+	const float Tone = 1.0 + 0.22 * Large + 0.10 * Medium + 0.04 * Fine;
+	const float Rough = saturate(BaseRoughness + 0.10 * Medium - 0.08 * Large);
+	return float2(Tone, Rough);
+}
+
+// Painted plaster wall: very low contrast roller / trowel variation. P in world cm. Returns the albedo scale.
+float RbPaintedWall(float3 P)
+{
+	const float2 Q = float2(P.x + P.y, P.z);
+	const float Footprint = RbFootprint(Q, 0.5);
+	return 1.0 + 0.05 * RbFbm(Q * 0.01, 4, Footprint * 0.01) + 0.025 * RbFbm(Q * 0.12, 3, Footprint * 0.12);
+}
+
+// ---- cue sections (plan 6.4; RbCueMeshBuilder: origin at the tip dome centre, +X toward the tip, cm) ----------------
+
+// Section id along the cue from the local X coordinate: 0 tip leather, 1 ferrule, 2 shaft (maple), 3 joint collar,
+// 4 forearm, 5 wrap, 6 butt sleeve, 7 bumper. Distances from the tip dome centre [cm].
+float RbCueSection(float LocalX, float TipEnd, float FerruleEnd, float JointStart, float JointEnd, float WrapStart, float WrapEnd,
+	float BumperStart)
+{
+	const float D = -LocalX;
+	if (D < TipEnd) return 0.0;
+	if (D < FerruleEnd) return 1.0;
+	if (D < JointStart) return 2.0;
+	if (D < JointEnd) return 3.0;
+	if (D < WrapStart) return 4.0;
+	if (D < WrapEnd) return 5.0;
+	if (D < BumperStart) return 6.0;
+	return 7.0;
+}
+
+// Albedo / roughness of a cue section. U = distance along the cue [m], V = around the cue [m]. The footprint is taken once,
+// outside the per-section branches (no derivatives in divergent control flow).
+float4 RbCueSurface(float Section, float2 UV, float3 Maple, float3 Butt, float3 Wrap)
+{
+	const float Footprint = RbFootprint(UV, 0.002);
+	const bool bShaft = Section > 1.5 && Section < 2.5;
+	const bool bWood = bShaft || (Section > 3.5 && Section < 4.5) || (Section > 5.5 && Section < 6.5);
+	const float3 Light = bShaft ? Maple : Butt;
+	const float4 Wood = RbWoodSurfaceFootprint(UV, Light, Light * 0.55, bShaft ? 700.0 : 260.0, 0.45, Footprint);
+	const float Cord = 0.5 + 0.5 * sin((UV.x + UV.y) * 1500.0 * RB_TWO_PI) * RbOctaveWeight(1500.0, Footprint);
+	if (Section < 0.5) return float4(0.030, 0.034, 0.075, 0.85);                 // chalked leather tip (blue chalk)
+	if (Section < 1.5) return float4(0.78, 0.76, 0.70, 0.25);                     // ferrule (ivory-like resin)
+	if (bWood) return Wood;                                                       // maple shaft, forearm, butt sleeve
+	if (Section < 3.5) return float4(0.80, 0.78, 0.72, 0.20);                     // joint collar
+	if (Section < 5.5) return float4(Wrap * lerp(0.7, 1.15, Cord), 0.75);        // Irish-linen wrap, fine diagonal cord
+	return float4(0.02, 0.02, 0.02, 0.55);                                        // rubber bumper
+}
+
+// ---- lamp diffuser (plan 6.1, pitfall 9) -----------------------------------------------------------------------------
+
+// Emissive of a lamp diffuser, visible to the camera only: zero in ray-tracing hit shaders (Lumen hit-lit reflections)
+// and in the Lumen surface-cache capture, so the balls show ONE highlight (the analytic rect light's) and Lumen GI does
+// not count the lamp twice (the rect light already lights the scene).
+float3 RbLampEmissive(float3 Emissive)
+{
+#if RB_IS_RAY_TRACING || (defined(LUMEN_CARD_CAPTURE) && LUMEN_CARD_CAPTURE)
+	return float3(0.0, 0.0, 0.0);
+#else
+	return Emissive;
+#endif
+}
