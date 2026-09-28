@@ -432,7 +432,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbCueRailFloor, "RawBreak.Unit.Cue.RailFloor",
 bool FRbCueRailFloor::RunTest(const FString& Parameters)
 {
 	// The rail floor (rail-top planes, sloped cushion tops, cue width across the slope) vs an independent brute force over the
-	// cushion profile; cue ball near the head rail and in the middle (the butt reaches the rail), square and oblique.
+	// cushion profile; cue ball near the head rail and in the middle (the butt reaches the rail), square, oblique and shallow
+	// crossings (cue nearly parallel to the rail).
 	const TSharedPtr<const FRbTableContext> Context = MakeContext(*this);
 	if (!Context.IsValid())
 	{
@@ -451,6 +452,9 @@ bool FRbCueRailFloor::RunTest(const FString& Parameters)
 		{0.10, 0.00, 20.0, 0.0, 0.25},
 		{0.08, 0.15, -35.0, 0.3, 0.0},
 		{HalfLength, 0.00, 0.0, 0.0, 0.25}, // the table centre: the butt still passes over the head rail
+		{0.05, -0.40, -70.0, 0.0, 0.25},    // shallow crossings of the head rail (cue nearly parallel to it)
+		{0.03, -0.35, -75.0, 0.0, 0.25},
+		{0.02, -0.30, -80.0, -0.3, 0.25},
 	};
 	for (const FCase& Case : Cases)
 	{
@@ -465,11 +469,30 @@ bool FRbCueRailFloor::RunTest(const FString& Parameters)
 		AddInfo(FString::Printf(TEXT("%s: floor %.3f deg (brute force %.4f deg)"), *Name, Result.MinElevation / kDeg, Brute / kDeg));
 		TestTrue(*(Name + TEXT(": the rail sets a floor")), Result.MinElevation > 0.1 * kDeg && Result.FloorBy == rb::human::FloorSource::Rail &&
 			Result.FloorBall == -1);
-		// Exact for a square crossing (0.01 deg bracket); across a sloped cushion top the analytic test takes the worst of the
-		// cue's width at every point of each plane (the brute force splits the width between planes): conservative by < 0.03 deg.
-		TestTrue(*(Name + TEXT(": == brute force (0.01 deg bracket, conservative < 0.03 deg)")),
-			Result.MinElevation >= Brute - 0.002 * kDeg && Result.MinElevation <= Brute + (Case.AzimuthDeg == 0.0 ? 0.012 : 0.03) * kDeg);
+		// The analytic floor is the exact minimum over the cue's footprint, so it equals the brute force within the 0.01 deg
+		// bracket for every crossing angle. (Review: the earlier test along the axis alone missed the side of the cue passing over
+		// the cushion while the axis was still over the bed: 12.19 instead of 14.54 deg for the -80 deg case.)
+		TestTrue(*(Name + TEXT(": == brute force (0.01 deg bracket)")),
+			Result.MinElevation >= Brute - 0.002 * kDeg && Result.MinElevation <= Brute + 0.012 * kDeg);
 		TestTrue(*(Name + TEXT(": clear at the floor")), RbCueClearance::EvaluateGap(&Table, Body, Scene.Input, Result.MinElevation).Gap >= 0.0);
+	}
+
+	// Cost per call (the stroke component recomputes the floor whenever the aim changes, i.e. every frame while aiming).
+	{
+		FClearanceScene Scene(rb::Vec3(0.0, 0.0, kR), 0.0, 0.0);
+		for (int32 Id = 1; Id < rb::kMaxBalls; ++Id)
+		{
+			Scene.AddBall(Id, rb::Vec3(0.3 + 0.06 * (Id % 5), -0.2 + 0.06 * (Id / 5), kR));
+		}
+		const int32 Runs = 50;
+		double Floor = 0.0;
+		const double Start = FPlatformTime::Seconds();
+		for (int32 Run = 0; Run < Runs; ++Run)
+		{
+			Floor += RbCueClearance::ComputeMinElevation(Table, Body, Scene.Input).MinElevation;
+		}
+		const double Ms = 1000.0 * (FPlatformTime::Seconds() - Start) / Runs;
+		AddInfo(FString::Printf(TEXT("ComputeMinElevation (15 balls, rail floor %.2f deg): %.3f ms per call"), Floor / Runs / kDeg, Ms));
 	}
 
 	// Aiming at the head rail from the head end: the whole cue lies over the bed, no floor.
@@ -948,14 +971,30 @@ bool FRbCueFollowsStroke::RunTest(const FString& Parameters)
 		Stroke->GetContext().Situation.FloorBall == 7);
 	const double RenderedElevation = FMath::Asin(-Direction.z);
 	TestNearlyEqual(TEXT("the butt rose to the floor"), RenderedElevation, Floor.MinElevation, 1e-9);
-	// The rendered cue (address: tip AddressDistance behind the ball) clears the obstacle.
-	FRbCuePose Pose;
-	Pose.Direction = Direction;
-	Pose.DomeCenter = Tip;
-	Pose.Rim = Tip + Direction * FMath::Sqrt(0.0106 * 0.0106 - 0.006375 * 0.006375);
-	TestTrue(TEXT("the rendered cue clears the ball behind"), RbCueClearance::BallGap(Pose, Context.CueBody, rb::kCuePlaying19oz.Length, 0.0,
-		Behind.Position, kR) > 0.0);
-
+	// The rendered cue (address: tip AddressDistance behind the ball) clears the obstacle, also for aims above the floor. (Aims
+	// raised but still below the floor need URbStrokeComponent to pass FRbCueClearanceInput::ContactElevation = its aim
+	// elevation - requested from UE-5a in the UE-4 review; until then the floor of such an aim is too low.)
+	auto RenderedGap = [&]()
+	{
+		Stroke->GetCuePoseCore(Tip, Direction);
+		FRbCuePose Pose;
+		Pose.Direction = Direction;
+		Pose.DomeCenter = Tip;
+		Pose.Rim = Tip + Direction * FMath::Sqrt(0.0106 * 0.0106 - 0.006375 * 0.006375);
+		return RbCueClearance::BallGap(Pose, Context.CueBody, rb::kCuePlaying19oz.Length, 0.0, Behind.Position, kR);
+	};
+	TestTrue(TEXT("the rendered cue clears the ball behind"), RenderedGap() > 0.0);
+	for (const double AimDeg : {22.0, 30.0})
+	{
+		Stroke->SetAim(0.0, AimDeg * kDeg, 0.0, 0.0);
+		Clock += 0.016;
+		Stroke->TickStroke(Clock);
+		const double Gap = RenderedGap();
+		AddInfo(FString::Printf(TEXT("aim %.0f deg: shown %.3f deg, gap to the ball behind %.2f mm"), AimDeg, FMath::Asin(-Direction.z) / kDeg,
+			1000.0 * Gap));
+		TestNearlyEqual(*FString::Printf(TEXT("aim %.0f deg: shown at the aim"), AimDeg), FMath::Asin(-Direction.z), AimDeg * kDeg, 1e-9);
+		TestTrue(*FString::Printf(TEXT("aim %.0f deg: the rendered cue clears the ball behind"), AimDeg), Gap > 0.0);
+	}
 	// Standing up hides it.
 	Stroke->RequestGetDownToggle();
 	Clock += 0.1;

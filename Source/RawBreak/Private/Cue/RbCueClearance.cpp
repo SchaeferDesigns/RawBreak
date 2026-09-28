@@ -88,98 +88,365 @@ namespace
 			{
 				Hi = FMath::Min(Hi, T);
 			}
-			if (Lo >= Hi)
+			if (Lo > Hi)
 			{
 				return false;
 			}
 		}
-		return Lo < Hi;
+		return Lo <= Hi;
 	}
 
-	// Smallest rail gap (no margin) of the swept body of Pose over every rail-top plane.
+	bool InsidePolygon(const rb::RailTopPolygon& Poly, const rb::Vec2& Q)
+	{
+		for (int32 Index = 0; Index < Poly.VertexCount; ++Index)
+		{
+			const rb::Vec2& V0 = Poly.Vertices[Index];
+			const rb::Vec2& V1 = Poly.Vertices[(Index + 1) % Poly.VertexCount];
+			if (rb::Dot(rb::Vec2(-(V1.y - V0.y), V1.x - V0.x), Q - V0) < 0.0)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool InsideCut(const rb::RailTopPolygon& Poly, const rb::Vec2& Q)
+	{
+		const rb::Vec2 W = Q - Poly.CutCenter;
+		return Poly.HasCut && rb::Dot(W, W) < Poly.CutRadius * Poly.CutRadius;
+	}
+
+	// Splits [Lo, Hi] of the plan line Q0 + D t into the parts outside the polygon's pocket cut disc (the hole through the rail
+	// carries no surface). Returns the number of parts (0 .. 2).
+	int32 OutsideCut(const rb::RailTopPolygon& Poly, const rb::Vec2& Q0, const rb::Vec2& D, double Lo, double Hi, double (&Out)[2][2])
+	{
+		Out[0][0] = Lo;
+		Out[0][1] = Hi;
+		if (!Poly.HasCut)
+		{
+			return 1;
+		}
+		const rb::Vec2 W = Q0 - Poly.CutCenter;
+		const double A = rb::Dot(D, D);
+		const double C = rb::Dot(W, W) - Poly.CutRadius * Poly.CutRadius;
+		if (A < 1e-24)
+		{
+			return C < 0.0 ? 0 : 1;
+		}
+		const double Bh = rb::Dot(D, W);
+		const double Disc = Bh * Bh - A * C;
+		if (Disc <= 0.0)
+		{
+			return 1;
+		}
+		const double Root = FMath::Sqrt(Disc);
+		const double T0 = (-Bh - Root) / A;
+		const double T1 = (-Bh + Root) / A;
+		int32 Count = 0;
+		if (FMath::Min(Hi, T0) >= Lo)
+		{
+			Out[Count][0] = Lo;
+			Out[Count][1] = FMath::Min(Hi, T0);
+			++Count;
+		}
+		if (FMath::Max(Lo, T1) <= Hi)
+		{
+			Out[Count][0] = FMath::Max(Lo, T1);
+			Out[Count][1] = Hi;
+			++Count;
+		}
+		return Count;
+	}
+
+	// One trial pose in plan coordinates: q = Origin + Dir s + Right y, s along the body toward the butt (|Dir| = cos theta), y
+	// lateral; swept radius r(s) = Rt + K min(s, L) over s in [0, SMax]. The underside over q lies at
+	// z_axis(s) - sqrt(r(s)^2 - y^2) / cos(theta) (vertical section of the inclined body; plan 5.5's r(s) / cos(theta) at y = 0).
+	struct FRailFrame
+	{
+		rb::Vec2 Origin;
+		rb::Vec2 Dir;
+		rb::Vec2 Right;
+		double CosT = 1.0;
+		double SinT = 0.0;
+		double RimZ = 0.0;
+		double L = 1.0;
+		double SMax = 1.0;
+		double Rt = 0.0;
+		double K = 0.0;
+
+		double Radius(double S) const { return Rt + K * FMath::Clamp(S, 0.0, L); }
+		double SOf(const rb::Vec2& Q) const { return rb::Dot(Q - Origin, Dir) / (CosT * CosT); }
+		double YOf(const rb::Vec2& Q) const { return rb::Dot(Q - Origin, Right); }
+		rb::Vec2 At(double S, double Y) const { return Origin + Dir * S + Right * Y; }
+	};
+
+	struct FRailPlane
+	{
+		double Z0 = 0.0;
+		double X0 = 0.0;
+		double Y0 = 0.0;
+		double GX = 0.0;
+		double GY = 0.0;
+
+		double At(const rb::Vec2& Q) const { return Z0 + GX * (Q.x - X0) + GY * (Q.y - Y0); }
+	};
+
+	// Smallest rail gap (no margin) of the swept body of Pose over every rail-top plane: the exact minimum of the underside
+	// height above the plane over the part of the body's plan footprint (|y| <= r(s), 0 <= s <= SMax) that lies over the
+	// polygon minus its pocket cut. The gap is convex over the footprint (a convex body's underside minus a plane), so the
+	// minimum is either the unconstrained one (the worst point across the width, at s = 0, L or SMax) when that lies over the
+	// surface, or on the region's boundary: the polygon edges (closed-form stationary point of the convex restriction), the
+	// footprint's silhouettes y = +-r(s) (linear there: the ends of the parts over the surface), its end sections s = 0 / SMax
+	// (closed form) and the rim of the pocket cut (64 chords). A test along the axis alone misses the side of the cue passing
+	// over a cushion while the axis is still over the bed (a cue crossing a rail at a shallow angle: up to 2.4 deg too low).
 	void EvaluateRails(const FRbTableContext& Table, const rb::human::CueBodyState& Body, const FRbCueClearanceInput& Input, const FRbCuePose& Pose,
 		double Elevation, FRbCueGap& InOut)
 	{
-		const double L = CueLengthOf(Input);
-		const double SMax = L + BackswingOf(Input);
-		const double CosT = FMath::Cos(Elevation);
-		const double SinT = FMath::Sin(Elevation);
-		const rb::Vec2 Origin(Pose.Rim.x, Pose.Rim.y);
-		const rb::Vec2 Dir(-Pose.Direction.x, -Pose.Direction.y); // plan direction of increasing s (toward the butt)
-		const rb::Vec2 Right(FMath::Sin(Input.Azimuth), -FMath::Cos(Input.Azimuth));
-		const double DirLen2 = rb::Dot(Dir, Dir);
+		FRailFrame F;
+		F.L = CueLengthOf(Input);
+		F.SMax = F.L + BackswingOf(Input);
+		F.CosT = FMath::Max(FMath::Cos(Elevation), 1e-6);
+		F.SinT = FMath::Sin(Elevation);
+		F.RimZ = Pose.Rim.z;
+		F.Origin = rb::Vec2(Pose.Rim.x, Pose.Rim.y);
+		F.Dir = rb::Vec2(-Pose.Direction.x, -Pose.Direction.y); // plan direction of increasing s (toward the butt)
+		F.Right = rb::Vec2(FMath::Sin(Input.Azimuth), -FMath::Cos(Input.Azimuth));
+		F.Rt = RbCueClearance::EnvelopeRadius(Body, F.L, 0.0);
+		F.K = (RbCueClearance::EnvelopeRadius(Body, F.L, F.L) - F.Rt) / F.L;
+		const double SPiece = FMath::Min(F.L, F.SMax);
+		const double RMax = FMath::Max(F.Radius(0.0), F.Radius(F.SMax));
 
+		FRailPlane Plane;
+		auto Consider = [&](const rb::Vec2& Q)
+		{
+			const double S = F.SOf(Q);
+			const double Y = F.YOf(Q);
+			const double R = F.Radius(S);
+			const double Gap = F.RimZ + F.SinT * S - Plane.At(Q) - FMath::Sqrt(FMath::Max(0.0, R * R - Y * Y)) / F.CosT;
+			if (Gap < InOut.Gap)
+			{
+				InOut.Gap = Gap;
+				InOut.By = rb::human::FloorSource::Rail;
+				InOut.Ball = -1;
+				InOut.S = FMath::Clamp(S, 0.0, F.SMax);
+			}
+		};
+
+		// Minimum of the (convex) gap along the plan line Q0 + D t, t in [Lo, Hi], inside the footprint. Per piece of the swept
+		// radius (taper s <= L, backswing cylinder s >= L) the footprint bounds are linear in t and the gap is
+		// alpha + beta t - sqrt(Q(t)) / cos(theta), Q = (p0 + p1 t)^2 - (y0 + dy t)^2 = a t^2 + b t + c: its stationary points are
+		// roots of a (a - m^2) t^2 + b (a - m^2) t + b^2 / 4 - m^2 c = 0 (m = beta cos(theta)). The ends and every root inside are
+		// evaluated (a spurious root is still a point of the footprint, so the minimum stays exact).
+		auto MinOnLine = [&](const rb::Vec2& Q0, const rb::Vec2& D, double Lo, double Hi)
+		{
+			const double S0 = F.SOf(Q0);
+			const double DS = rb::Dot(D, F.Dir) / (F.CosT * F.CosT);
+			const double Y0 = F.YOf(Q0);
+			const double DY = rb::Dot(D, F.Right);
+			const double Beta = F.SinT * DS - (Plane.GX * D.x + Plane.GY * D.y);
+			const double M2 = Beta * F.CosT * Beta * F.CosT;
+			// {s start, s end, r at s = 0 of the piece's linear law, dr / ds}
+			const double Pieces[2][4] = {{0.0, SPiece, F.Rt, F.K}, {F.L, F.SMax, F.Radius(F.L), 0.0}};
+			for (const auto& Piece : Pieces)
+			{
+				if (Piece[1] < Piece[0])
+				{
+					continue;
+				}
+				double A = Lo;
+				double B = Hi;
+				auto Constrain = [&A, &B](double C0, double C1) // C0 + C1 t <= 0
+				{
+					if (FMath::Abs(C1) < 1e-300)
+					{
+						if (C0 > 1e-15)
+						{
+							B = A - 1.0;
+						}
+						return;
+					}
+					const double T = -C0 / C1;
+					if (C1 > 0.0)
+					{
+						B = FMath::Min(B, T);
+					}
+					else
+					{
+						A = FMath::Max(A, T);
+					}
+				};
+				const double P0 = Piece[2] + Piece[3] * S0; // r at t = 0 (this piece's linear law)
+				const double P1 = Piece[3] * DS;
+				Constrain(Piece[0] - S0, -DS); // s >= start
+				Constrain(S0 - Piece[1], DS);  // s <= end
+				Constrain(Y0 - P0, DY - P1);   // y <= r(s)
+				Constrain(-Y0 - P0, -DY - P1); // -y <= r(s)
+				if (A > B)
+				{
+					continue;
+				}
+				Consider(Q0 + D * A);
+				Consider(Q0 + D * B);
+				const double Qa = P1 * P1 - DY * DY;
+				const double Qb = 2.0 * (P0 * P1 - Y0 * DY);
+				const double Qc = P0 * P0 - Y0 * Y0;
+				const double Ea = Qa * (Qa - M2);
+				const double Eb = Qb * (Qa - M2);
+				const double Ec = 0.25 * Qb * Qb - M2 * Qc;
+				const double Scale = FMath::Max3(FMath::Abs(Ea), FMath::Abs(Eb), FMath::Abs(Ec));
+				if (!(Scale > 0.0))
+				{
+					continue;
+				}
+				double Roots[2];
+				int32 RootCount = 0;
+				if (FMath::Abs(Ea) > 1e-14 * Scale)
+				{
+					const double Disc = Eb * Eb - 4.0 * Ea * Ec;
+					if (Disc >= 0.0)
+					{
+						const double Q = -0.5 * (Eb + (Eb >= 0.0 ? 1.0 : -1.0) * FMath::Sqrt(Disc));
+						Roots[RootCount++] = Q / Ea;
+						if (Q != 0.0)
+						{
+							Roots[RootCount++] = Ec / Q;
+						}
+					}
+				}
+				else if (FMath::Abs(Eb) > 1e-14 * Scale)
+				{
+					Roots[RootCount++] = -Ec / Eb;
+				}
+				for (int32 Index = 0; Index < RootCount; ++Index)
+				{
+					if (Roots[Index] > A && Roots[Index] < B)
+					{
+						Consider(Q0 + D * Roots[Index]);
+					}
+				}
+			}
+		};
+
+		double Parts[2][2];
 		for (const rb::RailTopPolygon& Poly : Table.Geometry.RailTops)
 		{
 			if (Poly.VertexCount < 3 || Poly.PlaneNormal.z <= 1e-9)
 			{
 				continue;
 			}
-			double Lo = 0.0;
-			double Hi = SMax;
-			if (!ClipToPolygon(Poly, Origin, Dir, Lo, Hi))
+			// Quick reject: the polygon lies entirely beside, ahead of or behind the footprint.
 			{
-				continue;
-			}
-			// Parts of [Lo, Hi] outside the pocket cut disc (the hole through the rail carries no surface).
-			double Parts[2][2] = {{Lo, Hi}, {0.0, -1.0}};
-			if (Poly.HasCut)
-			{
-				const rb::Vec2 W = Origin - Poly.CutCenter;
-				const double C = rb::Dot(W, W) - Poly.CutRadius * Poly.CutRadius;
-				if (DirLen2 < 1e-18)
+				double SLo = TNumericLimits<double>::Max();
+				double SHi = -TNumericLimits<double>::Max();
+				double YLo = TNumericLimits<double>::Max();
+				double YHi = -TNumericLimits<double>::Max();
+				for (int32 Index = 0; Index < Poly.VertexCount; ++Index)
 				{
-					if (C < 0.0)
-					{
-						continue; // a vertical cue standing in the hole
-					}
+					const double S = F.SOf(Poly.Vertices[Index]);
+					const double Y = F.YOf(Poly.Vertices[Index]);
+					SLo = FMath::Min(SLo, S);
+					SHi = FMath::Max(SHi, S);
+					YLo = FMath::Min(YLo, Y);
+					YHi = FMath::Max(YHi, Y);
 				}
-				else
-				{
-					const double Bh = rb::Dot(Dir, W);
-					const double Disc = Bh * Bh - DirLen2 * C;
-					if (Disc > 0.0)
-					{
-						const double Root = FMath::Sqrt(Disc);
-						const double S0 = (-Bh - Root) / DirLen2;
-						const double S1 = (-Bh + Root) / DirLen2;
-						Parts[0][0] = Lo;
-						Parts[0][1] = FMath::Min(Hi, S0);
-						Parts[1][0] = FMath::Max(Lo, S1);
-						Parts[1][1] = Hi;
-					}
-				}
-			}
-			const rb::Vec3& N = Poly.PlaneNormal;
-			const double GradX = -N.x / N.z;
-			const double GradY = -N.y / N.z;
-			const double Across = GradX * Right.x + GradY * Right.y;
-			const double Thickness = FMath::Sqrt(1.0 / FMath::Max(CosT * CosT, 1e-12) + Across * Across);
-			auto GapAt = [&](double S)
-			{
-				const double Px = Origin.x + Dir.x * S;
-				const double Py = Origin.y + Dir.y * S;
-				const double Plane = Poly.PlanePoint.z + GradX * (Px - Poly.PlanePoint.x) + GradY * (Py - Poly.PlanePoint.y);
-				const double Axis = Pose.Rim.z + SinT * S;
-				return Axis - Plane - RbCueClearance::EnvelopeRadius(Body, L, S) * Thickness;
-			};
-			for (const auto& Part : Parts)
-			{
-				if (Part[1] < Part[0])
+				if (YLo > RMax || YHi < -RMax || SHi < 0.0 || SLo > F.SMax)
 				{
 					continue;
 				}
-				// Piecewise linear in s: the minimum lies at an end or at the taper's end s = L.
-				double Candidates[3] = {Part[0], Part[1], FMath::Clamp(L, Part[0], Part[1])};
-				for (const double S : Candidates)
+			}
+			const rb::Vec3& N = Poly.PlaneNormal;
+			Plane.Z0 = Poly.PlanePoint.z;
+			Plane.X0 = Poly.PlanePoint.x;
+			Plane.Y0 = Poly.PlanePoint.y;
+			Plane.GX = -N.x / N.z;
+			Plane.GY = -N.y / N.z;
+
+			// 1. Unconstrained minimum: the worst point across the width (y = u r, u = g cos / sqrt(1 + g^2 cos^2), g = the plane's
+			//    slope across the cue) at s = 0, L or SMax (the gap of that point is piecewise linear in s).
+			{
+				const double G = Plane.GX * F.Right.x + Plane.GY * F.Right.y;
+				const double U = G * F.CosT / FMath::Sqrt(1.0 + G * G * F.CosT * F.CosT);
+				for (const double S : {0.0, SPiece, F.SMax})
 				{
-					const double Gap = GapAt(S);
-					if (Gap < InOut.Gap)
+					const rb::Vec2 Q = F.At(S, U * F.Radius(S));
+					if (InsidePolygon(Poly, Q) && !InsideCut(Poly, Q))
 					{
-						InOut.Gap = Gap;
-						InOut.By = rb::human::FloorSource::Rail;
-						InOut.Ball = -1;
-						InOut.S = S;
+						Consider(Q);
+					}
+				}
+			}
+			// 2. Polygon edges (outside the cut).
+			for (int32 Index = 0; Index < Poly.VertexCount; ++Index)
+			{
+				const rb::Vec2& V0 = Poly.Vertices[Index];
+				const rb::Vec2 D = Poly.Vertices[(Index + 1) % Poly.VertexCount] - V0;
+				const int32 Count = OutsideCut(Poly, V0, D, 0.0, 1.0, Parts);
+				for (int32 Part = 0; Part < Count; ++Part)
+				{
+					MinOnLine(V0, D, Parts[Part][0], Parts[Part][1]);
+				}
+			}
+			// 3. Silhouettes y = +-r(s), parametrised by s (the gap is linear along them: the ends of the parts over the surface).
+			for (const double Side : {-1.0, 1.0})
+			{
+				const rb::Vec2 Starts[2] = {F.Origin + F.Right * (Side * F.Rt), F.Origin + F.Right * (Side * F.Radius(F.L))};
+				const rb::Vec2 Dirs[2] = {F.Dir + F.Right * (Side * F.K), F.Dir};
+				const double Ranges[2][2] = {{0.0, SPiece}, {F.L, F.SMax}};
+				for (int32 Piece = 0; Piece < 2; ++Piece)
+				{
+					double Lo = Ranges[Piece][0];
+					double Hi = Ranges[Piece][1];
+					if (Hi < Lo || !ClipToPolygon(Poly, Starts[Piece], Dirs[Piece], Lo, Hi))
+					{
+						continue;
+					}
+					const int32 Count = OutsideCut(Poly, Starts[Piece], Dirs[Piece], Lo, Hi, Parts);
+					for (int32 Part = 0; Part < Count; ++Part)
+					{
+						Consider(Starts[Piece] + Dirs[Piece] * Parts[Part][0]);
+						Consider(Starts[Piece] + Dirs[Piece] * Parts[Part][1]);
+					}
+				}
+			}
+			// 4. End sections s = 0 and s = SMax (across the width).
+			for (const double S : {0.0, F.SMax})
+			{
+				const double R = F.Radius(S);
+				const rb::Vec2 Q0 = F.At(S, -R);
+				const rb::Vec2 D = F.Right * (2.0 * R);
+				double Lo = 0.0;
+				double Hi = 1.0;
+				if (!ClipToPolygon(Poly, Q0, D, Lo, Hi))
+				{
+					continue;
+				}
+				const int32 Count = OutsideCut(Poly, Q0, D, Lo, Hi, Parts);
+				for (int32 Part = 0; Part < Count; ++Part)
+				{
+					MinOnLine(Q0, D, Parts[Part][0], Parts[Part][1]);
+				}
+			}
+			// 5. Rim of the pocket cut where it runs under the footprint (64 chords: sagitta 0.07 mm for a 6 cm hole).
+			if (Poly.HasCut && Poly.CutRadius > 0.0)
+			{
+				const double YC = F.YOf(Poly.CutCenter);
+				const double SC = F.SOf(Poly.CutCenter);
+				const double Reach = Poly.CutRadius / F.CosT;
+				if (FMath::Abs(YC) <= Poly.CutRadius + RMax && SC >= -Reach && SC <= F.SMax + Reach)
+				{
+					constexpr int32 Chords = 64;
+					for (int32 Index = 0; Index < Chords; ++Index)
+					{
+						const double A0 = UE_DOUBLE_TWO_PI * static_cast<double>(Index) / Chords;
+						const double A1 = UE_DOUBLE_TWO_PI * static_cast<double>(Index + 1) / Chords;
+						const rb::Vec2 P0 = Poly.CutCenter + rb::Vec2(FMath::Cos(A0), FMath::Sin(A0)) * Poly.CutRadius;
+						const rb::Vec2 D = Poly.CutCenter + rb::Vec2(FMath::Cos(A1), FMath::Sin(A1)) * Poly.CutRadius - P0;
+						double Lo = 0.0;
+						double Hi = 1.0;
+						if (ClipToPolygon(Poly, P0, D, Lo, Hi))
+						{
+							MinOnLine(P0, D, Lo, Hi);
+						}
 					}
 				}
 			}
@@ -438,7 +705,9 @@ namespace
 		FCollisionQueryParams Params(SCENE_QUERY_STAT(RbCueEnvironmentSweep), false);
 		Params.AddIgnoredActor(&Table);
 		const FCollisionResponseParams Response;
-		TArray<FOverlapResult> Overlaps;
+		// Reused between calls: the stroke component sweeps every frame while aiming, and the player's pawn standing at the butt
+		// overlaps the chain every time (no allocation per frame once the array has grown).
+		static thread_local TArray<FOverlapResult> Overlaps;
 		for (int32 Segment = 0; Segment < Segments; ++Segment)
 		{
 			const double S0 = SMax * static_cast<double>(Segment) / static_cast<double>(Segments);

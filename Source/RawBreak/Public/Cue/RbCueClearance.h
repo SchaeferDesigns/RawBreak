@@ -16,9 +16,11 @@
 //  * ball j: min over s of |X(s) - C_j| - r_env(s) >= R_j + margin (exact minimum for the linear taper, the plan's
 //    closest-axis-point test refined; ball radii from the table context);
 //  * rails: over every rail-top plane of rb::TableGeometry::RailTops (cushion tops and caps, pocket cut discs excluded) the
-//    underside of the cue clears the plane: z_axis(s) - plane(p(s)) >= r_env(s) sqrt(1 / cos^2 theta + g^2) + margin, g = the
-//    plane's slope across the cue (plan 5.5's z(s) - r(s) / cos(theta) >= h_rail(s), exact for sloped cushion tops); pocket
-//    openings and the pocket holes carry no rail;
+//    underside of the cue clears the plane by the margin everywhere over the polygon: the underside over a plan point at
+//    lateral offset y from the axis is z_axis(s) - sqrt(r_env(s)^2 - y^2) / cos(theta) (plan 5.5's z(s) - r(s) / cos(theta)
+//    at y = 0), minimised exactly over the part of the cue's plan footprint that lies over the polygon (so the side of a cue
+//    crossing a rail at a shallow angle counts while the axis is still over the bed); pocket openings and the pocket holes
+//    carry no rail;
 //  * minimum elevation: coarse sweep of theta in 0.25 deg steps from the requested elevation upward, then bisection to
 //    0.01 deg on the first clear interval (plan 5.5); the result is the clear end of the final bracket.
 //  * environment: capsule chain along the swept body (tip to butt incl. the backswing), overlap query on ECC_WorldDynamic
@@ -50,6 +52,9 @@ struct FRbCueClearanceInput
 
 	// --- additions (UE-4) ------------------------------------------------------------------------------
 	// Elevation of the cue frame ContactPoint was computed in (the offsets (a, b) are read in that frame); < 0 = Elevation.
+	// A caller that searches from Elevation = 0 (the absolute floor) with a contact point computed at its aim elevation MUST
+	// pass that aim elevation here: otherwise a raised aim's centre hit reads as a top hit and the floor drops below an
+	// obstacle ball (15.3 instead of 21.4 deg for a 15 deg aim over a ball 0.10 m behind).
 	double ContactElevation = -1.0;
 	double TipDomeRadius = 0.0106; // [m] r_dome (rb::human::TipState::DomeRadius)
 	double TipWidth = 0.01275;     // [m] w_tip (rb::human::TipState::Width)

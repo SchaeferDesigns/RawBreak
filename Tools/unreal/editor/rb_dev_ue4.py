@@ -13,6 +13,7 @@ materials), a table lamp, fixed exposure and one ARbCueDemo that builds the scen
   L_DevUE4_Fallback   the Address scene without a material override: ARbCue's fallback material (engine vertex colours)
   L_DevUE4_BallFloor  a ball 0.10 m straight behind the cue ball (plan T13): the butt rises to the ball floor (~21.4 deg)
   L_DevUE4_RailFloor  the cue ball 6 cm from the head cushion, shooting away: the butt rises over the rail (~14.6 deg)
+  L_DevUE4_RailShallow the butt crossing the head rail at a shallow angle: the cue's side clears the cushion (~8.2 deg)
   L_DevUE4_Wall       a wall 1.45 m behind the cue ball: the environment sweep raises the 58 in cue to ~37.4 deg
   L_DevUE4_WallShort  the same wall with the 48 in bar short cue (runtime mesh): playable at ~17 deg
 Cue material: UE-3's M_RbCue when it exists, else M_DevCue (Substrate slab: albedo = the mesh's per-section vertex colour,
@@ -109,6 +110,14 @@ SCENES = {
 		"demo": {"cue_ball": (-HALF_LENGTH + 0.06, 0.10), "azimuth_deg": 0.0, "elevation_deg": 0.0, "tip_back_cm": 0.5},
 		"cameras": [
 			("RailFloor", (-1.30, 0.10 - 1.15, 0.10), (-1.30, 0.10, 0.06), 24.0),
+		],
+	},
+	"RailShallow": {
+		# The butt crosses the head rail at 15 deg (cue nearly parallel to it): the side of the cue passes over the cushion top
+		# while the axis is still over the bed (review fix: exact footprint minimum, ~8.2 deg; the axis-only test gave 7.9).
+		"demo": {"cue_ball": (-HALF_LENGTH + 0.03, -0.35), "azimuth_deg": -75.0, "elevation_deg": 0.0, "tip_back_cm": 0.5},
+		"cameras": [
+			("RailShallow", (-0.50, 0.04, 0.048), (-1.29, -0.17, 0.045), 14.0),
 		],
 	},
 	"Wall": {
