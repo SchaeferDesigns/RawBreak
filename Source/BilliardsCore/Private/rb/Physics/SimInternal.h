@@ -42,11 +42,25 @@
 //    an island member.
 //  * The end slot of a PocketPivot segment (pivot end, tier Transition) is dispatched as
 //    ProcessPocketEvent(Ws, b, TableFeatureRef{TableFeatureKind::None, pocket, 0}, t).
+//  * (WP-10, VAL ROB-11) A pivot's Seg is the current PIECE of its piecewise detection proxy (MakePivotProxyPiece, within
+//    kPivotProxyTolerance of the true path), not the single whole-arc proxy. The end slot of a piece that is not the last
+//    (BallSlot::PivotPieceLast false) is a piece node: loop::AdvancePivotPiece starts the next piece (version bump, observers
+//    from the node with IncludeFrom, every slot re-predicted; no event logged, no impulse, the open track placeholder of the
+//    pivot is kept). Only the last piece's end is the pivot end above. Resolvers keep using the true state (EvaluatePivot).
 //  * LinerWall and RimTorus table events go to ProcessPocketEvent first; if it returns false the loop resolves them itself as
 //    GRI contacts (architecture 8.5 "cushion-like" row: BallLiner / BallPocketRim). DropEdge, CaptureDepth, PocketExit,
 //    CaptureCircle and the pivot end are WP-6b's only (not consumed = nothing happens). RailTop, RailTopEdge and SupportExit
 //    go to ProcessRailTopEvent only; the loop itself turns a Stationary transition on the flat cap into
-//    OffTable(RestsOnRailOrFrame) (architecture 8.5 Transition row).
+//    OffTable(RestsOnRailOrFrame) (architecture 8.5 Transition row). (WP-10) Before that, the loop applies guards 2 and 5 of
+//    architecture 9 to RailTop / RailTopEdge contacts as to the cushion-like ones: a Pressing contact, or the Zeno detector's
+//    trigger for the ball-feature pair, starts the (rigid) rail-top island through HandOffToIsland instead of calling
+//    ProcessRailTopEvent, whose GRI resolves a zero-speed contact without an impulse (found again at the same instant).
+//  * (WP-10) An approaching event-mode ball-ball contact with a ball in a pocket state (PocketPivot / PocketFall) is resolved
+//    pairwise, never handed to an island for its neighbourhood (NeedsIsland): pocket states never join islands and a member in
+//    a pocket's hole leaves at the first step, so such an island ended after one step with the pair still approaching.
+//  * (WP-10 review) StartIsland with a table-feature seed whose ball is off the cloth over a pocket's opening (not a member yet,
+//    cloth context, no pocket state) makes that ball a rigid off-cloth member, as for a rail-top seed (SimIsland.cpp
+//    SeedLeavesClothIslandAtOnce): a cloth member there leaves at the first step while the contact comes back at once.
 //  * Exactly simultaneous IMPULSE contacts (ball-ball, tip, and the cushion-like / rail-top table contacts) sharing a ball form
 //    one group (architecture 8.3): the loop calls StartIsland once per group member, in queue-key order, at the same Time (the
 //    first call starts the island, the following ones must merge into it). Region events (drop edge, capture, pocket exit,
@@ -126,6 +140,8 @@ namespace rb::sim
 		std::uint32_t Version = 0;          // bumped whenever Seg is replaced; queued entries carry it
 		BallTableContext Context;           // pocket, support surface / polygon
 		PivotPath Pivot;                    // PocketPivot only
+		double PivotPieceU = 0.0;           // (WP-10) PocketPivot: substitution value U at the end of the current detection piece
+		bool PivotPieceLast = true;         // (WP-10) PocketPivot: the current piece ends at the pivot end (else: a piece node)
 		int BounceIndex = 0;                // current airborne sequence (N_max)
 		double SequenceMaxZ = 0.0;          // max center height of the airborne sequence (BallLand)
 		std::uint32_t InitialFreezeRails = 0; // rail features frozen at t = 0 and not yet left by LeaveDistance
@@ -299,6 +315,8 @@ namespace rb::sim
 		// Re-predicts the tip slots of moving tips. ExcludeBall / ExcludeTime: a tip contact on that ball at exactly that
 		// time is not queued again (a tip contact that produced no impulse).
 		void PredictTips(Workspace& Ws, int ExcludeBall, double ExcludeTime);
+		// (WP-10) Starts the next detection piece of a pivoting ball at the node time Time (see the file comment).
+		void AdvancePivotPiece(Workspace& Ws, int Ball, double Time);
 
 		// Queue validity of an entry (versions, island membership, terminal balls, moving tips).
 		bool IsValid(const Workspace& Ws, const QueuedEvent& Event);

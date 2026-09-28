@@ -35,7 +35,7 @@ namespace rb
 		double MaxAbs = 0.0;
 		for (int i = 0; i <= Degree; ++i)
 		{
-			MaxAbs = std::fmax(MaxAbs, std::fabs(c[i]));
+			MaxAbs = Max(MaxAbs, std::fabs(c[i])); // = std::fmax here (non-negative or NaN operands; NaN is skipped), inline
 		}
 		while (Degree > 0 && std::fabs(c[Degree]) <= RelativeEpsilon * MaxAbs)
 		{
@@ -72,7 +72,7 @@ namespace rb
 		double MaxRatio = 0.0;
 		for (int i = 0; i < n; ++i)
 		{
-			MaxRatio = std::fmax(MaxRatio, std::fabs(c[i]) / Lead);
+			MaxRatio = Max(MaxRatio, std::fabs(c[i]) / Lead); // = std::fmax here (MaxRatio is never NaN; a NaN ratio is skipped), inline
 		}
 		return 1.0 + MaxRatio;
 	}

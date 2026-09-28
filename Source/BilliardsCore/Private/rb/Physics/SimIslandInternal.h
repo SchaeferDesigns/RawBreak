@@ -34,7 +34,8 @@ namespace rb::sim
 	// ---------------------------------------------------------------------------------------------
 
 	// A table element becomes at most two island features (a straight rail-top edge whose middle lies over the pocket cut
-	// disc, or a cut rim whose arc on the polygon is split in two). The second piece carries SourceSub | kSecondPieceBit.
+	// disc, a cut rim whose arc on the polygon is split in two, or a facing's back-end edge, WP-10: its lower and upper
+	// segments). The second piece carries SourceSub | kSecondPieceBit.
 	inline constexpr int kMaxFeaturePieces = 2;
 	inline constexpr std::uint8_t kSecondPieceBit = 0x10; // edge indices are < kMaxRailTopVertices (8); kCutRimEdge = 0xFE
 

@@ -308,10 +308,17 @@ namespace rb
 
 		// B.4 / B.5 with the relative velocity: grip (impulse along the cue axis) inside the friction cone, else the
 		// cone edge. No squirt on re-contacts (applied once, at the strike, B.7).
+		// Cone edge (WP-10 fix, review doubt of WP-6a): kinetic friction opposes the SLIP, i.e. its tangential direction is that
+		// of the tip's velocity relative to the ball's contact point, not the stroke's. B.5 writes t_hat from the stroke because
+		// the struck ball is at rest there, where both coincide; a re-contact meets a moving, spinning ball (a double hit, a ball
+		// rolling across the follow-through), whose surface slides under the tip in any direction. Without tangential slip the
+		// stroke's direction is kept (B.5's t_hat, continuous with the strike).
 		const double CosPsi = Dot(Tip.Direction, Normal);
 		const double SinPsi = Length(Tip.Direction - Normal * CosPsi);
 		const bool Grip = CosPsi > 0.0 && SinPsi <= MiscueLimit(Cue.TipFriction);
-		const Vec3 PHat = Grip ? Tip.Direction : MiscueDirection(Tip.Direction, Normal, Cue.TipFrictionKinetic);
+		const Vec3 Slip = Relative - Normal * Result.RelativeSpeed;
+		const bool Slides = LengthSquared(Slip) > Numerics.EpsV * Numerics.EpsV;
+		const Vec3 PHat = Grip ? Tip.Direction : MiscueDirection(Slides ? Slip : Tip.Direction, Normal, Cue.TipFrictionKinetic);
 		const double Approach = Dot(Relative, PHat);
 		const double Dp = Dot(Tip.Direction, PHat);
 		const Vec3 QxP = Cross(QUnit, PHat);

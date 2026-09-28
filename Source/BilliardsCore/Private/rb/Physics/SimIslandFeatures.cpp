@@ -267,6 +267,38 @@ namespace rb::sim
 				F.ZMin = 0.0;
 				F.ZMax = Face.TopHeight;
 			}
+			else if (Ref.SubIndex == kFacingBottomEdge)
+			{
+				// The facing's bottom edge (WP-10, Detect.h PredictFacingBottomEdge): one EdgeLine at z = 0 along the facing.
+				F.Kind = IslandFeatureKind::EdgeLine;
+				F.Point = FacingBottomEdgeStart(Face);
+				F.Normal = -Vec3{Face.PocketNormal.x * Sin(Face.Backdraft), Face.PocketNormal.y * Sin(Face.Backdraft), Cos(Face.Backdraft)};
+				F.Radius = 0.0;
+			}
+			else if (Ref.SubIndex == kFacingEndEdge)
+			{
+				// The facing's back-end edge (WP-10, Detect.h PredictFacingEndEdge): two EdgeLines (their end caps are points, so the
+				// joint is closed), the lower one in the face plane from the slate to (End, h), the upper one vertical to the cushion
+				// top. The second piece carries SourceSub | kSecondPieceBit (HasFeature finds the pair by the first).
+				const FacingEndEdge E = MakeFacingEndEdge(Face, FacingEndEdgeTop(Table, Face));
+				F.Kind = IslandFeatureKind::EdgeLine;
+				F.Point = E.Lower;
+				F.Direction = E.LowerDirection;
+				F.Length = E.LowerLength;
+				F.Normal = ToVec3(Face.Direction);
+				F.Radius = 0.0;
+				Out[0] = F;
+				if (!(E.UpperLength > 0.0))
+				{
+					return 1;
+				}
+				F.Point = E.Joint;
+				F.Direction = Vec3::UnitZ();
+				F.Length = E.UpperLength;
+				F.SourceSub = static_cast<std::uint8_t>(kFacingEndEdge | kSecondPieceBit);
+				Out[1] = F;
+				return 2;
+			}
 			else
 			{
 				F.Kind = IslandFeatureKind::EdgeLine;
@@ -362,6 +394,10 @@ namespace rb::sim
 		Ref.Kind = static_cast<TableFeatureKind>(Feature.SourceKind);
 		Ref.Index = Feature.SourceIndex;
 		Ref.SubIndex = Feature.SourceSub;
+		if (Ref.Kind == TableFeatureKind::FacingTopEdge)
+		{
+			Ref.SubIndex = static_cast<std::uint8_t>(Ref.SubIndex & ~kSecondPieceBit); // the end edge's upper piece (WP-10)
+		}
 		if (Ref.Kind == TableFeatureKind::RailTopEdge)
 		{
 			if (Ref.SubIndex == kCutRimEdge - 1)

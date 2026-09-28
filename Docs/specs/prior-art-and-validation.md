@@ -4,7 +4,7 @@
 |---|---|
 | Document | `Docs/specs/prior-art-and-validation.md` |
 | Scope | Survey of existing pool-physics implementations and research, the numerical pitfalls of event-based simulation, a catalogue of real-world validation data, and performance targets for `BilliardsCore` |
-| Status | v1.0 (2026-09-25) |
+| Status | v1.0 (2026-09-25). v1.1 (2026-09-28, WP-10): §6.7 / CUE-02 cue-strike formula corrected (the printed one created energy); §9.9 speeds are ball speeds; §9.12 implementation notes (one-step comparison, expected model differences, results); §9.13 PERF-03 on the host's performance cores. |
 | Consumers | `BilliardsCore` physics and simulator authors, test authors, AI (shot search) authors |
 | Related specs | `equipment.md` (geometry and constants), `physics-motion-and-cue.md` (ball motion and cue strike), `rules.md`, `ue5-realism-plan.md` |
 
@@ -617,7 +617,7 @@ Setup:
 ### 6.7 Cue strike (Tier A/B): TP A.30
 
 - **Elastic, horizontal cue**, m_r' = m_ball/m_cue:
-  - `v_b = 2 v_s / (1 + m_r'(1 + (5/2)(x/R)²))`
+  - `v_b = 2 v_s / (1 + m_r' + (5/2)(x/R)²)` (the effective inverse mass of the ball at an offset contact is `(1/m)(1 + (5/2)(x/R)²)`; this is `physics-motion-and-cue.md` B.5 with e = 1, Leckie & Greenspan, pooltool and Kim 2021 Eq. 83). v1.0 printed `2 v_s / (1 + m_r'(1 + (5/2)(x/R)²))`, which puts m_r' on the offset term and creates energy (m = 1, M = 3, v_s = 1, x = R/2: 1.851 J out of 1.5 J); corrected in v1.1 (WP-1 finding, WP-10).
   - `ω = 5 v_b x / (2R²)`, so the spin-rate factor is `Rω/v_b = (5/2)(x/R)`, which equals 1.25 at x = R/2.
 - **Center hit with 6 oz ball and 18 oz cue** (m_r' = 1/3): v_b = 1.5 v_s.
 - **With tip restitution e_tip, center hit:** `v_b = (1 + e_tip) v_s / (1 + m_r')`. Leather tips have e_tip 0.71–0.75, phenolic 0.81–0.87 [DD-CONST].
@@ -846,7 +846,7 @@ Unless stated otherwise:
 | SQ-03 | Reality: default playing cue at b = 0.5R | 1.5°–3.0° (range of the measured regular and low-squirt cues) | range | C |
 | SQ-04 | Sign | a right-English strike (contact point right of center) sends the CB left of the cue line; squirt = 0 at b = 0; odd in b | sign / 1e-12 | A |
 | CUE-01 | Elastic, center, level cue, m_ball/m_cue = 1/3 | v_b = 1.5 v_s; ω = 0 | rel 1e-9 | A |
-| CUE-02 | Elastic, x = 0.5R (side or top) | v_b = 1.297297 v_s; Rω/v_b = 1.25 | rel 1e-9 | A |
+| CUE-02 | Elastic, x = 0.5R (side or top) | v_b = 48/47 v_s = 1.021277 v_s (v1.0: 1.297297, from the energy-creating formula, §6.7); Rω/v_b = 1.25 | rel 1e-9 | A |
 | CUE-03 | Center, e_tip = 0.75 | v_b = 1.3125 v_s | rel 1e-9 | A |
 | CUE-04 | Spin rate vs. offset | maximum at x/R = sqrt(0.4·(1 + 1/3)) = 0.730297 (if the miscue limit is disabled) | 1e-6 | A |
 
@@ -892,6 +892,8 @@ Unless stated otherwise:
 | BRK-04 | Zero-gap rack vs. 50 µm random gaps | both terminate; outcomes differ (chaos); the zero-gap result is independent of ball-id ordering when the cluster solver is enabled | as stated | A/D |
 | BRK-05 | Speed sweep 7.6 → 13.4 m/s | mean kinetic energy delivered to the object balls increases monotonically | trend | D |
 
+Speeds in this table are **cue-ball** speeds right after the strike (§6.11: radar speeds; 10.7 m/s = 24 mph), not cue (tip) speeds: a 21 oz break cue sends the ball off at about 1.44 times its tip speed (7.44 m/s for 10.7 m/s), so a tip speed of 10.7 m/s is a 15.4 m/s ("ridiculously powerful") break (v1.1 clarification; the WP-10 tests find the tip speed by bisection).
+
 ### 9.10 Airborne (AIR)
 
 | ID | Setup | Expected | Tol | Tier |
@@ -929,13 +931,15 @@ Unless stated otherwise:
 | XREF-01 | 1000 B1 shots; pooltool resolver: frictionless-elastic ball–ball, `unrealistic` cushions, canonical everything else; RawBreak configured identically (circle pockets) | same event-type sequence in ≥ 99 % of shots; final positions within 1 mm; event times within 1e-6 s |
 | XREF-02 | Same with pooltool's default models (Alciatore ball–ball, Stronge cushions `omega_ratio` 1.8) and our ports | final positions within 5 mm in ≥ 95 % of shots (differences come from spacer/cluster handling; examine the outliers) |
 
+**Implementation notes (WP-10, 2026-09-28; `Tools/xref/xref.py`).** Shots are chaotic: each contact amplifies a position difference by about 10^2, so pooltool's own contact spacer (it moves balls to 2R + 1 µm before resolving, `make_kiss`) or a 1e-7 m difference in how the two codes construct a jaw becomes a millimetre within three contacts. The whole-shot criteria above therefore cannot be met by two correct implementations; they are reported as specified. The harness adds a **one-step comparison**: from pooltool's state of all balls after each of its events, the core must find pooltool's next event (same type and balls, time within 1e-6 s), and the post-contact velocities and spins are compared. XREF-01 runs pooltool with a 1e-8 m spacer (0 makes pooltool re-find the resolved contact at once; 1e-9 m makes `make_kiss` fail). Expected model differences, compared only where the models agree: facings (the core's are undercut with the on-shelf offset `s_f`; pooltool's are vertical lines at R): shots and steps with a facing contact are left out; clusters (the core's compliant island vs pooltool's sequential pairs); XREF-02 only: pooltool drops `v_z` after every contact ("FIXME-3D") where the core applies the slate reaction with cloth friction, and pooltool's ball-ball friction impulse is `mu e v_n` instead of `mu (1 + e) v_n / 2`. Results (1000 shots each): XREF-01 whole shots (878 without a facing contact) 98.7 % same sequence, 97.0 % within 1 mm, all times within 1e-6 s in 459 of 867; one step 99.97 % same next event, time error median 1e-16 s, p99 1e-14 s; post-contact difference median 9e-8 m/s ball-ball, 3e-16 m/s cushions. XREF-02 whole shots 20.2 % within 5 mm; one step 100 % same next event (motion and detection agree to machine precision); post-contact difference median 0.016 m/s ball-ball, 0.005 m/s cushions (the model differences above). Proposal: make the one-step comparison the criterion of XREF-01 and XREF-02 (architecture O-23).
+
 ### 9.13 Performance (PERF)
 
 | ID | Check | Pass |
 |---|---|---|
 | PERF-01 | B1 median / p99 per shot, 1 thread, Release | ≤ 100 µs / ≤ 1 ms |
 | PERF-02 | B2 median / p99 | ≤ 2 ms / ≤ 10 ms |
-| PERF-03 | B1 throughput 1 / 4 / 8 threads | ≥ 10 k/s per core; efficiency ≥ 0.8 |
+| PERF-03 | B1 throughput 1 / 4 / 8 threads | ≥ 10 k/s per core; efficiency ≥ 0.8 (v1.1: up to 8 threads and up to the host's performance cores, from the CPU time per shot; a hybrid CPU's efficiency cores and SMT siblings are slower per thread by design, and wall time on a shared host measures the other jobs; the wall efficiency is reported; other load only lowers the efficiency, so a gated count below 0.8 is measured again, up to 3 times, and the best measurement counts) |
 | PERF-04 | Allocation counter during B1 (after warm-up) | 0 |
 | PERF-05 | AI budget: 50,000 B1-like simulations on 6 threads | ≤ 1.0 s wall |
 

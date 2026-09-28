@@ -8,7 +8,9 @@
 
 #include "rb/Config.h"
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
 
 namespace rb
 {
@@ -33,7 +35,9 @@ namespace rb
 	inline double Asinh(double X) { return std::asinh(X); }
 	inline double Sinh(double X) { return std::sinh(X); }
 	inline double Pow(double X, double Y) { return std::pow(X, Y); }
-	inline bool IsFinite(double X) { return std::isfinite(X); }
+	// Exponent bits not all set (the definition of std::isfinite, which MSVC compiles to an out-of-line CRT call (_dtest) that
+	// showed up in the break profile; WP-10).
+	inline bool IsFinite(double X) { return (std::bit_cast<std::uint64_t>(X) & 0x7FF0000000000000ull) != 0x7FF0000000000000ull; }
 
 	constexpr double Abs(double X) { return X < 0.0 ? -X : X; }
 	constexpr double Square(double X) { return X * X; }

@@ -860,7 +860,11 @@ namespace rb::sim
 					}
 					else
 					{
-						Slot.Seg = PivotDetectionProxy(Slot.Pivot);
+						// First piece of the piecewise detection proxy (WP-10, VAL ROB-11; SimInternal.h).
+						const PivotProxyPiece Piece = MakePivotProxyPiece(Slot.Pivot, 0.0, Slot.Pivot.T0, kPivotProxyTolerance);
+						Slot.Seg = Piece.Seg;
+						Slot.PivotPieceU = Piece.UpperU;
+						Slot.PivotPieceLast = Piece.Last;
 						IsPivot = true;
 					}
 				}
@@ -887,6 +891,21 @@ namespace rb::sim
 				PushTrack(Ws, Ball, T);
 			}
 			ComputeObservers(Ws, Ball, Time, true);
+		}
+
+		void AdvancePivotPiece(Workspace& Ws, int Ball, double Time)
+		{
+			// A node of the pivot's detection proxy (SimInternal.h): the next piece from the exact node of the true path. The
+			// open track placeholder of the pivot and Orientation0 (the orientation at the pivot start) stay: the pivot is
+			// recorded as Sampled pieces of the true path when it is closed (CloseOpenSegment).
+			BallSlot& Slot = Ws.Balls[Ball];
+			const PivotProxyPiece Piece = MakePivotProxyPiece(Slot.Pivot, Slot.PivotPieceU, Time, kPivotProxyTolerance);
+			++Slot.Version;
+			Slot.Seg = Piece.Seg;
+			Slot.PivotPieceU = Piece.UpperU;
+			Slot.PivotPieceLast = Piece.Last;
+			ComputeObservers(Ws, Ball, Time, true);
+			PredictBalls(Ws, 1u << Ball);
 		}
 
 		void PredictBalls(Workspace& Ws, std::uint32_t Changed)

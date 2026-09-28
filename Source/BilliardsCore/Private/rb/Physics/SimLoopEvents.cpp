@@ -319,6 +319,11 @@ namespace rb::sim
 				RouteLanding(Ws, Ball, Time); // collisions 6.1 (WP-6b)
 				return;
 			}
+			if (Seg.State == MotionState::PocketPivot && !Slot.PivotPieceLast)
+			{
+				loop::AdvancePivotPiece(Ws, Ball, Time); // a node of the piecewise detection proxy (WP-10, SimInternal.h)
+				return;
+			}
 			if (Seg.State == MotionState::PocketPivot)
 			{
 				const PocketId Pocket = Slot.Pivot.Pocket != PocketId::None ? Slot.Pivot.Pocket : Slot.Context.Pocket;
@@ -492,6 +497,43 @@ namespace rb::sim
 			loop::PredictBalls(Ws, 1u << Ball);
 		}
 
+		// Guards 2 and 5 (architecture 9) for the rail-top contacts of an event-mode ball, as ResolveFixedFeature applies them to the
+		// cushion-like features: a Pressing contact (zero normal speed, curving into the feature), or the ZenoContactCount-th contact
+		// of the ball-feature pair within ZenoWindow, starts the rigid rail-top island (StartIsland makes every RailTop / RailTopEdge
+		// seed rigid, collisions 6.2), which resolves sustained contacts. (WP-10 fix, found by PERF-05, B1 seed 745323: a ball flying
+		// along the inside of a side pocket's cut rim - a concave edge whose curvature (~70 m/s^2 at 1.6 m/s) pulls it back after each
+		// bounce - bounced with e_rt = 0.5 at geometrically shorter intervals until the contact was pressing; ProcessRailTopEvent
+		// resolved it by GRI without an impulse, the predictor found it again at the same instant, and the shot ran into the event
+		// cap: SimStatus::Aborted.) The seed state is the ball's state at the event (StartIsland); nothing else changes, so every
+		// shot without such a contact is bitwise unchanged.
+		bool RailTopContactToIsland(Workspace& Ws, const QueuedEvent& E, const TableFeatureRef& Feature)
+		{
+			const int Ball = E.BallA;
+			const MotionState State = Ws.Balls[Ball].Seg.State;
+			if (IsTerminal(State) || State == MotionState::PocketPivot || Feature.Index >= Ws.Input->Table->RailTops.Size())
+			{
+				return false; // not a rail-top contact ProcessRailTopEvent would resolve
+			}
+			IslandSeed Seed;
+			Seed.BallA = Ball;
+			Seed.Feature = Feature;
+			Seed.RailTop = true;
+			if ((E.Flags & ContactFlags::Pressing) != 0u)
+			{
+				Seed.Pressing = true;
+				loop::HandOffToIsland(Ws, Seed, E.Time);
+				return true;
+			}
+			if (RecordZenoContact(Ws, Ball, -1, Feature, E.Time))
+			{
+				EmitZenoGuard(Ws, Ball, kNoBall, Feature, E.Time);
+				Seed.Zeno = true;
+				loop::HandOffToIsland(Ws, Seed, E.Time);
+				return true;
+			}
+			return false;
+		}
+
 		void ProcessTableFeature(Workspace& Ws, const QueuedEvent& E)
 		{
 			const int Ball = E.BallA;
@@ -520,6 +562,12 @@ namespace rb::sim
 				return;
 			case TableFeatureKind::RailTop:
 			case TableFeatureKind::RailTopEdge:
+				if (RailTopContactToIsland(Ws, E, Feature))
+				{
+					return;
+				}
+				ProcessRailTopEvent(Ws, Ball, Feature, Time);
+				return;
 			case TableFeatureKind::SupportExit:
 				ProcessRailTopEvent(Ws, Ball, Feature, Time);
 				return;
@@ -597,7 +645,13 @@ namespace rb::sim
 			}
 			const double ReducedMass = SpecI.Mass * SpecJ.Mass / (SpecI.Mass + SpecJ.Mass);
 			const double Join = IslandJoinDistance(Vn, ReducedMass, P.Cli, P.Numerics.ContactTol);
-			if (NeedsIsland(Ws, I, J, BeforeI.Position, BeforeJ.Position, Time, Join))
+			// An approaching pair with a ball in a pocket (pivoting or falling) is resolved pairwise (collisions 5.4: "PocketFall -- other
+			// balls --> PocketFall", GRI): an island cannot hold it - pocket states never join islands and a member in a pocket's hole
+			// leaves at the first step (MemberExit), so the island ended after one step with the pair still approaching, the contact
+			// fired again at once, and the pair sank into each other by one step per round (WP-10 fix, a 9-ball break of a 20 000-break
+			// scan: 592 one-step islands and 750 overlap diagnostics, two balls rattling on a side pocket's rim).
+			const bool InPocket = IsInPocket(BeforeI.State) || IsInPocket(BeforeJ.State);
+			if (!InPocket && NeedsIsland(Ws, I, J, BeforeI.Position, BeforeJ.Position, Time, Join))
 			{
 				loop::HandOffToIsland(Ws, Seed, Time); // cluster, frozen-to-rail kiss, frozen strike (3.9.2)
 				return;

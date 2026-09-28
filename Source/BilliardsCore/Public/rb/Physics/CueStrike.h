@@ -161,7 +161,10 @@ namespace rb
 	// grip/miscue logic of B.5 with the relative velocity; the table reaction uses Surface (the support
 	// the ball is on; ignored if it is airborne).
 	// Contact normal n from the dome center at Time to the ball center; grip (p_hat = d) while d . n > 0 and |d x n| <=
-	// MiscueLimit(mu_tip), else the friction-cone edge of B.5; J = (1 + e_tip) (v_rel . p_hat) / ((d . p_hat)^2 / M +
+	// MiscueLimit(mu_tip), else the friction-cone edge of B.5 with t_hat along the tangential SLIP of the tip over the ball's
+	// contact point, v_rel - (v_rel . n) n (kinetic friction opposes the slip; WP-10 fix: B.5's stroke direction is the slip of a
+	// ball at rest only, and a moving or spinning ball could be pushed along its own slip, gaining energy); without tangential
+	// slip (|slip| <= EpsV) the stroke direction; J = (1 + e_tip) (v_rel . p_hat) / ((d . p_hat)^2 / M +
 	// (1/m)(1 + |Q/R x p_hat|^2 / k)) with v_rel = V_tip d - (v + w x Q) (J = 0 when v_rel . p_hat <= 0). No squirt (applied
 	// once, at the strike). Non-penetration (integration round 2): if the pair still approaches along n after that impulse
 	// (v_n' = v_rel . n - J ((d . p_hat)(d . n) / M + (p_hat . n) / m) > 0: the miscue branch, or a grip axis far from n),
