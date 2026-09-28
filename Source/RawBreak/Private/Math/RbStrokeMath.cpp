@@ -4,9 +4,7 @@
 
 namespace
 {
-	// Inclusive window slack: sample times are QPC-derived doubles (resolution ~1e-12 s at 1e4 s uptime); 1 ns keeps a
-	// sample that sits exactly on a window edge (e.g. T9's 0.48 = 0.5 - 0.02) inside regardless of rounding.
-	constexpr double kWindowSlack = 1.0e-9;
+	using RbStrokeMath::kWindowSlack;
 
 	double GainSlope(const FRbStrokeGain& P)
 	{
@@ -36,39 +34,47 @@ namespace
 		return S1 + S2 + S3;
 	}
 
-	// Least-squares quadratic y = c0 + c1 u + c2 u^2 over (u_i, y_i); Cramer's rule on the normal equations.
-	bool SolveQuadratic(const double* U, const double* Y, int32 N, double& C1, double& C2)
+	// Least-squares quadratic y = c0 + c1 u + c2 u^2 over (u_i, y_i), accumulated one point at a time (no buffers: the
+	// presentation fits every frame, and a 20 ms window of an 8 kHz mouse holds 160 samples); Cramer's rule on the normal
+	// equations.
+	struct FQuadraticSums
 	{
 		double S0 = 0.0, S1 = 0.0, S2 = 0.0, S3 = 0.0, S4 = 0.0;
 		double T0 = 0.0, T1 = 0.0, T2 = 0.0;
-		for (int32 i = 0; i < N; ++i)
+		int32 N = 0;
+
+		void Add(double u, double y)
 		{
-			const double u = U[i];
 			const double u2 = u * u;
 			S0 += 1.0;
 			S1 += u;
 			S2 += u2;
 			S3 += u2 * u;
 			S4 += u2 * u2;
-			T0 += Y[i];
-			T1 += u * Y[i];
-			T2 += u2 * Y[i];
+			T0 += y;
+			T1 += u * y;
+			T2 += u2 * y;
+			++N;
 		}
-		// | S0 S1 S2 |   | c0 |   | T0 |
-		// | S1 S2 S3 | * | c1 | = | T1 |
-		// | S2 S3 S4 |   | c2 |   | T2 |
-		const double Det = S0 * (S2 * S4 - S3 * S3) - S1 * (S1 * S4 - S3 * S2) + S2 * (S1 * S3 - S2 * S2);
-		const double Scale = S0 * S2 * S4;
-		if (!(FMath::Abs(Det) > 1.0e-12 * FMath::Max(Scale, 1.0e-300)))
+
+		bool Solve(double& C1, double& C2) const
 		{
-			return false;
+			// | S0 S1 S2 |   | c0 |   | T0 |
+			// | S1 S2 S3 | * | c1 | = | T1 |
+			// | S2 S3 S4 |   | c2 |   | T2 |
+			const double Det = S0 * (S2 * S4 - S3 * S3) - S1 * (S1 * S4 - S3 * S2) + S2 * (S1 * S3 - S2 * S2);
+			const double Scale = S0 * S2 * S4;
+			if (!(FMath::Abs(Det) > 1.0e-12 * FMath::Max(Scale, 1.0e-300)))
+			{
+				return false;
+			}
+			const double Det1 = S0 * (T1 * S4 - S3 * T2) - T0 * (S1 * S4 - S3 * S2) + S2 * (S1 * T2 - T1 * S2);
+			const double Det2 = S0 * (S2 * T2 - T1 * S3) - S1 * (S1 * T2 - T1 * S2) + T0 * (S1 * S3 - S2 * S2);
+			C1 = Det1 / Det;
+			C2 = Det2 / Det;
+			return true;
 		}
-		const double Det1 = S0 * (T1 * S4 - S3 * T2) - T0 * (S1 * S4 - S3 * S2) + S2 * (S1 * T2 - T1 * S2);
-		const double Det2 = S0 * (S2 * T2 - T1 * S3) - S1 * (S1 * T2 - T1 * S2) + T0 * (S1 * S3 - S2 * S2);
-		C1 = Det1 / Det;
-		C2 = Det2 / Det;
-		return true;
-	}
+	};
 
 	template <typename TValue>
 	bool FitQuadratic(const FRbStrokeSample* Samples, int32 Count, double T, double WindowStart, double WindowEnd, TValue Value,
@@ -81,8 +87,7 @@ namespace
 			return false;
 		}
 		const double Scale = FMath::Max(WindowEnd - WindowStart, 1.0e-6);
-		TArray<double, TInlineAllocator<64>> U;
-		TArray<double, TInlineAllocator<64>> Y;
+		FQuadraticSums Sums;
 		double Origin = 0.0;
 		bool bHaveOrigin = false;
 		for (int32 i = 0; i < Count; ++i)
@@ -98,12 +103,11 @@ namespace
 				Origin = V; // positions relative to the first sample of the window (smaller sums, same derivatives)
 				bHaveOrigin = true;
 			}
-			U.Add((Time - T) / Scale);
-			Y.Add(V - Origin);
+			Sums.Add((Time - T) / Scale, V - Origin);
 		}
 		double C1 = 0.0;
 		double C2 = 0.0;
-		if (U.Num() < 3 || !SolveQuadratic(U.GetData(), Y.GetData(), U.Num(), C1, C2))
+		if (Sums.N < 3 || !Sums.Solve(C1, C2))
 		{
 			return false;
 		}
@@ -266,6 +270,32 @@ namespace RbStrokeMath
 	{
 		return FitQuadratic(Samples, Count, T, WindowStart, WindowEnd, [](const FRbStrokeSample& S) { return S.Lateral; },
 			OutVelocity, OutAcceleration);
+	}
+
+	int32 FirstSampleInWindow(const FRbStrokeSample* Samples, int32 Count, double WindowStart)
+	{
+		if (!Samples || Count <= 0)
+		{
+			return 0;
+		}
+		// The same bound as the fit's filter (Time < WindowStart - kWindowSlack is outside), so the subrange keeps exactly
+		// the samples the full-range fit keeps.
+		const double Bound = WindowStart - kWindowSlack;
+		int32 Lo = 0;
+		int32 Hi = Count;
+		while (Lo < Hi)
+		{
+			const int32 Mid = Lo + (Hi - Lo) / 2;
+			if (Samples[Mid].Time < Bound)
+			{
+				Lo = Mid + 1;
+			}
+			else
+			{
+				Hi = Mid;
+			}
+		}
+		return Lo;
 	}
 
 	bool QuadraticFitVelocity(const FRbStrokeSample* Samples, int32 Count, double T, double Window, double& OutVelocity)

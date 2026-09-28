@@ -108,11 +108,21 @@ namespace RbStrokeMath
 	// derivative evaluated AT T, not at the window centre; T9). Returns false with fewer than 3 samples.
 	RAWBREAK_API bool QuadraticFitVelocity(const FRbStrokeSample* Samples, int32 Count, double T, double Window, double& OutVelocity);
 
+	// Inclusive slack of every fit window: a sample with Time >= WindowStart - kWindowSlack is inside (QPC-derived doubles; 1 ns
+	// keeps a sample that sits exactly on a window edge, e.g. T9's 0.48 = 0.5 - 0.02, inside regardless of rounding).
+	inline constexpr double kWindowSlack = 1.0e-9;
+
 	// General form: quadratic least-squares fit of Position over the samples with Time in [WindowStart, WindowEnd]
-	// (inclusive, 1 ns slack), evaluated at T: velocity and acceleration. Times are centred on T and scaled by the window
-	// before the fit (no cancellation with QPC-sized times). Returns false with fewer than 3 samples or a singular fit.
+	// (inclusive, kWindowSlack), evaluated at T: velocity and acceleration. Times are centred on T and scaled by the window
+	// before the fit (no cancellation with QPC-sized times). Single pass, no allocation (called every frame while a forward
+	// stroke is shown). Returns false with fewer than 3 samples or a singular fit.
 	RAWBREAK_API bool QuadraticFit(const FRbStrokeSample* Samples, int32 Count, double T, double WindowStart, double WindowEnd,
 		double& OutVelocity, double& OutAcceleration);
+
+	// Index of the first sample with Time >= WindowStart - kWindowSlack in time-ordered samples (binary search; Count if none).
+	// A fit over [that index, Count) sees exactly the samples a fit over all of them keeps, so the per-frame fit of a long
+	// stroke costs O(log N + window) instead of O(N).
+	RAWBREAK_API int32 FirstSampleInWindow(const FRbStrokeSample* Samples, int32 Count, double WindowStart);
 
 	// The same fit on the Lateral coordinate (steering swoop at contact).
 	RAWBREAK_API bool QuadraticFitLateral(const FRbStrokeSample* Samples, int32 Count, double T, double WindowStart, double WindowEnd,

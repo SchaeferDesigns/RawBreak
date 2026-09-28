@@ -13,6 +13,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Parse.h"
+#include "Null/NullPlatformApplicationMisc.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/WindowsApplication.h"
@@ -93,8 +94,16 @@ namespace
 	constexpr UINT WM_RB_REGISTER = WM_APP + 0x5B1;
 	constexpr UINT WM_RB_UNREGISTER = WM_APP + 0x5B2;
 	constexpr UINT WM_RB_INJECT = WM_APP + 0x5B3;
+	constexpr UINT WM_RB_INJECT_ABSOLUTE = WM_APP + 0x5B4;
 
 	std::atomic<uint32> GRbRawInputWindowCounter{0};
+
+	// The Slate application runs on the Windows platform application (under -RenderOffscreen UE creates its NULL application,
+	// FNullPlatformApplicationMisc: casting that to FWindowsApplication and adding a message handler would corrupt memory).
+	bool HasWindowsSlateApplication()
+	{
+		return FSlateApplication::IsInitialized() && !FNullPlatformApplicationMisc::IsUsingNullApplication();
+	}
 
 	// Parses one WM_INPUT. True for a relative mouse report with motion; bAbsolute for absolute (tablet / remote) reports.
 	bool ReadRelativeMouse(LPARAM LParam, int32& OutDX, int32& OutDY, bool& bOutAbsolute)
@@ -151,18 +160,22 @@ namespace
 		{
 			if (HWND W = Window.load(); W && !bRegisterPending.exchange(true))
 			{
-				::PostMessageW(W, WM_RB_REGISTER, 0, 0);
+				if (!::PostMessageW(W, WM_RB_REGISTER, 0, 0))
+				{
+					bRegisterPending.store(false); // not queued: the next WM_INPUT on the game window asks again
+				}
 			}
 		}
-		bool PostInject(int32 DX, int32 DY)
+		bool PostInject(int32 DX, int32 DY, bool bAbsolute)
 		{
 			HWND W = Window.load();
-			return W && ::PostMessageW(W, WM_RB_INJECT, static_cast<WPARAM>(static_cast<intptr_t>(DX)), static_cast<LPARAM>(static_cast<intptr_t>(DY))) != 0;
+			return W && ::PostMessageW(W, bAbsolute ? WM_RB_INJECT_ABSOLUTE : WM_RB_INJECT, static_cast<WPARAM>(static_cast<intptr_t>(DX)),
+				static_cast<LPARAM>(static_cast<intptr_t>(DY))) != 0;
 		}
 
 		std::atomic<uint32> Registrations{0};
 		std::atomic<uint64> Reports{0};
-		std::atomic<bool> bAbsoluteSeen{false};
+		std::atomic<uint64> AbsoluteReports{0};
 		std::atomic<bool> bOwnsRegistration{false};
 
 		virtual uint32 Run() override
@@ -249,7 +262,7 @@ namespace
 				}
 				else if (bAbsolute)
 				{
-					bAbsoluteSeen.store(true);
+					AbsoluteReports.fetch_add(1, std::memory_order_relaxed); // the game thread turns them into a cursor move
 				}
 				::DefWindowProcW(Hwnd, Msg, WParam, LParam); // RIM_INPUT cleanup
 				return 0;
@@ -283,6 +296,9 @@ namespace
 				Reports.fetch_add(1, std::memory_order_relaxed);
 				return 0;
 			}
+			case WM_RB_INJECT_ABSOLUTE:
+				AbsoluteReports.fetch_add(1, std::memory_order_relaxed); // same path as an absolute WM_INPUT
+				return 0;
 			case WM_RB_QUIT:
 				::PostQuitMessage(0);
 				return 0;
@@ -349,8 +365,11 @@ struct FRbRawMouseInput::FImpl
 	int64 ForwardX = 0; // thread deltas not yet forwarded to Slate (game thread)
 	int64 ForwardY = 0;
 	uint64 EngineReports = 0;
+	uint64 AbsoluteForwarded = 0; // thread's absolute-report count already turned into a cursor move (game thread)
 	bool bAbsoluteWarned = false;
 	bool bFirstThreadReportLogged = false;
+	bool bHandlerInstalled = false;
+	TArray<double> TimesScratch; // fallback time reconstruction (reused: an 8 kHz mouse sends > 100 reports per frame)
 	FDelegateHandle BeginFrameHandle;
 
 	static constexpr int32 MaxPending = 16384;
@@ -405,6 +424,23 @@ struct FRbRawMouseInput::FImpl
 		}
 		ForwardX = 0;
 		ForwardY = 0;
+#if PLATFORM_WINDOWS
+		// Absolute reports (tablet, touch, VM / streaming tools) that the thread took from UE: UE answers them with a
+		// cursor-based OnMouseMove (WindowsApplication.cpp, WM_INPUT MOUSE_MOVE_ABSOLUTE); one call per frame carries the
+		// whole cursor delta, so look / aim keep working with such a device.
+		if (Runnable)
+		{
+			const uint64 Absolute = Runnable->AbsoluteReports.load(std::memory_order_relaxed);
+			if (Absolute != AbsoluteForwarded)
+			{
+				AbsoluteForwarded = Absolute;
+				if (Options.bForwardToSlate && FSlateApplication::IsInitialized())
+				{
+					FSlateApplication::Get().OnMouseMove();
+				}
+			}
+		}
+#endif
 	}
 
 	void PumpGameThread()
@@ -433,12 +469,11 @@ struct FRbRawMouseInput::FImpl
 		{
 			const double PumpTime = PumpBatch.Last().Time;
 			IntervalEstimate = RbRawMouse::UpdateIntervalEstimate(IntervalEstimate, PumpTime, LastPumpTime, PumpBatch.Num());
-			TArray<double, TInlineAllocator<64>> Times;
-			Times.SetNumUninitialized(PumpBatch.Num());
-			RbRawMouse::ReconstructPumpTimes(PumpTime, LastPumpTime, IntervalEstimate, PumpBatch.Num(), Times.GetData());
+			TimesScratch.SetNumUninitialized(PumpBatch.Num(), EAllowShrinking::No);
+			RbRawMouse::ReconstructPumpTimes(PumpTime, LastPumpTime, IntervalEstimate, PumpBatch.Num(), TimesScratch.GetData());
 			for (int32 i = 0; i < PumpBatch.Num(); ++i)
 			{
-				PumpBatch[i].Time = Times[i];
+				PumpBatch[i].Time = TimesScratch[i];
 				Pending.Add(PumpBatch[i]);
 			}
 			LastPumpTime = PumpTime;
@@ -450,10 +485,10 @@ struct FRbRawMouseInput::FImpl
 		}
 
 #if PLATFORM_WINDOWS
-		if (Runnable && Runnable->bAbsoluteSeen.load() && !bAbsoluteWarned)
+		if (Runnable && Runnable->AbsoluteReports.load(std::memory_order_relaxed) > 0 && !bAbsoluteWarned)
 		{
 			bAbsoluteWarned = true;
-			UE_LOG(LogRawBreak, Warning, TEXT("RbRawMouse: absolute raw mouse reports (tablet / remote desktop) are ignored by the raw-input thread; use -RbRawInputThread=0"));
+			UE_LOG(LogRawBreak, Warning, TEXT("RbRawMouse: absolute pointer reports (tablet / touch / remote tool): forwarded as cursor moves for look / aim; the mouse stroke needs a relative mouse"));
 		}
 #endif
 		if (Pending.Num() > MaxPending)
@@ -478,13 +513,14 @@ struct FRbRawMouseInput::FImpl
 				StopThread();
 			}
 		}
-		if (Options.bInstallHandler && FSlateApplication::IsInitialized())
+		if (Options.bInstallHandler && HasWindowsSlateApplication())
 		{
 			TSharedPtr<GenericApplication> App = FSlateApplication::Get().GetPlatformApplication();
-			WinApp = static_cast<FWindowsApplication*>(App.Get());
+			WinApp = static_cast<FWindowsApplication*>(App.Get()); // FWindowsApplication: checked above (not the NULL application)
 			if (WinApp)
 			{
 				WinApp->AddMessageHandler(*this);
+				bHandlerInstalled = true;
 			}
 		}
 		bActive = bThreadMode || WinApp != nullptr;
@@ -522,6 +558,7 @@ struct FRbRawMouseInput::FImpl
 		{
 			WinApp->RemoveMessageHandler(*this);
 		}
+		bHandlerInstalled = false;
 		StopThread();
 		// Hand the mouse back: UE still believes its game window is registered while it is in high-precision mode.
 		if (bTookOver && WinApp && FSlateApplication::IsInitialized() && WinApp->IsUsingHighPrecisionMouseMode() && EngineWindow &&
@@ -590,10 +627,10 @@ TSharedRef<FRbRawMouseInput> FRbRawMouseInput::CreateWithOptions(const FRbRawMou
 #if PLATFORM_WINDOWS
 	const TCHAR* Cmd = FCommandLine::Get();
 	const bool bHeadless = !FApp::CanEverRender() || IsRunningCommandlet() || IsRunningDedicatedServer() ||
-		FParse::Param(Cmd, TEXT("RenderOffscreen")) || !FSlateApplication::IsInitialized();
+		FParse::Param(Cmd, TEXT("RenderOffscreen")) || !HasWindowsSlateApplication();
 	if (Options.bForceActive || !bHeadless)
 	{
-		if (Options.bForceActive && !FSlateApplication::IsInitialized())
+		if (Options.bForceActive && !HasWindowsSlateApplication())
 		{
 			Impl.Options.bInstallHandler = false;
 			Impl.Options.bForwardToSlate = false;
@@ -661,10 +698,10 @@ void FRbRawMouseInput::Reset()
 	Impl->Pending.Reset();
 }
 
-bool FRbRawMouseInput::InjectTestReport(int32 DeltaX, int32 DeltaY)
+bool FRbRawMouseInput::InjectTestReport(int32 DeltaX, int32 DeltaY, bool bAbsolute)
 {
 #if PLATFORM_WINDOWS
-	return Impl->bThreadMode && Impl->Runnable && Impl->Runnable->PostInject(DeltaX, DeltaY);
+	return Impl->bThreadMode && Impl->Runnable && Impl->Runnable->PostInject(DeltaX, DeltaY, bAbsolute);
 #else
 	return false;
 #endif
@@ -680,8 +717,10 @@ FRbRawMouseInput::FStats FRbRawMouseInput::GetStats() const
 	if (Impl->Runnable)
 	{
 		Stats.ThreadReports = Impl->Runnable->Reports.load();
+		Stats.AbsoluteReports = Impl->Runnable->AbsoluteReports.load();
 		Stats.Registrations = Impl->Runnable->Registrations.load();
 	}
+	Stats.bMessageHandler = Impl->bHandlerInstalled;
 #endif
 	return Stats;
 }

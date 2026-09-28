@@ -7,12 +7,14 @@
 #include "Tests/RbTestFlags.h"
 
 #include "Async/Async.h"
+#include "Framework/Application/SlateApplication.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "InputTriggers.h"
+#include "Null/NullPlatformApplicationMisc.h"
 #include "UObject/Package.h"
 
 #if PLATFORM_WINDOWS
@@ -209,6 +211,71 @@ bool FRbRawInputThread::RunTest(const FString& Parameters)
 	TestFalse(TEXT("fallback: no thread"), Fallback->IsThreadRunning());
 	TestFalse(TEXT("fallback: no true timestamps"), Fallback->HasTrueTimestamps());
 	TestFalse(TEXT("fallback: injection needs the thread"), Fallback->InjectTestReport(1, 1));
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbRawInputAbsolute, "RawBreak.Unit.Input.AbsoluteReports", RB_UNIT_TEST_FLAGS)
+bool FRbRawInputAbsolute::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS
+	// An absolute report (pen tablet, touch, VM / streaming tool) between two relative ones: the thread counts it (the game thread
+	// turns it into a cursor move for look / aim, as UE does), it never becomes a stroke sample, and the thread keeps running
+	// with true timestamps for the relative mouse.
+	FRbRawMouseInputOptions Options;
+	Options.bForceActive = true;
+	Options.bInstallHandler = false;
+	Options.bForwardToSlate = false;
+	TSharedRef<FRbRawMouseInput> Input = FRbRawMouseInput::CreateWithOptions(Options);
+	if (!TestTrue(TEXT("thread running"), Input->IsThreadRunning()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("relative report posted"), Input->InjectTestReport(5, -5));
+	TestTrue(TEXT("absolute report posted"), Input->InjectTestReport(30000, 30000, true));
+	TestTrue(TEXT("relative report posted"), Input->InjectTestReport(6, -6));
+	TArray<FRbRawMouseReport> Reports;
+	const double Deadline = FPlatformTime::Seconds() + 2.0;
+	while ((Reports.Num() < 2 || Input->GetStats().AbsoluteReports < 1) && FPlatformTime::Seconds() < Deadline)
+	{
+		Input->Drain(Reports);
+		FPlatformProcess::Sleep(0.0005f);
+	}
+	const FRbRawMouseInput::FStats Stats = Input->GetStats();
+	TestEqual(TEXT("absolute report counted"), static_cast<int32>(Stats.AbsoluteReports), 1);
+	TestEqual(TEXT("relative reports only in the ring"), static_cast<int32>(Stats.ThreadReports), 2);
+	TestTrue(TEXT("the two relative reports, in order"), Reports.Num() == 2 && Reports[0].DeltaX == 5 && Reports[1].DeltaX == 6 &&
+		Reports[0].bTrueTimestamp && Reports[1].bTrueTimestamp);
+	TestTrue(TEXT("thread keeps running"), Input->IsThreadRunning());
+	TestTrue(TEXT("true timestamps kept"), Input->HasTrueTimestamps());
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbRawInputHandlerApp, "RawBreak.Unit.Input.HandlerOnlyOnWindowsApplication", RB_UNIT_TEST_FLAGS)
+bool FRbRawInputHandlerApp::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS
+	// A forced instance WITH the message handler: installed on the Windows platform application, never on UE's NULL application
+	// (-RenderOffscreen, e.g. rbue.py test --render), where the cast to FWindowsApplication would corrupt memory; removed again
+	// on destruction. The thread runs either way.
+	FRbRawMouseInputOptions Options;
+	Options.bForceActive = true;
+	Options.bInstallHandler = true;
+	Options.bForwardToSlate = false;
+	const bool bWindowsApp = FSlateApplication::IsInitialized() && !FNullPlatformApplicationMisc::IsUsingNullApplication();
+	for (int32 Cycle = 0; Cycle < 3; ++Cycle)
+	{
+		TSharedPtr<FRbRawMouseInput> Input = FRbRawMouseInput::CreateWithOptions(Options);
+		TestTrue(TEXT("thread running"), Input->IsThreadRunning());
+		TestTrue(TEXT("active"), Input->IsActive());
+		TestTrue(TEXT("handler only on the Windows application"), Input->GetStats().bMessageHandler == bWindowsApp);
+		TArray<FRbRawMouseReport> Reports;
+		TestEqual(TEXT("nothing to drain"), Input->Drain(Reports), 0);
+		Input.Reset(); // removes the handler, joins the thread
+	}
+	AddInfo(FString::Printf(TEXT("Slate %s, %s application"), FSlateApplication::IsInitialized() ? TEXT("initialized") : TEXT("absent"),
+		FNullPlatformApplicationMisc::IsUsingNullApplication() ? TEXT("NULL") : TEXT("Windows")));
 #endif
 	return true;
 }

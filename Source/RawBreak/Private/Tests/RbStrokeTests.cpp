@@ -752,6 +752,201 @@ bool FRbStrokeRawThread::RunTest(const FString& Parameters)
 }
 #endif
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbStrokeScriptedSequence, "RawBreak.Unit.Stroke.ScriptedStrokeSequence", RB_UNIT_TEST_FLAGS)
+bool FRbStrokeScriptedSequence::RunTest(const FString& Parameters)
+{
+	// The RbStroke cheat pattern (UE-7): InjectStrokeSamples(MakeScriptedStroke(V, Now + 0.05)) more than once per address.
+	// Every injection is its own stroke with its own hand origin; before the fix the second stroke continued the first one's
+	// hand path (a jump from the old hand position to 0 moved the cue), so the shot missed its speed.
+	// 1. A practice stroke, then the committed shot.
+	{
+		FStrokeRig Rig(MakeTestContext());
+		Rig.GetDown();
+		const TArray<FRbStrokeSample> Practice = Rig.Stroke->MakeScriptedStroke(3.0, Rig.Clock + 0.1);
+		Rig.Stroke->InjectStrokeSamples(Practice);
+		Rig.RunFrames(60.0, Practice.Last().Time + 0.1);
+		TestEqual(TEXT("practice: no contact"), Rig.Contacts.Num(), 0);
+		TestEqual(TEXT("practice: stopped short"), Rig.Stroke->GetCueDisplacement(), -Rig.Stroke->PracticeStopShort);
+		Rig.Stroke->SetCommitHeld(true);
+		const TArray<FRbStrokeSample> Shot = Rig.Stroke->MakeScriptedStroke(2.4, Rig.Clock + 0.1);
+		Rig.Stroke->InjectStrokeSamples(Shot);
+		Rig.RunFrames(60.0, Shot.Last().Time + 0.1);
+		if (TestEqual(TEXT("second injection: one contact"), Rig.Contacts.Num(), 1))
+		{
+			TestNearlyEqual(TEXT("second injection: speed of its own stroke"), Rig.Contacts[0].Intended.Speed, 2.4, 1e-3);
+			TestTrue(TEXT("the shot's forward stroke, not the practice one"),
+				Rig.Contacts[0].Intended.ForwardStart > Practice.Last().Time - Rig.Stroke->GetDownSince());
+		}
+		TestEqual(TEXT("an uncommitted practice stroke never aborts"), Rig.Aborts.Num(), 0);
+	}
+	// 2. A committed stroke cut off by a new injection: it ends as an abort (the ramp was shown), the new stroke is clean.
+	{
+		FStrokeRig Rig(MakeTestContext());
+		Rig.GetDown();
+		Rig.Stroke->SetCommitHeld(true);
+		FRbScriptedStroke P;
+		P.TipSpeed = 2.0;
+		P.StartTime = Rig.Clock + 0.1;
+		P.StartCueDisplacement = Rig.Stroke->GetCueDisplacement();
+		TArray<FRbStrokeSample> First;
+		double Tc = 0.0;
+		double ForwardStart = 0.0;
+		RbStrokeMath::MakeScriptedStroke(P, Rig.Stroke->Gain, First, &Tc, &ForwardStart);
+		First.RemoveAll([ForwardStart](const FRbStrokeSample& S) { return S.Time > ForwardStart + 0.08; });
+		Rig.Stroke->InjectStrokeSamples(First);
+		Rig.RunUntil(First.Last().Time + 0.02);
+		TestTrue(TEXT("committed stroke in progress"), Rig.Stroke->IsCommittedStrokeInProgress());
+		const TArray<FRbStrokeSample> Second = Rig.Stroke->MakeScriptedStroke(1.7, Rig.Clock + 0.05);
+		Rig.Stroke->InjectStrokeSamples(Second);
+		Rig.RunFrames(60.0, Second.Last().Time + 0.1);
+		TestTrue(TEXT("the cut-off committed stroke aborted after the ramp"), Rig.Aborts.Num() == 1 && Rig.Aborts[0]);
+		if (TestEqual(TEXT("new stroke: one contact"), Rig.Contacts.Num(), 1))
+		{
+			TestNearlyEqual(TEXT("new stroke: its own speed"), Rig.Contacts[0].Intended.Speed, 1.7, 1e-3);
+		}
+	}
+	// 3. One stroke fed in chunks (bNewStroke = false) is the same stroke as one injection: bitwise identical commit.
+	{
+		TArray<FRbStrokeSample> Samples;
+		FRbStrokeCommit Reference;
+		for (int32 Pass = 0; Pass < 2; ++Pass)
+		{
+			FStrokeRig Rig(MakeTestContext());
+			Rig.GetDown();
+			Rig.Stroke->SetCommitHeld(true);
+			if (Samples.Num() == 0)
+			{
+				Samples = Rig.Stroke->MakeScriptedStroke(2.9, Rig.Clock + 0.1);
+			}
+			if (Pass == 0)
+			{
+				Rig.Stroke->InjectStrokeSamples(Samples);
+				Rig.RunFrames(60.0, Samples.Last().Time + 0.1);
+			}
+			else
+			{
+				// Three chunks, each injected after the previous one was consumed completely (a frame exactly at its last sample).
+				const int32 A = Samples.Num() / 3;  // inside the backswing
+				const int32 B = Samples.Num() - 100; // inside the forward stroke, ~50 ms before the crossing (1 kHz, 50 ms follow-through)
+				Rig.Stroke->InjectStrokeSamples(TArray<FRbStrokeSample>(Samples.GetData(), A));
+				Rig.RunUntil(Samples[A - 1].Time);
+				Rig.Clock = Samples[A - 1].Time;
+				Rig.Stroke->TickStroke(Rig.Clock);
+				Rig.Stroke->InjectStrokeSamples(TArray<FRbStrokeSample>(Samples.GetData() + A, B - A), false);
+				Rig.RunUntil(Samples[B - 1].Time);
+				Rig.Clock = Samples[B - 1].Time;
+				Rig.Stroke->TickStroke(Rig.Clock);
+				TestTrue(TEXT("chunks consumed"), Rig.Contacts.Num() == 0 && Rig.Stroke->GetPhase() == ERbStrokePhase::Down);
+				Rig.Stroke->InjectStrokeSamples(TArray<FRbStrokeSample>(Samples.GetData() + B, Samples.Num() - B), false);
+				Rig.RunFrames(60.0, Samples.Last().Time + 0.1);
+			}
+			if (!TestEqual(*FString::Printf(TEXT("pass %d: one contact"), Pass), Rig.Contacts.Num(), 1))
+			{
+				return false;
+			}
+			if (Pass == 0)
+			{
+				Reference = Rig.Contacts[0];
+				continue;
+			}
+			TestTrue(TEXT("chunked stream: IntendedStroke bitwise identical"), SameIntended(Rig.Contacts[0].Intended, Reference.Intended));
+			TestTrue(TEXT("chunked stream: contact time bitwise identical"), SameBits(Rig.Contacts[0].ContactTime, Reference.ContactTime));
+			TestEqual(TEXT("chunked stream: no abort"), Rig.Aborts.Num(), 0);
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbStrokeRawAfterScripted, "RawBreak.Unit.Stroke.RawTakesOverScripted", RB_UNIT_TEST_FLAGS)
+bool FRbStrokeRawAfterScripted::RunTest(const FString& Parameters)
+{
+	// After a scripted stream is used up (e.g. an RbStroke practice stroke) the Stroke button must drive the cue again. Before the
+	// fix the used-up scripted stroke stayed "active" and the physical stroke never began until the player stood up.
+	// 1. Pressed after the stream ended.
+	{
+		FStrokeRig Rig(MakeTestContext());
+		Rig.GetDown();
+		const TArray<FRbStrokeSample> Practice = Rig.Stroke->MakeScriptedStroke(2.0, Rig.Clock + 0.1);
+		Rig.Stroke->InjectStrokeSamples(Practice);
+		Rig.RunFrames(60.0, Practice.Last().Time + 0.1);
+		TestTrue(TEXT("scripted stroke used up"), Rig.Stroke->IsStrokeActive() && !Rig.Stroke->IsRawStrokeActive());
+		Rig.Stroke->SetStrokeHeld(true);
+		TestTrue(TEXT("press: the raw stroke takes over"), Rig.Stroke->IsRawStrokeActive());
+		Rig.Stroke->SetStrokeHeld(false);
+		TestFalse(TEXT("release ends it"), Rig.Stroke->IsStrokeActive());
+	}
+	// 2. Held while the stream ran out.
+	{
+		FStrokeRig Rig(MakeTestContext());
+		Rig.GetDown();
+		const TArray<FRbStrokeSample> Practice = Rig.Stroke->MakeScriptedStroke(2.0, Rig.Clock + 0.1);
+		Rig.Stroke->InjectStrokeSamples(Practice);
+		Rig.RunUntil(Practice[Practice.Num() / 2].Time);
+		Rig.Stroke->SetStrokeHeld(true);
+		TestFalse(TEXT("the running scripted stream keeps the cue"), Rig.Stroke->IsRawStrokeActive());
+		Rig.RunFrames(60.0, Practice.Last().Time + 0.05);
+		TestTrue(TEXT("held button takes over when the stream is used up"), Rig.Stroke->IsRawStrokeActive());
+		TestEqual(TEXT("no contact"), Rig.Contacts.Num(), 0);
+	}
+#if PLATFORM_WINDOWS
+	// 3. End to end: a scripted practice stroke, then the real input thread's reports make the shot with true timestamps. The
+	//    component runs on the real clock (the thread's time domain); DownSince lies 2 s in the past, so the scripted stroke
+	//    (timed inside those 2 s) is consumed at once.
+	{
+		FRbRawMouseInputOptions Options;
+		Options.bForceActive = true;
+		Options.bInstallHandler = false;
+		Options.bForwardToSlate = false;
+		TSharedPtr<FRbRawMouseInput> Raw = FRbRawMouseInput::CreateWithOptions(Options);
+		if (!TestTrue(TEXT("input thread running"), Raw->IsThreadRunning()))
+		{
+			return false;
+		}
+		FStrokeRig Rig(MakeTestContext());
+		Rig.Stroke->ClockOverride = []() { return FPlatformTime::Seconds(); };
+		Rig.Stroke->SetRawMouseInput(Raw);
+		Rig.Stroke->GetDownSeconds = -2.0;
+		Rig.Stroke->RequestGetDownToggle();
+		const double Now = FPlatformTime::Seconds();
+		Rig.Stroke->TickStroke(Now);
+		if (!TestTrue(TEXT("down"), Rig.Stroke->GetPhase() == ERbStrokePhase::Down))
+		{
+			return false;
+		}
+		const TArray<FRbStrokeSample> Practice = Rig.Stroke->MakeScriptedStroke(2.0, Rig.Stroke->GetDownSince() + 0.01);
+		TestTrue(TEXT("practice stroke fits in the past"), Practice.Num() > 0 && Practice.Last().Time < Now);
+		Rig.Stroke->InjectStrokeSamples(Practice);
+		Rig.Stroke->TickStroke(FPlatformTime::Seconds());
+		TestEqual(TEXT("practice stroke stopped short"), Rig.Stroke->GetCueDisplacement(), -Rig.Stroke->PracticeStopShort);
+		Rig.Stroke->SetCommitHeld(true);
+		Rig.Stroke->SetStrokeHeld(true);
+		TestTrue(TEXT("raw stroke active"), Rig.Stroke->IsRawStrokeActive());
+		for (int32 k = 0; k < 200 && Rig.Contacts.Num() == 0; ++k)
+		{
+			Raw->InjectTestReport(0, -10); // forward, 0.32 mm of hand per report
+			FPlatformProcess::Sleep(0.001f);
+			if (k % 4 == 3)
+			{
+				Rig.Stroke->TickStroke(FPlatformTime::Seconds());
+			}
+		}
+		const double Deadline = FPlatformTime::Seconds() + 2.0;
+		while (Rig.Contacts.Num() == 0 && FPlatformTime::Seconds() < Deadline)
+		{
+			FPlatformProcess::Sleep(0.001f);
+			Rig.Stroke->TickStroke(FPlatformTime::Seconds());
+		}
+		Rig.Stroke->SetRawMouseInput(nullptr);
+		if (TestEqual(TEXT("the physical stroke makes the shot"), Rig.Contacts.Num(), 1))
+		{
+			TestTrue(TEXT("with true timestamps"), Rig.Contacts[0].bTrueTimestamps);
+			TestTrue(TEXT("forward stroke after the scripted one"), Rig.Contacts[0].Intended.ForwardStart > Practice.Last().Time - Rig.Stroke->GetDownSince());
+		}
+	}
+#endif
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbStrokePlacement, "RawBreak.Unit.Stroke.PlacementConfirm", RB_UNIT_TEST_FLAGS)
 bool FRbStrokePlacement::RunTest(const FString& Parameters)
 {

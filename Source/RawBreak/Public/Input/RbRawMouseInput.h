@@ -25,12 +25,18 @@
 //      is forwarded then.
 //      The thread stops (RIDEV_REMOVE of its own registration only, WM_QUIT, join) in the destructor; if UE is still in
 //      high-precision mode, its game window is registered again so mouse look keeps working after the hand-over.
+//      Absolute reports (pen tablet, touch, VM / streaming tools outside a remote-desktop session) carry no counts for the
+//      stroke; UE turns them into cursor-based moves (OnMouseMove). The thread counts them and the game thread makes the
+//      same OnMouseMove call once per frame, so look / aim keep working with such a device (the stroke needs a relative
+//      mouse in every mode).
 //   2. Fallback (thread could not start, a remote session, or -RbRawInputThread=0): the handler on the game window
 //      records the reports UE delivers; the N reports of one pump get reconstructed times spaced by the measured
 //      report interval and ending at the pump time (RbRawMouse::ReconstructPumpTimes). HasTrueTimestamps() tells the
 //      stroke component (and the F2 debug block) which one runs; every report carries bTrueTimestamp.
 // Headless / non-Windows / -nullrhi / -RenderOffscreen / commandlets / no Slate application: Create() returns an inactive
 // instance (IsActive() == false); the stroke then comes from URbStrokeComponent's scripted source (tests, cheats).
+// The message handler needs the Windows platform application: under -RenderOffscreen Slate runs on UE's NULL application
+// (FNullPlatformApplicationMisc), so even a forced instance (tests) installs no handler and forwards nothing there.
 // One instance per process (raw input is per process): Create() returns the live instance while one exists.
 
 #include "CoreMinimal.h"
@@ -111,18 +117,21 @@ public:
 	// Drops pending reports (e.g. when the stroke mode starts).
 	void Reset();
 
-	// Test hook: posts a synthetic relative report to the input thread, which stamps and queues it exactly like a WM_INPUT
-	// (thread -> ring -> game thread path without a physical mouse). False without a running thread.
-	bool InjectTestReport(int32 DeltaX, int32 DeltaY);
+	// Test hook: posts a synthetic report to the input thread, which stamps and queues it exactly like a WM_INPUT
+	// (thread -> ring -> game thread path without a physical mouse). bAbsolute: an absolute report (tablet / touch), which
+	// the thread only counts. False without a running thread.
+	bool InjectTestReport(int32 DeltaX, int32 DeltaY, bool bAbsolute = false);
 
 	// Counters for the debug block and the A9 log check.
 	struct FStats
 	{
 		uint64 ThreadReports = 0;      // stamped on arrival by the thread
 		uint64 EngineReports = 0;      // delivered by UE on the game window (reconstructed times)
+		uint64 AbsoluteReports = 0;    // absolute reports the thread saw (forwarded as cursor moves, no stroke samples)
 		uint32 Registrations = 0;      // times the thread took the mouse over
 		uint32 Dropped = 0;            // ring overflow
 		double IntervalEstimate = 0.0; // [s] measured report interval
+		bool bMessageHandler = false;  // IWindowsMessageHandler installed on the Windows application
 	};
 	FStats GetStats() const;
 

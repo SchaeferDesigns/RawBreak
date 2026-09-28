@@ -184,6 +184,76 @@ bool FRbStrokeMathIntegrator::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbStrokeMathIntegratorTravel, "RawBreak.Unit.StrokeMath.IntegratorNonlinearTravel", RB_UNIT_TEST_FLAGS)
+bool FRbStrokeMathIntegratorTravel::RunTest(const FString& Parameters)
+{
+	// Independent of the scripted-stroke generator (which uses the integrator itself): a uniformly accelerated hand from rest,
+	// sampled at 1 kHz, must move the cue by S(v) / a (plan 5.4: x_c = integral of G(|v_m|) v_m dt) through the knee, the
+	// linear part and the saturation of the gain curve and into the tip-speed clamp. The per-step speed is the secant (= midpoint)
+	// hand speed, so the only error is the midpoint rule's O(dt^2).
+	const FRbStrokeGain Gain;
+	for (const double Accel : {1.0, 4.0, 12.0})
+	{
+		for (const double Tau : {0.3, 0.45, 0.25})
+		{
+			const double HandSpeed = Accel * Tau;
+			FRbCueIntegrator Integrator;
+			Integrator.Reset(-0.3);
+			const int32 N = FMath::RoundToInt(Tau * 1000.0);
+			for (int32 k = 0; k <= N; ++k)
+			{
+				const double T = 50.0 + k * 0.001;
+				const double Local = k * 0.001;
+				Integrator.Step({T, 0.5 * Accel * Local * Local, 0.0}, Gain, true, 0.004, 1.0);
+			}
+			const double Expected = RbStrokeMath::CueTravelIntegral(HandSpeed, Gain) / Accel;
+			TestNearlyEqual(*FString::Printf(TEXT("cue travel a=%.0f v=%.2f"), Accel, HandSpeed), Integrator.GetX() + 0.3, Expected, 2e-5);
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbStrokeMathWindowSubrange, "RawBreak.Unit.StrokeMath.FitWindowSubrange", RB_UNIT_TEST_FLAGS)
+bool FRbStrokeMathWindowSubrange::RunTest(const FString& Parameters)
+{
+	// The per-frame presentation fit starts at FirstSampleInWindow: it must keep exactly the samples of the full-range fit
+	// (bitwise identical result), including a sample exactly on the window edge and irregular (jittered) report times.
+	TArray<FRbStrokeSample> Samples;
+	uint32 State = 99u;
+	double T = 7000.0;
+	for (int32 i = 0; i < 3000; ++i)
+	{
+		State = State * 1664525u + 1013904223u;
+		T += 0.0002 + 0.0016 * (State >> 8) / 16777216.0; // 0.2 .. 1.8 ms
+		const double Local = T - 7000.0;
+		Samples.Add({T, 0.3 * Local * Local - 0.1 * Local, 0.01 * Local});
+	}
+	int32 Checked = 0;
+	for (int32 End = 10; End < Samples.Num(); End += 37)
+	{
+		const double Now = Samples[End].Time;
+		for (const double Window : {0.015, 0.02, 0.025})
+		{
+			const double WindowStart = Now - Window;
+			const int32 First = RbStrokeMath::FirstSampleInWindow(Samples.GetData(), End + 1, WindowStart);
+			TestTrue(TEXT("first sample inside"), First > End || Samples[First].Time >= WindowStart - RbStrokeMath::kWindowSlack);
+			TestTrue(TEXT("previous sample outside"), First == 0 || Samples[First - 1].Time < WindowStart - RbStrokeMath::kWindowSlack);
+			double V0 = 0.0, A0 = 0.0, V1 = 0.0, A1 = 0.0;
+			const bool bFull = RbStrokeMath::QuadraticFit(Samples.GetData(), End + 1, Now, WindowStart, Now, V0, A0);
+			const bool bSub = RbStrokeMath::QuadraticFit(Samples.GetData() + First, End + 1 - First, Now, WindowStart, Now, V1, A1);
+			TestTrue(TEXT("same fit result"), bFull == bSub && FMemory::Memcmp(&V0, &V1, sizeof(double)) == 0 && FMemory::Memcmp(&A0, &A1, sizeof(double)) == 0);
+			++Checked;
+		}
+	}
+	// A sample exactly on the window start (T9 edge) is inside.
+	const FRbStrokeSample Edge[4] = {{0.47, 0.0, 0.0}, {0.48, 0.0, 0.0}, {0.49, 0.0, 0.0}, {0.50, 0.0, 0.0}};
+	TestEqual(TEXT("edge sample kept"), RbStrokeMath::FirstSampleInWindow(Edge, 4, 0.50 - 0.02), 1);
+	TestEqual(TEXT("empty range"), RbStrokeMath::FirstSampleInWindow(Edge, 0, 0.0), 0);
+	TestEqual(TEXT("all before"), RbStrokeMath::FirstSampleInWindow(Edge, 4, 1.0), 4);
+	AddInfo(FString::Printf(TEXT("%d windows compared"), Checked));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbStrokeMathScripted, "RawBreak.Unit.StrokeMath.ScriptedStroke", RB_UNIT_TEST_FLAGS)
 bool FRbStrokeMathScripted::RunTest(const FString& Parameters)
 {

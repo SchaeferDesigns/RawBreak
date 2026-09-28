@@ -51,6 +51,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 
+#include "Input/RbRawMouseInput.h"
 #include "Math/RbStrokeMath.h"
 
 #include "rb/Human/HumanModel.h"
@@ -158,8 +159,13 @@ public:
 	// Scripted stroke source (automation tests, cheats): hand positions along the axis with timestamps, consumed
 	// like raw mouse samples. Positions in metres of HAND travel (the gain curve still applies). A scripted stream implies
 	// the Stroke button (it does not need SetStrokeHeld); Commit / Hardcore still decide practice vs shot. Samples are
-	// consumed while Down once the clock reaches their time; samples before the get-down completed are dropped.
-	void InjectStrokeSamples(const TArray<FRbStrokeSample>& Samples);
+	// consumed while Down once the clock reaches their time; samples before the get-down completed are dropped, and so is a
+	// sample older than the last one of its stroke (a stroke stays time ordered).
+	// bNewStroke (default): the first sample of this call starts a NEW stroke (its own hand origin, like a fresh Stroke press),
+	// so consecutive MakeScriptedStroke injections (the RbStroke cheat: a practice stroke, then the shot) never continue the
+	// previous stroke's hand path; a committed stroke still in progress then ends as an abort. false = the samples continue the
+	// current stream (one stroke fed in chunks). A physical Stroke press takes over once the scripted stream is used up.
+	void InjectStrokeSamples(const TArray<FRbStrokeSample>& Samples, bool bNewStroke = true);
 
 	// Scripted stroke of the component's current state (cue displacement, gain, backswing limit) that crosses the ball at
 	// TipSpeed [m/s]; first sample at StartTime (FPlatformTime domain / the clock). For tests and the RbStroke cheat:
@@ -180,6 +186,7 @@ public:
 	double GetDownSince() const { return DownSince; }
 	bool IsCommittedStrokeInProgress() const { return bCommittedStroke; }
 	bool IsStrokeActive() const { return bStrokeActive; } // a stroke source drives the cue (Stroke held / scripted stream)
+	bool IsRawStrokeActive() const { return bStrokeActive && !bScriptedStroke; } // the Stroke button's raw reports drive it
 	bool HasTrueTimestamps() const;       // raw input with per-report timestamps (F2 debug block)
 	// Rendered cue pose (core, table frame): tip dome centre and butt -> tip direction.
 	void GetCuePoseCore(rb::Vec3& OutTipDomeCenter, rb::Vec3& OutDirection) const { OutTipDomeCenter = CuePoseTip; OutDirection = CuePoseDir; }
@@ -256,6 +263,9 @@ private:
 	bool IsLive() const { return bCommitHeld || bHardcore; }
 	void BeginStroke(bool bRawSource, double StartTime);
 	void EndStroke();                         // stroke source released / stood up / locked (aborts a committed stroke)
+	// The held Stroke button takes over from a scripted stream that is used up (else the button would stay dead until the
+	// player stands up). True if a raw stroke now runs.
+	bool TakeOverExhaustedScriptedStroke(double StartTime);
 	void ResetAddress();                      // clears the input log of the address
 	bool ProcessHandSample(const FRbStrokeSample& Sample); // false = contact reached (stop consuming)
 	void TrackForwardStroke(int32 Index);
@@ -296,6 +306,9 @@ private:
 	TArray<FRbStrokeSample> HandSamples;  // hand positions of the current address (the input log)
 	TArray<FRbStrokeSample> CueSamples;   // x_c at the same times (Position = x_c), parallel to HandSamples
 	TArray<FRbStrokeSample> PendingScripted;
+	TArray<bool> PendingScriptedStarts;   // parallel to PendingScripted: the sample starts a new stroke (InjectStrokeSamples)
+	bool bScriptedRestart = false;        // a consumed / dropped sample asked for a new stroke; the next kept sample begins it
+	TArray<FRbRawMouseReport> ReportScratch; // drained raw reports of this call (reused: no per-frame allocation)
 	FRbCueIntegrator Integrator;
 	bool bStrokeActive = false;           // a stroke source (Stroke button or a scripted stream) is driving the cue
 	bool bScriptedStroke = false;

@@ -14,6 +14,7 @@
 #include "Components/SceneComponent.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
 
 #include "rb/Physics/CueStrike.h"
@@ -231,9 +232,16 @@ void URbStrokeComponent::SetStrokeHeld(bool bHeld)
 		}
 		bStrokeHeld = true;
 		StrokeHeldSince = T;
-		if (Phase == ERbStrokePhase::Down && !bScriptedStroke)
+		if (Phase == ERbStrokePhase::Down)
 		{
-			BeginStroke(true, FMath::Max(T, DownSince)); // older reports (look input) are filtered by StrokeHeldSince
+			if (!bScriptedStroke)
+			{
+				BeginStroke(true, FMath::Max(T, DownSince)); // older reports (look input) are filtered by StrokeHeldSince
+			}
+			else
+			{
+				TakeOverExhaustedScriptedStroke(FMath::Max(T, DownSince)); // a used-up scripted stream never blocks the button
+			}
 		}
 		return;
 	}
@@ -295,9 +303,16 @@ void URbStrokeComponent::ConfirmPressed()
 	OnCueBallPlaced.Broadcast(World);
 }
 
-void URbStrokeComponent::InjectStrokeSamples(const TArray<FRbStrokeSample>& Samples)
+void URbStrokeComponent::InjectStrokeSamples(const TArray<FRbStrokeSample>& Samples, bool bNewStroke)
 {
+	if (Samples.Num() == 0)
+	{
+		return;
+	}
+	const int32 First = PendingScripted.Num();
 	PendingScripted.Append(Samples);
+	PendingScriptedStarts.AddZeroed(Samples.Num());
+	PendingScriptedStarts[First] = bNewStroke;
 }
 
 TArray<FRbStrokeSample> URbStrokeComponent::MakeScriptedStroke(double TipSpeed, double StartTime) const
@@ -457,9 +472,38 @@ void URbStrokeComponent::EndStroke()
 	bForwardPhase = false;
 }
 
+bool URbStrokeComponent::TakeOverExhaustedScriptedStroke(double StartTime)
+{
+	if (!bStrokeHeld || bStrokeNeedsRelease || Phase != ERbStrokePhase::Down || !bStrokeActive || !bScriptedStroke || PendingScripted.Num() > 0)
+	{
+		return false;
+	}
+	// The raw stroke starts where the scripted one stopped at the earliest (its reports stay time ordered after it).
+	double Start = FMath::Max(StartTime, DownSince);
+	if (HandSamples.Num() > StrokeStartIndex)
+	{
+		Start = FMath::Max(Start, HandSamples.Last().Time);
+	}
+	EndStroke(); // the used-up scripted stroke ends without contact (a committed one aborts)
+	if (Phase != ERbStrokePhase::Down)
+	{
+		return false; // an abort listener locked / moved the component
+	}
+	BeginStroke(true, Start);
+	return true;
+}
+
 void URbStrokeComponent::ProcessStrokeSamples(double NowSeconds)
 {
-	TArray<FRbRawMouseReport> Reports;
+	// Drained reports in a reused buffer (no per-frame allocation). Moved out for the call, so a delegate listener that calls
+	// back into the component (OnStrokeAborted / OnStrokeContact -> SetCommitHeld ...) gets its own buffer.
+	TArray<FRbRawMouseReport> Reports = MoveTemp(ReportScratch);
+	Reports.Reset();
+	ON_SCOPE_EXIT
+	{
+		Reports.Reset();
+		ReportScratch = MoveTemp(Reports);
+	};
 	if (RawMouse.IsValid() && RawMouse->IsActive())
 	{
 		RawMouse->Drain(Reports); // always drained: outside a stroke the reports are look input only
@@ -469,23 +513,31 @@ void URbStrokeComponent::ProcessStrokeSamples(double NowSeconds)
 		return; // scripted samples wait for Down (the ones older than DownSince are dropped then)
 	}
 
-	// Scripted samples whose time has come, in time order.
+	// Scripted samples whose time has come, in time order. The first sample of each InjectStrokeSamples call (bNewStroke)
+	// begins a new stroke with its own hand origin.
 	int32 Consumed = 0;
 	bool bContact = false;
 	while (Consumed < PendingScripted.Num() && PendingScripted[Consumed].Time <= NowSeconds)
 	{
-		const FRbStrokeSample Sample = PendingScripted[Consumed++];
+		const FRbStrokeSample Sample = PendingScripted[Consumed];
+		bScriptedRestart |= PendingScriptedStarts[Consumed];
+		++Consumed;
 		if (Sample.Time < DownSince)
 		{
 			continue;
 		}
-		if (!bStrokeActive || !bScriptedStroke)
+		if (!bStrokeActive || !bScriptedStroke || bScriptedRestart)
 		{
 			if (bStrokeActive)
 			{
 				EndStroke();
 			}
+			bScriptedRestart = false;
 			BeginStroke(false, Sample.Time);
+		}
+		else if (HandSamples.Num() > StrokeStartIndex && Sample.Time < HandSamples.Last().Time)
+		{
+			continue; // older than the stroke's last sample: the integrator and the fits need time order
 		}
 		if (!ProcessHandSample(Sample))
 		{
@@ -496,12 +548,18 @@ void URbStrokeComponent::ProcessStrokeSamples(double NowSeconds)
 	if (bContact)
 	{
 		PendingScripted.Reset();
+		PendingScriptedStarts.Reset();
+		bScriptedRestart = false;
 		return;
 	}
 	if (Consumed > 0)
 	{
 		PendingScripted.RemoveAt(0, Consumed, EAllowShrinking::No);
+		PendingScriptedStarts.RemoveAt(0, Consumed, EAllowShrinking::No);
 	}
+
+	// Stroke button held while a scripted stream ran out: the button's raw reports drive the cue from now on.
+	TakeOverExhaustedScriptedStroke(StrokeHeldSince);
 
 	// Raw reports of the Stroke button (true timestamps from the input thread, or the reconstructed fallback times).
 	if (bStrokeActive && !bScriptedStroke && bStrokeHeld && Phase == ERbStrokePhase::Down)
@@ -811,10 +869,14 @@ void URbStrokeComponent::UpdatePresentation()
 		LateralNow = Latest.Lateral;
 		if (bForwardPhase)
 		{
+			// Every frame: only the samples of the window (binary search, the stroke is time ordered), not the whole stroke.
+			const FRbStrokeSample* Stroke = HandSamples.GetData() + StrokeStartIndex;
+			const int32 Count = HandSamples.Num() - StrokeStartIndex;
+			const double WindowStart = Latest.Time - FitWindowSeconds;
+			const int32 First = RbStrokeMath::FirstSampleInWindow(Stroke, Count, WindowStart);
 			double V = 0.0;
 			double Acc = 0.0;
-			if (RbStrokeMath::QuadraticFit(HandSamples.GetData() + StrokeStartIndex, HandSamples.Num() - StrokeStartIndex, Latest.Time,
-				Latest.Time - FitWindowSeconds, Latest.Time, V, Acc))
+			if (RbStrokeMath::QuadraticFit(Stroke + First, Count - First, Latest.Time, WindowStart, Latest.Time, V, Acc))
 			{
 				Speed = FMath::Clamp(RbStrokeMath::CueSpeedFromHandSpeed(V, Gain), 0.0, Gain.VTipMax);
 			}
