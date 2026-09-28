@@ -2,6 +2,9 @@
 
 #include "RawBreak.h"
 
+#include "Simulation/RbSimScenarios.h"
+
+#include "Engine/World.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/Timespan.h"
 
@@ -24,6 +27,44 @@ namespace RbSimulationSubsystemPrivate
 }
 
 URbSimulationSubsystem::URbSimulationSubsystem() = default;
+
+void URbSimulationSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+	if (InWorld.IsGameWorld())
+	{
+		Prewarm();
+	}
+}
+
+void URbSimulationSubsystem::Prewarm()
+{
+	check(IsInGameThread());
+	if (bPrewarmed || bInFlight)
+	{
+		return;
+	}
+	FRbShotRequest Request;
+	FString Error;
+	if (!RbSimScenarios::MakeBreak9(Request, Error))
+	{
+		UE_LOG(LogRawBreak, Warning, TEXT("RbSimulation: prewarm skipped (%s)"), *Error);
+		return;
+	}
+	if (!Simulator.IsValid())
+	{
+		Simulator = MakeUnique<rb::Simulator>();
+		WorkResult = MakeUnique<rb::ShotResult>();
+	}
+	FRbShot Shot;
+	Shot.Request = MoveTemp(Request);
+	Shot.Request.Input.Table = &Shot.Request.Table->Geometry;
+	const double Start = FPlatformTime::Seconds();
+	Simulate(*Simulator, *WorkResult, Shot);
+	bPrewarmed = true;
+	UE_LOG(LogRawBreak, Log, TEXT("RbSimulation: prewarmed with the break9 reference shot (%.2f ms simulation, %.2f ms total)"), Shot.SimMilliseconds,
+		1000.0 * (FPlatformTime::Seconds() - Start));
+}
 
 uint32 URbSimulationSubsystem::SubmitShot(FRbShotRequest&& Request)
 {
@@ -197,6 +238,7 @@ void URbSimulationSubsystem::Deinitialize()
 	LastShot.Reset();
 	Simulator.Reset();
 	WorkResult.Reset();
+	bPrewarmed = false;
 	Super::Deinitialize();
 }
 

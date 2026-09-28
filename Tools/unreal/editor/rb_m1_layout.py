@@ -34,6 +34,27 @@ CAPTURES = [
 ]
 
 
+# The player's own first-person views (M1 integration): the pawn's camera rig (Eyes preset), no look-dev camera; the rb.Player.*
+# console commands (UE-5b) put the pawn somewhere and get it down on the shot, the rb.Match.* commands (UE-6b) place the cue ball
+# and break (live playback rate 0 = the break is committed at once, the still shows its end).
+PLAYER_OPTIONS = "?Mode=Practice?Game=NineBall?Seed=3?Rate=0"
+PLAYER_PLACE = f"rb.Match.Place {CUE_BALL_CORE[0]} {CUE_BALL_CORE[1]}"
+PLAYER_STAND = f"rb.Player.Teleport -1.85 {CUE_BALL_CORE[1]} 0 -22"
+PLAYER_CAPTURES = [
+	# (output file name, commands after the quality preset)
+	# Walking: standing eye (1.65 m) behind the head rail, looking down the table at the rack, cue ball in hand placed.
+	("standing.png", f"{PLAYER_PLACE}, {PLAYER_STAND}"),
+	# Down on the shot with the cue (chin over the cue, aimed at the apex ball on the foot spot).
+	("down_on_shot.png", f"{PLAYER_PLACE}, {PLAYER_STAND}, rb.Player.AimAt {AIM_POINT_CORE[0]} {AIM_POINT_CORE[1]}, rb.Player.GetDown"),
+	# After a 9 m/s break: standing at the head end, looking over the spread balls.
+	("after_break.png", f"{PLAYER_PLACE}, rb.Match.Break 9, rb.Player.Teleport -1.85 0.0 0 -30"),
+]
+
+
+def player_exec_cmds(commands: str, quality: str = "High") -> str:
+	return f"rb.Quality {quality}, {commands}"
+
+
 def capture_exec_cmds(quality: str = "High") -> str:
 	"""Console commands of a capture run: quality preset, then ball in hand at the chin-on-cue position."""
 	return f"rb.Quality {quality}, rb.Match.Place {CUE_BALL_CORE[0]} {CUE_BALL_CORE[1]}"

@@ -971,9 +971,9 @@ bool FRbCueFollowsStroke::RunTest(const FString& Parameters)
 		Stroke->GetContext().Situation.FloorBall == 7);
 	const double RenderedElevation = FMath::Asin(-Direction.z);
 	TestNearlyEqual(TEXT("the butt rose to the floor"), RenderedElevation, Floor.MinElevation, 1e-9);
-	// The rendered cue (address: tip AddressDistance behind the ball) clears the obstacle, also for aims above the floor. (Aims
-	// raised but still below the floor need URbStrokeComponent to pass FRbCueClearanceInput::ContactElevation = its aim
-	// elevation - requested from UE-5a in the UE-4 review; until then the floor of such an aim is too low.)
+	// The rendered cue (address: tip AddressDistance behind the ball) clears the obstacle, for aims raised but still below the
+	// floor (URbStrokeComponent passes FRbCueClearanceInput::ContactElevation = its aim elevation; M1 integration) and for aims
+	// above it.
 	auto RenderedGap = [&]()
 	{
 		Stroke->GetCuePoseCore(Tip, Direction);
@@ -984,6 +984,19 @@ bool FRbCueFollowsStroke::RunTest(const FString& Parameters)
 		return RbCueClearance::BallGap(Pose, Context.CueBody, rb::kCuePlaying19oz.Length, 0.0, Behind.Position, kR);
 	};
 	TestTrue(TEXT("the rendered cue clears the ball behind"), RenderedGap() > 0.0);
+	for (const double AimDeg : {10.0, 15.0, 20.0})
+	{
+		Stroke->SetAim(0.0, AimDeg * kDeg, 0.0, 0.0);
+		Clock += 0.016;
+		Stroke->TickStroke(Clock);
+		const double Gap = RenderedGap();
+		const double Shown = FMath::Asin(-Direction.z);
+		AddInfo(FString::Printf(TEXT("aim %.0f deg (below the floor): floor %.3f deg, shown %.3f deg, gap to the ball behind %.2f mm"), AimDeg,
+			Stroke->GetAim().ElevationFloor / kDeg, Shown / kDeg, 1000.0 * Gap));
+		TestTrue(*FString::Printf(TEXT("aim %.0f deg: the floor stays above the aim"), AimDeg), Stroke->GetAim().ElevationFloor > AimDeg * kDeg);
+		TestNearlyEqual(*FString::Printf(TEXT("aim %.0f deg: shown at the floor"), AimDeg), Shown, Stroke->GetAim().ElevationFloor, 1e-9);
+		TestTrue(*FString::Printf(TEXT("aim %.0f deg: the rendered cue clears the ball behind"), AimDeg), Gap > 0.0);
+	}
 	for (const double AimDeg : {22.0, 30.0})
 	{
 		Stroke->SetAim(0.0, AimDeg * kDeg, 0.0, 0.0);

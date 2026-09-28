@@ -972,32 +972,27 @@ void URbStrokeComponent::UpdateElevationFloor()
 		Input.ContactPoint = CueBallPosition + rb::CueContactPoint(Frame, Offset.x, Offset.y, R);
 		Input.Azimuth = Aim.Azimuth;
 		Input.Elevation = 0.0; // the absolute floor: lowest clear elevation (the requested one may lie above it)
+		// The contact offsets above were computed in the cue frame of the aim elevation: the search from 0 must keep them in that
+		// frame, or a raised centre hit reads as a top hit and the floor drops below an obstacle ball (UE-4 review, integration).
+		Input.ContactElevation = Aim.Elevation;
+		Input.TipDomeRadius = Context.Tip.DomeRadius;
+		Input.TipWidth = Context.Tip.Width;
 		Input.CueLength = Context.Cue.Length;
 		Input.Backswing = MaxBackswing;
+		Input.MaxElevation = MaxElevation;
 		Input.CueBall = 0;
 		Input.BallPositions = Positions;
 		Input.InPlay = InPlay;
 		Input.BallCount = rb::kMaxBalls;
-		const FRbCueClearanceResult Result = RbCueClearance::ComputeMinElevation(TableActor->GetContext(), Context.CueBody, Input);
-		Floor = FMath::Max(0.0, Result.MinElevation);
+		// Balls and rails analytically, then raised until the environment sweep (walls, lamp, furniture) is clear too (bisection
+		// to 0.01 deg on the combined test).
+		const UWorld* World = GetWorld();
+		const FRbCueClearanceResult Result = World
+			? RbCueClearance::ComputeMinElevationWithEnvironment(World, *TableActor, Context.CueBody, Input)
+			: RbCueClearance::ComputeMinElevation(TableActor->GetContext(), Context.CueBody, Input);
+		Floor = FMath::Clamp(Result.MinElevation, 0.0, MaxElevation);
 		FloorBy = Result.FloorBy;
 		FloorBall = static_cast<rb::BallId>(Result.FloorBall);
-		// Environment (walls, lamp, furniture): raise the elevation in 1 deg steps until the capsule sweep is clear.
-		if (const UWorld* World = GetWorld())
-		{
-			const double Start = FMath::Max(Floor, Aim.Elevation);
-			double E = Start;
-			while (E < MaxElevation && !RbCueClearance::SweepEnvironment(World, *TableActor, Input, E, Context.CueBody))
-			{
-				E += FMath::DegreesToRadians(1.0);
-			}
-			if (E > Start)
-			{
-				Floor = FMath::Min(E, MaxElevation);
-				FloorBy = rb::human::FloorSource::None;
-				FloorBall = rb::kNoBall;
-			}
-		}
 	}
 	Aim.ElevationFloor = Floor;
 	Context.Situation.ElevationFloor = Floor;

@@ -90,7 +90,15 @@ public:
 	// the frame of the submission).
 	double CollectBudgetSeconds = 0.004;
 
+	// Creates the pooled Simulator / result and runs the break9 reference shot once on the game thread (discarded: no
+	// broadcast, no stats), so the first real shot of a world does not pay the first-run costs - the ~6 MB result reservation
+	// and its first touch, cold code. Without it the first break of a packaged game took 5.5 ms and handed off a frame late
+	// (M1 integration, A6). Called at OnWorldBeginPlay of game worlds; idempotent; refused while a shot is in flight.
+	void Prewarm();
+	bool IsPrewarmed() const { return bPrewarmed; }
+
 	// UTickableWorldSubsystem
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 	virtual void BeginDestroy() override;
 	virtual void Tick(float DeltaTime) override;
@@ -108,6 +116,7 @@ private:
 	TUniquePtr<rb::ShotResult> WorkResult;          // reserved by the first Run (ReserveShotResult), reused across shots
 	UE::Tasks::TTask<TSharedPtr<FRbShot>> InFlight; // valid while a shot is in flight
 	bool bInFlight = false;
+	bool bPrewarmed = false;
 	bool bCollectWaitPending = false;               // the in-flight shot has not had its bounded Tick wait yet
 	uint32 InFlightId = 0;
 	uint32 NextShotId = 1;
