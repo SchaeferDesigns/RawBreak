@@ -70,9 +70,13 @@ float4 RbWoodSurfaceFootprint(float2 UV, float3 Light, float3 Dark, float RingsP
 	// Pores: thin dark dashes along the grain (long in U, narrow in V).
 	const float PoreNoise = RbGradientNoise(float2(P.x * 90.0, P.y * 1800.0)).x;
 	const float Pores = saturate(PoreNoise * 3.0 - 0.9) * RbOctaveWeight(1800.0, Footprint);
-	// Board tone and slight redness variation.
-	const float Board = RbFbm(float2(P.x * 0.35, P.y * 2.5), 3, Footprint);
-	const float T = saturate(0.40 * Late + 0.45 * (Streaks + 0.25) + 0.30 * Pores + 0.20 * Board);
+	// Figure bands: the latewood density follows the figure, so groups of rings read as darker / lighter bands of ~2 cm
+	// that stretch along the grain. They stay resolved from across the room, where the single rings (6 mm) have faded to
+	// their mean - without them a rail seen from a standing player's eye (~1 m, grazing) is a flat colour.
+	const float Bands = RbFbm(float2(P.x * 1.5, (P.y + Figure) * 45.0), 3, Footprint * 45.0);
+	// Board tone and slight redness variation (octave weights at the pattern's own frequency).
+	const float Board = RbFbm(float2(P.x * 0.35, P.y * 2.5), 3, Footprint * 2.5);
+	const float T = saturate(0.40 * Late + 0.45 * (Streaks + 0.25) + 0.30 * Pores + 0.20 * Board + 0.80 * Bands);
 	float3 Albedo = lerp(Light, Dark, T);
 	Albedo *= 1.0 + 0.10 * Board;
 	const float Rough = saturate(Roughness + 0.12 * Pores - 0.05 * Late);
