@@ -29,3 +29,12 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 
 ## M2 (läuft seit 28.09. abends)
 - [ ] Dive Bar v1 (The Low Bridge Tavern, DB-0..DB-3 ohne Meshy-Props), Sound v1 (alle Physik-Sounds, Raumklang), Pause-/Settings-Menü v1, Kugeln fallen vom Tisch auf den Boden, Vorbereitung Mehr-Tisch-Räume → Integration + gepackter M2-Build
+
+## M3 (nach M2)
+- [ ] Arme & Hände (zuerst Unreal-Mannequin, später MetaHuman): Brückenhand auf dem Tuch (offen/geschlossen/Bande), Stoßhand am Queue, Kreiden, Hand-Unperfektheiten aus dem Human-Factors-Modell (zitternde Brückenhand unter Druck, kriechende Finger bei harten Stößen, weiße Knöchel, Hände an der Jeans abwischen, Queue auf dem Tisch rollen), alles mit menschlicher Kopf-/Körperbewegung gekoppelt
+- [ ] KI-Gegner im Spiel (rb::ai), 8-Ball, Polish nach 2. Playtest
+
+## Meilensteine (Schätzung vom 28.09.2026, abhängig von Playtests/Limits)
+- Echter Prototyp / Vertical Slice (~1–2 Wochen): Dive Bar sieht echt aus, Körper & Hände, Stoßgefühl per Playtests getunt, Sound, 9-Ball + 8-Ball gegen KI → erste „Echt oder Spiel?"-Clips
+- Beta / Early Access (~1–3 Monate): mehrere Venues, Karriere, alle Spielarten, Tutorial, volle Settings, Steam-Integration
+- Steam-Release: Store-Page ≥ 2 Wochen vorher, 30 Tage Wartezeit nach Gebühr, Wishlist-Phase (parallel)
