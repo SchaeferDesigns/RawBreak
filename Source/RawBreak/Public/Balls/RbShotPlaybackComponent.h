@@ -12,6 +12,28 @@
 // it was captured; the component hides it after DropHideDelay (the pocket-fall animation is a later package).
 // The cue follows rb::CueTipAt of strike 0 while the tip path lasts (what the rules judged is what is shown).
 // Events: each rb::ShotEvent whose time is passed fires OnShotEvent once, in log order (audio / VFX / chalk later).
+//
+// Details (UE-2):
+//  * Clock source: the FRAME clock FApp::GetCurrentTime() (= FPlatformTime::Seconds() sampled once at the start of the
+//    frame in normal play, the same time base as FRbShotRequest::ContactTime), so every object of a frame sees one time;
+//    with a fixed / custom time step (benchmark runs, Movie Render Queue captures of the trailer) it advances by the
+//    step, which makes replays frame-exact. SetClockSource replaces it (tests). ShotTime(now) = Origin + (now - ClockOrigin)
+//    * Rate, clamped to [0, FinishTime].
+//  * Rate >= 0 (negative rates are clamped to 0; scrub backwards with SeekTo). SetRate / SetPaused / SeekTo re-anchor the
+//    clock at the current value, so the shown time never jumps.
+//  * Events fire when the playing clock passes them (Play fires those up to the anchored "now"); a seek does not fire the
+//    events it jumps over, and events at or after the seek target fire again as the clock passes them.
+//  * FinishTime = Result.StopTime, extended to capture time + DropHideDelay of the last captured ball and to the end of
+//    the cue's tip path. The first tick at or after it fires the remaining events, shows Result.Finals exactly (snap:
+//    on-table balls at their final position / orientation, captured and unused balls hidden), stops, and broadcasts
+//    OnFinished(Shot) - never from inside Play / SeekTo / SetPaused, so a caller can set its own state after Play.
+//  * Play makes the cue follow the tip path (ARbCue::SetDrive(Playback)) when the shot has one for strike 0; whoever
+//    owns the cue afterwards (director, replay) sets the next drive.
+//  * Stop never broadcasts OnFinished (a deliberate stop; the caller knows).
+//  * Continuous playback never teleports (ETeleportType::None, motion vectors kept). DISCONTINUOUS re-placements drop the
+//    motion history of the balls that jump (ARbBallSet::ResetBallMotion): SeekTo, Stop(true) and a Play whose balls are
+//    not shown at the shot's start pose (a replay started from another table state; a live shot starts where the table
+//    shows its balls, so its first frame keeps the motion vectors). No streak across a jump in motion blur / TSR.
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
@@ -64,6 +86,31 @@ public:
 	// UActorComponent
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+	// --- additions (UE-2) ----------------------------------------------------------------------------
+
+	float GetRate() const { return Rate; }
+	bool IsPaused() const { return bPaused; }
+
+	// Shot time at which the playback finishes (see the file comment); 0 when not playing.
+	double GetFinishTime() const { return FinishTime; }
+
+	// FinishTime of Shot for a given drop-hide delay (pure).
+	static double ComputeFinishTime(const FRbShot& Shot, double DropHideDelay);
+
+	// Core state of a ball as last shown (Play / SeekTo / tick): bitwise rb::StateAt / OrientationAt at GetShotTime().
+	// False if the ball is not part of the playing shot.
+	bool GetBallStateCore(int32 BallId, rb::BallState& OutState, rb::Quat& OutOrientation) const;
+
+	// Index of the next event to fire (== Result.Events.size() when all fired).
+	int32 GetNextEventIndex() const { return NextEventIndex; }
+
+	// Clock source in seconds (default FApp::GetCurrentTime()); an empty function restores the default.
+	void SetClockSource(TFunction<double()> InClock);
+	double ClockNow() const;
+
+	// What a tick does: advance ShotTime to the clock, show it, fire passed events, finish at FinishTime.
+	void Advance();
+
 protected:
 	// Evaluates every ball (and the cue) at ShotTime and pushes the transforms to the ball set.
 	void ApplyAt(double Time);
@@ -71,13 +118,37 @@ protected:
 	ARbBallSet* GetBallSet() const;
 
 private:
+	// ShotTime the clock gives now (unclamped).
+	double ClockShotTime(double Now) const;
+	double ClampShotTime(double Time) const;
+	// First event index with Time >= T.
+	int32 FirstEventAtOrAfter(double T) const;
+	// Fires the events up to T (inclusive); false if a listener stopped / replaced this playback.
+	bool FireEventsUpTo(double T);
+	// Shows Result.Finals (on-table balls at their final pose, everything else hidden) and the cue at rest.
+	void ApplyFinals(const FRbShot& FinalShot);
+	void Finish();
+	void SetBallShown(ARbBallSet* Balls, int32 BallId, bool bShown);
+
+	// Table-local UE poses of the visible balls (bit mask of the visible ones).
+	uint32 CaptureShownPoses(FVector* OutLocations, FQuat* OutRotations) const;
+	// Drops the motion history of every ball in VisibleBefore that is still visible and no longer at its captured pose.
+	void ResetMovedBalls(uint32 VisibleBefore, const FVector* Locations, const FQuat* Rotations);
+
 	TSharedPtr<const FRbShot> Shot;
 	rb::PlaybackCursor Cursor;
 	double ShotTime = 0.0;
-	double ClockOrigin = 0.0;   // FPlatformTime::Seconds() at ShotTime = ClockOriginShotTime
+	double ClockOrigin = 0.0;   // clock value (ClockNow) at ShotTime = ClockOriginShotTime
 	double ClockOriginShotTime = 0.0;
 	float Rate = 1.0f;
 	bool bPaused = false;
 	int32 NextEventIndex = 0;
 	TWeakObjectPtr<ARbCue> Cue;
+
+	double FinishTime = 0.0;
+	TFunction<double()> Clock;
+	uint32 EvaluatedMask = 0;               // balls whose LastStates / LastOrientations are valid
+	rb::BallState LastStates[rb::kMaxBalls];
+	rb::Quat LastOrientations[rb::kMaxBalls];
+	int8 ShownCache[rb::kMaxBalls] = {};    // -1 unknown, 0 hidden, 1 shown (by this playback)
 };
