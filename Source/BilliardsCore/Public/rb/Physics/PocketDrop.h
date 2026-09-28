@@ -92,10 +92,32 @@ namespace rb
 	// with the center at psi = 0 when Result.Immediate.
 	RB_API BallState PivotLeaveState(const PivotPath& Path);
 
-	// Quadratic proxy of the pivot path for event detection (the true path is a circle): r(tau) through
-	// the start position/velocity and the leave position at Duration. The simulator predicts on it
-	// against other balls AND against the pocket's facings (face + top edge) and jaw arcs with the
-	// airborne predictors (collisions 5.4: "the ball can touch a facing or another ball"). Contacts found
-	// on the proxy truncate the pivot and are resolved by GRI with the ball free.
+	// Quadratic proxy of the whole pivot path (the true path is a circle): r(tau) through the start position/velocity and the
+	// leave position at Duration. It deviates from the true arc by up to ~0.1 mm, so the simulator no longer detects on it
+	// (WP-10: contacts found on it were resolved with the balls up to 52 um inside each other, VAL ROB-11); kept for tools and
+	// tests. The simulator uses the pieces of MakePivotProxyPiece.
 	RB_API MotionSegment PivotDetectionProxy(const PivotPath& Path);
+
+	// Piecewise detection proxy of the pivot (WP-10 fix of VAL ROB-11; collisions 5.4 "the ball can touch a facing or another
+	// ball"). The pivot [0, T_p] is covered by consecutive quadratic PIECES. Each piece interpolates the TRUE path (EvaluatePivot)
+	// at three nodes of its span - start, the node of the mid substitution value, end - so the true path stays within Tolerance
+	// of the piece over the whole span (DERIVED: the interpolation remainder |e| <= M3 G(mu) h^3 / 6 with an analytic bound M3
+	// of |d^3 r / d tau^3| over the span, safety factor 2; see PocketDrop.cpp). The simulator predicts the pocket's facings and
+	// jaw arcs and the other balls on the current piece, starts the next piece at its end (a no-impulse node event, like a tilt
+	// refresh) and resolves a contact found on a piece at the true state, so the true gap at a resolved contact is >= -Tolerance.
+	// Nodes are exact points of the true path (errors do not accumulate). Pieces are chosen in the substitution variable U of the
+	// time law (no inversion of T(psi) is needed): a piece from FromU ends at UpperU; the last piece ends at UpperLimit (T_p).
+	inline constexpr double kPivotProxyTolerance = 1.0e-7; // [m] max distance of the true pivot path from its detection piece
+
+	struct PivotProxyPiece
+	{
+		MotionSegment Seg;   // State PocketPivot, T0 = the piece start (absolute), TauEnd = its span
+		double UpperU = 0.0; // substitution variable U at the piece end (FromU of the next piece)
+		bool Last = true;    // the piece ends at the pivot end (Seg.T0 + Seg.TauEnd = Path.T0 + Duration)
+		double Deviation = 0.0; // the bound of the true path's distance from the piece over its span (<= Tolerance) [m]
+	};
+
+	// Piece of a (non-immediate) pivot from the substitution value FromU (0 = the drop edge), starting at absolute time T0 (the
+	// caller passes Path.T0 for the first piece and the previous piece's end time afterwards).
+	RB_API PivotProxyPiece MakePivotProxyPiece(const PivotPath& Path, double FromU, double T0, double Tolerance);
 }

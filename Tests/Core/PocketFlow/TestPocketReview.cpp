@@ -328,15 +328,25 @@ RB_TEST(Integ_WP6b_BallBehindTheBackWallIsPocketedNotReleasedIntoTheRail)
 	// Review fix (found by VAL ROB-14's jaw sweep on TABLE_7FT_78): a 3.9 m/s rolling ball rattles off a side-pocket jaw and rim near
 	// the end of the front arc into the back sector, already beyond the liner's contact radius, so no wall event fires (the facing /
 	// back-wall junction, WP-5 / WP-2). Its PocketExit at a_d behind the wall released it into the rail: it rolled over the cap and
-	// off the table. Now the missed wall contact is counted and the ball pocketed.
+	// off the table. Then the missed wall contact was counted and the ball pocketed. WP-10 (VAL ROB-11) closed the junction: the
+	// facing's back-end edge (Detect.h PredictFacingEndEdge) now turns the ball before it reaches the back sector, so no event is
+	// missed any more; the outcome is unchanged (pocketed, never released into the rail).
 	std::unique_ptr<Scene> S = MakeScene(rb::kTableSevenFoot78, kGVal);
 	RB_REQUIRE(S->Built == rb::ErrorCode::Ok);
 	S->Input.Params = ValRecipe();
 	PlaceRolling(*S, 0, {0.82496493382352054, 0.21715373230760571, kR}, {2.5901379971211136, 2.9412094333952181, 0.0});
 	RB_REQUIRE(Run(*S) == rb::SimStatus::Ok);
 	const rb::ShotResult& R = S->Result;
+	int EdgeContacts = 0;
+	for (const rb::ShotEvent& E : R.Events)
+	{
+		EdgeContacts += E.Type == rb::ShotEventType::BallJaw && (E.SubFeature >> 4) == 2 ? 1 : 0;
+	}
+	std::printf("  back-wall junction: %d facing-edge contacts, %d missed events, final status %d\n", EdgeContacts, R.Diagnostics.MissedEvents,
+		static_cast<int>(R.Finals[0].Status));
 	RB_CHECK(Count(R, rb::ShotEventType::BallOffTable) == 0);
 	RB_CHECK(R.Finals[0].Status == rb::BallFinalStatus::Pocketed);
-	RB_CHECK(R.Diagnostics.MissedEvents == 1);
+	RB_CHECK(R.Diagnostics.MissedEvents == 0);
+	RB_CHECK(EdgeContacts >= 1);
 	RB_CHECK(Count(R, rb::ShotEventType::BallPocketExit) == 0);
 }

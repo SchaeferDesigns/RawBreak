@@ -1189,6 +1189,110 @@ namespace rb
 			TimeLimit, Numerics);
 	}
 
+	FacingEndEdge MakeFacingEndEdge(const Facing& Face, double TopZ)
+	{
+		// The face plane passes through the plan line at h with the normal tilted down by beta_v, so at height z its plan line is
+		// displaced by (z - h) tan(beta_v) along PocketNormal (recessed below h: the undercut). Its end: from (End - h tan(beta_v)
+		// PocketNormal, 0) up the face, direction (sin(beta_v) PocketNormal, cos(beta_v)), to (End, h); then vertical to TopZ.
+		const double C = Cos(Face.Backdraft);
+		const double S = Sin(Face.Backdraft);
+		const double H = Face.TopHeight;
+		FacingEndEdge E;
+		E.Lower = ToVec3(Face.End - Face.PocketNormal * (H * S / C), 0.0);
+		E.LowerDirection = Vec3{Face.PocketNormal.x * S, Face.PocketNormal.y * S, C};
+		E.LowerLength = H / C;
+		E.Joint = ToVec3(Face.End, H);
+		E.UpperLength = Max(0.0, TopZ - H);
+		return E;
+	}
+
+	ContactPrediction PredictFacingEndEdge(const MotionSegment& Seg, double Radius, const Facing& Face, double TopZ, double TimeLimit,
+		const NumericsConfig& Numerics)
+	{
+		// Distance R from the end edge (the edge lies at s = L and its directions are normal to the facing direction): the two
+		// lines and the bottom, joint and top points (quartics), each on its own part of the region around the polyline; the
+		// earliest valid one. Where the center may be:
+		//  * lower segment and bottom point (z <= h): beyond the facing's end (s >= L); in front of it the face itself is the contact
+		//    (at s = L the lower segment is the face's own boundary);
+		//  * upper segment, joint and top point (above h): beyond the end OR on the pocket side of the facing's plan line. Above h the
+		//    face is no contact feature (the triangle of facing between its top edge at h and the sloped cushion top is not
+		//    modelled, collisions 5.3 Level A), so its end line is that face's boundary; a ball flying past the end at s < L met it
+		//    from the front (by 11 um, WP-10 scan: B1 seed 2188204) and was missed, as was a ball above the top point (seed
+		//    2098296: the top end of the vertical segment, where the cut disc has removed the rail top, so no rail-top edge ends
+		//    there). Behind the plan line with s < L lies cushion material.
+		const FacingEndEdge E = MakeFacingEndEdge(Face, TopZ);
+		const Vec3 Side = ToVec3(Face.Direction);
+		const Vec3 Front = ToVec3(Face.PocketNormal);
+		const Vec3 Up = Vec3::UnitZ();
+		const double Slack = Numerics.SegmentParamSlack;
+		const double TauMax = LocalWindow(Seg, TimeLimit);
+		// W relative to a point of the end line (every point of the upper polyline part has s = L and lies on the plan line).
+		const auto AboveHValid = [&](const Vec3& W) { return Dot(Side, W) >= 0.0 || Dot(Front, W) >= 0.0; };
+		ContactPrediction Best = EdgeLineContact(Seg, Radius, E.Lower, E.LowerDirection, E.LowerLength, Side, TimeLimit, Numerics);
+		if (E.UpperLength > 0.0)
+		{
+			const VecQuad Q = Relative(Seg, E.Joint);
+			Polynomial F = SquaredNorm(RejectFrom(Q, Up));
+			F.c[0] -= Radius * Radius;
+			const auto Valid = [&](double Tau)
+			{
+				const Vec3 W = At(Q, Tau);
+				return W.z >= -Slack && W.z <= E.UpperLength + Slack && AboveHValid(W);
+			};
+			const ContactPrediction Upper = FirstCrossing(F, TauMax, Seg.T0, {2.0 * Radius, true}, Numerics, Valid);
+			if (Earlier(Upper, Best))
+			{
+				Best = Upper;
+			}
+		}
+		const int Points = E.UpperLength > 0.0 ? 3 : 2;
+		for (int Point = 0; Point < Points; ++Point)
+		{
+			const Vec3 Where = Point == 0 ? E.Lower : (Point == 1 ? E.Joint : E.Joint + Up * E.UpperLength);
+			const VecQuad Q = Relative(Seg, Where);
+			Polynomial F = SquaredNorm(Q);
+			F.c[0] -= Radius * Radius;
+			const auto Valid = [&](double Tau)
+			{
+				// Bottom point: below the lower segment. Joint: above the lower segment and below the upper one (the wedge on the
+				// convex side of the kink). Top point: above the upper segment.
+				const Vec3 W = At(Q, Tau);
+				const double AlongLower = Dot(E.LowerDirection, W);
+				if (Point == 0)
+				{
+					return AlongLower <= Slack && Dot(Side, W) >= 0.0;
+				}
+				if (Point == 1)
+				{
+					return AlongLower >= -Slack && (E.UpperLength == 0.0 || W.z <= Slack) && AboveHValid(W);
+				}
+				return W.z >= -Slack && AboveHValid(W);
+			};
+			const ContactPrediction Cap = FirstCrossing(F, TauMax, Seg.T0, {2.0 * Radius, true}, Numerics, Valid);
+			if (Earlier(Cap, Best))
+			{
+				Best = Cap;
+			}
+		}
+		return Best;
+	}
+
+	Vec3 FacingBottomEdgeStart(const Facing& Face)
+	{
+		// The face plane at z = 0 (MakeFacingEndEdge): the plan line displaced by -h tan(beta_v) along PocketNormal.
+		const double H = Face.TopHeight;
+		return ToVec3(Face.Start - Face.PocketNormal * (H * Sin(Face.Backdraft) / Cos(Face.Backdraft)), 0.0);
+	}
+
+	ContactPrediction PredictFacingBottomEdge(const MotionSegment& Seg, double Radius, const Facing& Face, double TimeLimit,
+		const NumericsConfig& Numerics)
+	{
+		// Distance R from the bottom edge line, along [0, L], with the center below the face: the in-plane up direction of the face
+		// (the end edge's LowerDirection) points away from the center (Detect.h).
+		const Vec3 Up{Face.PocketNormal.x * Sin(Face.Backdraft), Face.PocketNormal.y * Sin(Face.Backdraft), Cos(Face.Backdraft)};
+		return EdgeLineContact(Seg, Radius, FacingBottomEdgeStart(Face), ToVec3(Face.Direction), Face.Length, -Up, TimeLimit, Numerics);
+	}
+
 	ContactPrediction PredictDropEdge(const MotionSegment& Seg, double /*Radius*/, const PocketGeometry& Pocket, double TimeLimit,
 		const NumericsConfig& Numerics)
 	{
@@ -1800,6 +1904,9 @@ namespace rb
 				if (Edges)
 				{
 					Consider(PredictFacingTopEdge(Seg, R, Table.Facings[Index], Limit, Numerics), TableFeatureKind::FacingTopEdge, Index, 0);
+					const Facing& Face = Table.Facings[Index];
+					Consider(PredictFacingEndEdge(Seg, R, Face, FacingEndEdgeTop(Table, Face), Limit, Numerics), TableFeatureKind::FacingTopEdge, Index, kFacingEndEdge);
+					Consider(PredictFacingBottomEdge(Seg, R, Face, Limit, Numerics), TableFeatureKind::FacingTopEdge, Index, kFacingBottomEdge);
 				}
 			}
 		};
@@ -1899,6 +2006,9 @@ namespace rb
 				}
 				const double Sf = FacingContactOffset(R, Face.TopHeight, Face.Backdraft);
 				Consider(PredictFacingOnShelf(Seg, R, Face, Sf, Limit, Numerics), TableFeatureKind::FacingFace, i, 0);
+				// The back end lies over the hole on every preset (beyond the drop edge), so a ball on the cloth normally drops
+				// first; the edge keeps the face closed for any geometry (WP-10).
+				Consider(PredictFacingEndEdge(Seg, R, Face, FacingEndEdgeTop(Table, Face), Limit, Numerics), TableFeatureKind::FacingTopEdge, i, kFacingEndEdge);
 			}
 			for (int p = 0; p < NumPockets; ++p)
 			{
@@ -1938,6 +2048,8 @@ namespace rb
 				{
 					Consider(PredictFacingAirborne(Seg, R, Face, Limit, Numerics), TableFeatureKind::FacingFace, i, 0);
 					Consider(PredictFacingTopEdge(Seg, R, Face, Limit, Numerics), TableFeatureKind::FacingTopEdge, i, 0);
+					Consider(PredictFacingEndEdge(Seg, R, Face, FacingEndEdgeTop(Table, Face), Limit, Numerics), TableFeatureKind::FacingTopEdge, i, kFacingEndEdge);
+					Consider(PredictFacingBottomEdge(Seg, R, Face, Limit, Numerics), TableFeatureKind::FacingTopEdge, i, kFacingBottomEdge);
 				}
 			}
 			Consider(PredictOuterBoundary(Seg, Table.OuterBoundary, Limit), TableFeatureKind::OuterBoundary, 0, 0);
@@ -2053,6 +2165,18 @@ namespace rb
 			if (Region.Overlaps(SegmentBox(Face.Start, Face.End, Face.TopHeight, Face.TopHeight, 0.0)))
 			{
 				Emit(TableFeatureKind::FacingTopEdge, i, 0);
+			}
+			const FacingEndEdge E = MakeFacingEndEdge(Face, FacingEndEdgeTop(Table, Face));
+			const Aabb3 EndBox{{Min(E.Lower.x, E.Joint.x), Min(E.Lower.y, E.Joint.y), E.Lower.z},
+				{Max(E.Lower.x, E.Joint.x), Max(E.Lower.y, E.Joint.y), E.Joint.z + E.UpperLength}};
+			if (Region.Overlaps(EndBox))
+			{
+				Emit(TableFeatureKind::FacingTopEdge, i, kFacingEndEdge); // the back-end edge (WP-10)
+			}
+			const Vec3 Bottom = FacingBottomEdgeStart(Face);
+			if (Region.Overlaps(SegmentBox(XY(Bottom), XY(E.Lower), 0.0, 0.0, 0.0)))
+			{
+				Emit(TableFeatureKind::FacingTopEdge, i, kFacingBottomEdge); // the bottom edge (WP-10)
 			}
 		}
 		if (Options.Pockets == PocketModel::GeometricLevelA)
@@ -2204,14 +2328,36 @@ namespace rb
 				break;
 			}
 			const Facing& Face = Table.Facings[Index];
-			const Vec3 D = ToVec3(Face.Direction);
-			const Vec3 W = P - ToVec3(Face.Start, Face.TopHeight);
 			Out.Kind = FixedContactKind::FacingTopEdge;
 			Out.RailFeature = static_cast<std::uint8_t>(RailFeatureOfJaw(Face.Pocket, Face.Side));
 			Out.Pocket = Face.Pocket;
 			Out.BallOnCloth = false;
-			Out.IntoFeature = -ToVec3(Face.PocketNormal);
-			Out.Normal = Normalized(W - D * Dot(D, W));
+			if (Feature.SubIndex == kFacingBottomEdge)
+			{
+				// The bottom edge (WP-10): from the nearest point of the line, as detected.
+				const Vec3 A = FacingBottomEdgeStart(Face);
+				const Vec3 D = ToVec3(Face.Direction);
+				Out.Normal = Normalized(P - (A + D * Clamp(Dot(P - A, D), 0.0, Face.Length)));
+				Out.IntoFeature = IntoFrom(Out.Normal);
+			}
+			else if (Feature.SubIndex >= kFacingEndEdge)
+			{
+				// The back-end edge (WP-10): from the nearest point of its polyline (lower segment in the face plane, vertical upper
+				// segment; the points between them included), as detected.
+				const FacingEndEdge E = MakeFacingEndEdge(Face, FacingEndEdgeTop(Table, Face));
+				const Vec3 OnLower = E.Lower + E.LowerDirection * Clamp(Dot(P - E.Lower, E.LowerDirection), 0.0, E.LowerLength);
+				const Vec3 OnUpper = E.Joint + Vec3::UnitZ() * Clamp(P.z - E.Joint.z, 0.0, E.UpperLength);
+				const Vec3 Nearest = LengthSquared(P - OnUpper) < LengthSquared(P - OnLower) ? OnUpper : OnLower;
+				Out.Normal = Normalized(P - Nearest);
+				Out.IntoFeature = IntoFrom(Out.Normal);
+			}
+			else
+			{
+				const Vec3 D = ToVec3(Face.Direction);
+				const Vec3 W = P - ToVec3(Face.Start, Face.TopHeight);
+				Out.IntoFeature = -ToVec3(Face.PocketNormal);
+				Out.Normal = Normalized(W - D * Dot(D, W));
+			}
 			Out.Elevation = ElevationOf(Out.Normal);
 			break;
 		}

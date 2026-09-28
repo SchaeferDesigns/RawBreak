@@ -87,15 +87,38 @@ RB_TEST(Sim_ServicesPivotReplaceAndTerminal)
 	const double Mid = T0 + 0.5 * Pivot.Result.Duration;
 	const BallState OnPath = EvaluatePivot(Pivot, Mid - T0);
 	RB_CHECK(SameStateBits(sim::BallStateAt(Ws, 0, Mid), OnPath));
-	// Its end slot (pivot end, tier Transition) is queued with the new version.
+	// Its end slot (tier Transition) is queued with the new version: the end of the first piece of the piecewise detection proxy
+	// (WP-10, VAL ROB-11: pieces within kPivotProxyTolerance of the true path), a node unless the pivot is a single piece. Walking
+	// the nodes (loop::AdvancePivotPiece, as ProcessEndSlot does) keeps the piece within the tolerance of the true path, bumps the
+	// version each time and ends at the pivot end, T0 + T_p.
 	bool EndQueued = false;
 	while (!Ws.Queue.IsEmpty())
 	{
 		const QueuedEvent E = Ws.Queue.Top();
 		Ws.Queue.Pop();
-		EndQueued = EndQueued || (E.Kind == QueuedEventKind::Transition && E.BallA == 0 && E.VersionA == Slot.Version && E.Time == T0 + Pivot.Result.Duration);
+		EndQueued = EndQueued || (E.Kind == QueuedEventKind::Transition && E.BallA == 0 && E.VersionA == Slot.Version && E.Time == Slot.Seg.T0 + Slot.Seg.TauEnd);
 	}
 	RB_CHECK(EndQueued);
+	RB_CHECK(Slot.Seg.T0 == T0);
+	int Nodes = 0;
+	while (!Slot.PivotPieceLast && Nodes < 1000)
+	{
+		const double Node = Slot.Seg.T0 + Slot.Seg.TauEnd;
+		const double Probe = Slot.Seg.T0 + 0.37 * Slot.Seg.TauEnd;
+		RB_CHECK(Length(PositionAt(Slot.Seg, Probe - Slot.Seg.T0) - EvaluatePivot(Pivot, Probe - T0).Position) <= kPivotProxyTolerance);
+		const std::uint32_t Before = Slot.Version;
+		Ws.Now = Node;
+		sim::loop::AdvancePivotPiece(Ws, 0, Node);
+		RB_CHECK(Slot.Version == Before + 1 && Slot.Seg.T0 == Node && Slot.Seg.State == MotionState::PocketPivot);
+		++Nodes;
+	}
+	RB_CHECK(Slot.PivotPieceLast && Nodes > 0);
+	RB_CHECK(Abs(Slot.Seg.T0 + Slot.Seg.TauEnd - (T0 + Pivot.Result.Duration)) <= 1e-15);
+	RB_CHECK(R.Tracks[0].Segments.back().Kind == SegmentKind::Sampled && R.Tracks[0].Segments.back().T1 == kInfinity); // the placeholder stays
+	while (!Ws.Queue.IsEmpty())
+	{
+		Ws.Queue.Pop();
+	}
 
 	// Pivot end: PocketFall from the leave state; the pivot becomes adaptive Sampled pieces on the pivot path.
 	const double T1 = T0 + Pivot.Result.Duration;

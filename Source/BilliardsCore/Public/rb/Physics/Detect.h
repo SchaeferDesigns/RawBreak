@@ -127,6 +127,46 @@ namespace rb
 		const NumericsConfig& Numerics);
 	RB_API ContactPrediction PredictFacingAirborne(const MotionSegment& Seg, double Radius, const Facing& Face, double TimeLimit, const NumericsConfig& Numerics);
 	RB_API ContactPrediction PredictFacingTopEdge(const MotionSegment& Seg, double Radius, const Facing& Face, double TimeLimit, const NumericsConfig& Numerics);
+	// (WP-10, VAL ROB-11) The facing's BACK END: the corner edge at Facing::End, where the facing meets the cushion back. The
+	// face contact exists only along [0, L], so a ball in the pocket (airborne, falling or pivoting) that came from beyond the end
+	// - rebounding off the back wall of a corner pocket, or dropping over the rail cut behind a side pocket - entered the face's
+	// range already inside it (8 mm deep in B1 shot 9217) with no event. The end edge closes the face there. It is a polyline of
+	// two segments: the face's own end in the undercut plane from the slate (z = 0) to (End, h), then vertical from (End, h) up
+	// to the cushion top at the cushion back (TopZ = PocketGeometry::WallTopZ = RailTopZ), where the rail-top model puts the face
+	// above h (on the plan line, TableGeometry.h RailTopPolygon Facing edges). A ball touches it at distance R (the two lines,
+	// the bottom end, the joint and the top end as points; on every preset the end lies over the pocket's cut disc, where no
+	// rail-top edge ends at the top point): the lower part while its center is beyond the end (s >= L; at s = L the lower segment
+	// is the face's own boundary, tangent continuation), the upper part (above h, where the face is no contact feature) also from
+	// the pocket side of the plan line. Returned by PredictTableEvent as FacingTopEdge with SubIndex kFacingEndEdge (a facing
+	// edge, BallJaw element 2).
+	struct FacingEndEdge
+	{
+		Vec3 Lower;           // bottom point (z = 0, on the face plane)
+		Vec3 LowerDirection;  // unit, up the face: (sin(beta_v) PocketNormal, cos(beta_v))
+		double LowerLength = 0.0; // h / cos(beta_v): Lower + LowerDirection LowerLength = (End, h), the joint
+		Vec3 Joint;           // (End, h)
+		double UpperLength = 0.0; // TopZ - h (vertical, may be 0)
+	};
+	RB_API FacingEndEdge MakeFacingEndEdge(const Facing& Face, double TopZ);
+	RB_API ContactPrediction PredictFacingEndEdge(const MotionSegment& Seg, double Radius, const Facing& Face, double TopZ, double TimeLimit,
+		const NumericsConfig& Numerics);
+	// (WP-10) The facing's BOTTOM edge: where the undercut face meets the slate plane, i.e. the plan line displaced by -h tan(beta_v)
+	// along PocketNormal at z = 0, from below Start to the end edge's bottom point (E.Lower). Over the slate no ball reaches it, but
+	// over the pocket's hole (every preset has part of the face there) the face hangs in the air and a ball falling in the hole
+	// can meet its lower edge from below (1 in 1 600 B1 shots on TABLE_9FT_TIGHT entered the face's corner there by up to 2 mm).
+	// A ball touches it at distance R while its center is below the face (the face's in-plane up direction, E.LowerDirection,
+	// points away from it) and along [0, L]; with the end edge's bottom point (centers beyond L) the corner is closed. Returned
+	// by PredictTableEvent for balls off the cloth (airborne, pivoting, falling) as FacingTopEdge with SubIndex kFacingBottomEdge.
+	RB_API ContactPrediction PredictFacingBottomEdge(const MotionSegment& Seg, double Radius, const Facing& Face, double TimeLimit,
+		const NumericsConfig& Numerics);
+	// Start point of the bottom edge (z = 0); it runs along Facing::Direction for Facing::Length to MakeFacingEndEdge(...).Lower.
+	RB_API Vec3 FacingBottomEdgeStart(const Facing& Face);
+	// TopZ of a facing's end edge on Table: its pocket's WallTopZ (h when the pocket is not in the table).
+	inline double FacingEndEdgeTop(const TableGeometry& Table, const Facing& Face)
+	{
+		const int Pocket = static_cast<int>(Face.Pocket);
+		return Pocket >= 0 && Pocket < Table.Pockets.Size() ? Table.Pockets[Pocket].WallTopZ : Face.TopHeight;
+	}
 	// Center reaches horizontal distance a_d from C_cap, moving inward, within the front arc (DropEdge).
 	RB_API ContactPrediction PredictDropEdge(const MotionSegment& Seg, double Radius, const PocketGeometry& Pocket, double TimeLimit,
 		const NumericsConfig& Numerics);
@@ -234,7 +274,8 @@ namespace rb
 		NoseSegment,   // Index = CushionId
 		JawArc,        // Index = 2 * pocket + side
 		FacingFace,    // Index = 2 * pocket + side
-		FacingTopEdge, // Index = 2 * pocket + side
+		FacingTopEdge, // Index = 2 * pocket + side; SubIndex 0 = the top edge, kFacingEndEdge = the back-end edge, kFacingBottomEdge = the
+		               //   bottom edge (both WP-10)
 		DropEdge,      // Index = PocketId
 		LinerWall,     // Index = PocketId
 		RimTorus,      // Index = PocketId
@@ -248,6 +289,9 @@ namespace rb
 		OuterBoundary, // Index = 0 (-> BallOffTable Floor)
 		LampApex,      // Index = 0 (-> BallExternalContact Lamp + BallOffTable ExternalObjectRebound)
 	};
+
+	inline constexpr std::uint8_t kFacingEndEdge = 1;    // TableFeatureRef::SubIndex of FacingTopEdge for the facing's back-end edge
+	inline constexpr std::uint8_t kFacingBottomEdge = 2; // TableFeatureRef::SubIndex of FacingTopEdge for the facing's bottom edge
 
 	struct TableFeatureRef
 	{

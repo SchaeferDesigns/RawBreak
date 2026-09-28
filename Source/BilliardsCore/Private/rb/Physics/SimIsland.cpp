@@ -19,6 +19,8 @@
 #include "rb/Math/Scalar.h"
 #include "rb/Physics/Slate.h"
 
+#include <bit>
+
 namespace rb::sim
 {
 	namespace
@@ -174,16 +176,20 @@ namespace rb::sim
 		{
 			IslandBounds Out;
 			const CompliantIsland& Solver = Ws.Island.Solver;
+			double MaxSpeedSquared = 0.0;
 			for (int k = 0; k < Solver.BodyCount(); ++k)
 			{
 				const IslandBody& B = Solver.Body(k);
 				Out.Box.Lo = Vec3{Min(Out.Box.Lo.x, B.Position.x), Min(Out.Box.Lo.y, B.Position.y), Min(Out.Box.Lo.z, B.Position.z)};
 				Out.Box.Hi = Vec3{Max(Out.Box.Hi.x, B.Position.x), Max(Out.Box.Hi.y, B.Position.y), Max(Out.Box.Hi.z, B.Position.z)};
 				Out.MaxRadius = Max(Out.MaxRadius, B.Radius);
-				Out.MaxSpeed = Max(Out.MaxSpeed, Length(B.Velocity));
+				MaxSpeedSquared = Max(MaxSpeedSquared, LengthSquared(B.Velocity));
 				Out.MaxMass = Max(Out.MaxMass, B.Mass);
 				Out.AnyRailTop = Out.AnyRailTop || !B.ClothSupport;
 			}
+			// (WP-10 performance) One square root: sqrt is correctly rounded and monotone, so the root of the largest square is
+			// bitwise the largest Length (= Sqrt(LengthSquared)).
+			Out.MaxSpeed = Sqrt(MaxSpeedSquared);
 			return Out;
 		}
 
@@ -1046,8 +1052,30 @@ namespace rb::sim
 			}
 		}
 
+		// (WP-10 performance) Positions of event-mode balls at the ends of the island's steps, carried from one step to the next within
+		// an AdvanceIsland call (their segments do not change during a call: every event, join, exit or release returns to the loop).
+		struct EventPositions
+		{
+			double Time[2] = {-1.0, -1.0};
+			std::uint32_t Have[2] = {};
+			Vec3 At[2][kMaxBalls];
+		};
+
+		// BallStateAt(Ws, Ball, T).Position of an event-mode ball without the rest of the state, bitwise: EvaluateSegment's position
+		// is PositionAt at the local time clamped to [0, TauEnd]; a pivot uses its true path.
+		Vec3 EventPositionAt(const Workspace& Ws, int Ball, double T)
+		{
+			const MotionSegment& Seg = Ws.Balls[Ball].Seg;
+			if (Seg.State == MotionState::PocketPivot)
+			{
+				return BallStateAt(Ws, Ball, T).Position;
+			}
+			const double Tau = T - Seg.T0;
+			return PositionAt(Seg, !(Tau > 0.0) ? 0.0 : (Tau < Seg.TauEnd ? Tau : Seg.TauEnd));
+		}
+
 		// Observers of the members in Test over the step [T0, T1] (architecture 8.7: crossing time by linear interpolation).
-		void MemberObservers(Workspace& Ws, const PreStep& Pre, double T0, double T1, std::uint32_t Test)
+		void MemberObservers(Workspace& Ws, const PreStep& Pre, double T0, double T1, std::uint32_t Test, EventPositions& Cache)
 		{
 			const TableGeometry& Table = TableOf(Ws);
 			const CompliantIsland& Solver = Ws.Island.Solver;
@@ -1063,6 +1091,72 @@ namespace rb::sim
 			int Count = 0;
 			const TableLandmarks& L = Table.Landmarks;
 			const double Lines[kTableLineCount] = {L.HeadStringX, L.FootStringX, L.CenterStringX, L.LongStringY, L.BaulkX};
+			// (WP-10 performance, bitwise the same tests) Body index of every ball, and the positions at T1 of the balls the freeze
+			// tests read, each evaluated once per step instead of once per (member, partner): a break tests most members every step
+			// (their pending initial ball freezes give ExitClearance 0), which made this function the largest cost of the 15-ball
+			// break (~1 us per step).
+			int BodyOf[kMaxBalls];
+			for (int b = 0; b < kMaxBalls; ++b)
+			{
+				BodyOf[b] = -1;
+			}
+			for (int i = 0; i < Solver.BodyCount(); ++i)
+			{
+				BodyOf[Solver.Body(i).Ball] = i;
+			}
+			// Event-mode balls: the step's two ends come from Cache, whose T1 buffer becomes the next step's T0 buffer.
+			int Before = 0;
+			if (Cache.Time[0] == T0)
+			{
+				Before = 0;
+			}
+			else if (Cache.Time[1] == T0)
+			{
+				Before = 1;
+			}
+			else
+			{
+				Cache.Time[0] = T0;
+				Cache.Have[0] = 0;
+			}
+			const int After = 1 - Before;
+			if (Cache.Time[After] != T1)
+			{
+				Cache.Time[After] = T1;
+				Cache.Have[After] = 0;
+			}
+			const auto EventPosition = [&](int Buffer, int Other, double Time) -> const Vec3&
+			{
+				if (((Cache.Have[Buffer] >> Other) & 1u) == 0)
+				{
+					Cache.At[Buffer][Other] = EventPositionAt(Ws, Other, Time);
+					Cache.Have[Buffer] |= 1u << Other;
+				}
+				return Cache.At[Buffer][Other];
+			};
+			const auto PositionOf = [&](int Other) -> Vec3
+			{
+				return BodyOf[Other] >= 0 ? Solver.Body(BodyOf[Other]).Position : EventPosition(After, Other, T1); // = AnyPosition
+			};
+			// Positions at T0 for the jump-over test: the pre-step state of a member, else the ball's segment at T0 (PreIndex order).
+			int PreOf[kMaxBalls];
+			for (int b = 0; b < kMaxBalls; ++b)
+			{
+				PreOf[b] = -1;
+			}
+			for (int k = Pre.Count - 1; k >= 0; --k)
+			{
+				PreOf[Pre.Ball[k]] = k; // the first index of the ball, as PreIndex returns
+			}
+			const auto PositionBefore = [&](int Other) -> Vec3
+			{
+				return PreOf[Other] >= 0 ? Pre.Position[PreOf[Other]].Get() : EventPosition(Before, Other, T0);
+			};
+			std::uint32_t LiveMask = 0;
+			double RadiusOf[kMaxBalls];
+			Vec2 PlanBefore[kMaxBalls];
+			Vec2 PlanAfter[kMaxBalls];
+			bool HaveLive = false;
 			for (int k = 0; k < Pre.Count; ++k)
 			{
 				const int Ball = Pre.Ball[k];
@@ -1070,7 +1164,7 @@ namespace rb::sim
 				{
 					continue;
 				}
-				const int Index = Solver.FindBody(Ball);
+				const int Index = BodyOf[Ball];
 				if (Index < 0)
 				{
 					continue;
@@ -1125,10 +1219,23 @@ namespace rb::sim
 				}
 				if (B.InitialFreezeBalls != 0)
 				{
-					for (int Other = 0; Other < kMaxBalls; ++Other)
+					// The set bits in ascending order (the order of the former 0..23 loop; each test reads only its own bit).
+					for (std::uint32_t Pending = B.InitialFreezeBalls; Pending != 0; Pending &= Pending - 1)
 					{
-						if (((B.InitialFreezeBalls >> Other) & 1u) != 0 && Ws.Balls[Other].InPlay &&
-							Length(AnyPosition(Ws, Other, T1) - P1) - (Body.Radius + SpecOf(Ws, Other).Radius) > Ws.Params.Numerics.LeaveDistance)
+						const int Other = std::countr_zero(Pending);
+						if (!Ws.Balls[Other].InPlay)
+						{
+							continue;
+						}
+						// Still within LeaveDistance with a relative margin (squared, no root): the exact test below is false as well.
+						const double Sum = Body.Radius + SpecOf(Ws, Other).Radius;
+						const double Inside = (Sum + Ws.Params.Numerics.LeaveDistance) * (1.0 - 1e-9);
+						const Vec3 D = PositionOf(Other) - P1;
+						if (LengthSquared(D) < Inside * Inside)
+						{
+							continue;
+						}
+						if (Length(D) - Sum > Ws.Params.Numerics.LeaveDistance)
 						{
 							B.InitialFreezeBalls &= ~(1u << Other);
 						}
@@ -1137,18 +1244,42 @@ namespace rb::sim
 				// Jump-over (rules F9): plan overlaps entered / left while airborne.
 				if (P0.z - Body.Radius > Ws.Params.Numerics.EpsZ)
 				{
-					for (int Other = 0; Other < kMaxBalls; ++Other)
+					if (!HaveLive)
 					{
-						if (Other == Ball || !Ws.Balls[Other].InPlay || IsTerminal(Ws.Balls[Other].Seg.State))
+						// In play and not terminal, the radii and the plan positions at T0 / T1, once per call (members lifted by contact
+						// friction are common in a break).
+						for (int Other = 0; Other < kMaxBalls; ++Other)
+						{
+							const bool Live = Ws.Balls[Other].InPlay && !IsTerminal(Ws.Balls[Other].Seg.State);
+							LiveMask |= Live ? 1u << Other : 0u;
+							RadiusOf[Other] = Live ? SpecOf(Ws, Other).Radius : 0.0;
+							if (Live)
+							{
+								PlanBefore[Other] = XY(PositionBefore(Other));
+								PlanAfter[Other] = XY(PositionOf(Other));
+							}
+						}
+						HaveLive = true;
+					}
+					const Vec2 Plan0 = XY(P0);
+					const Vec2 Plan1 = XY(P1);
+					for (std::uint32_t Others = LiveMask & ~(1u << Ball); Others != 0; Others &= Others - 1)
+					{
+						const int Other = std::countr_zero(Others); // ascending, as the former 0..23 loop
+						const double Sum = Body.Radius + RadiusOf[Other];
+						// (WP-10 performance, the same transitions) Both plan distances clearly on the same side of Sum (squared, with a
+						// relative margin): neither an entry nor a leave. Members lifted by contact friction (z - R > EpsZ by micrometres)
+						// ran this loop for every ball at every step of a break.
+						const double Above = Sum * (1.0 + 1e-9);
+						const double Below = Sum * (1.0 - 1e-9);
+						const double S0 = LengthSquared(Plan0 - PlanBefore[Other]);
+						const double S1 = LengthSquared(Plan1 - PlanAfter[Other]);
+						if ((S0 > Above * Above && S1 > Above * Above) || (S0 < Below * Below && S1 < Below * Below))
 						{
 							continue;
 						}
-						const int OtherPre = PreIndex(Pre, Other);
-						const Vec3 Q0 = OtherPre >= 0 ? Pre.Position[OtherPre].Get() : BallStateAt(Ws, Other, T0).Position;
-						const Vec3 Q1 = AnyPosition(Ws, Other, T1);
-						const double Sum = Body.Radius + SpecOf(Ws, Other).Radius;
-						const double D0 = Length(XY(P0) - XY(Q0));
-						const double D1 = Length(XY(P1) - XY(Q1));
+						const double D0 = Length(Plan0 - PlanBefore[Other]);
+						const double D1 = Length(Plan1 - PlanAfter[Other]);
 						const std::uint32_t Bit = 1u << Other;
 						if (D0 > Sum && D1 <= Sum)
 						{
@@ -1424,7 +1555,9 @@ namespace rb::sim
 		// not predicted, so this per-step test is what catches them: delta_cl >> v dt for every speed).
 		// Candidates: the balls that passed CanJoin when the current AdvanceIsland call began (the set changes only through events
 		// and member exits / joins / releases, after each of which AdvanceIsland returns).
-		bool JoinBalls(Workspace& Ws, double T, std::uint32_t Candidates)
+		// ReachAtOne (per AdvanceIsland call, < 0 = not yet computed): IslandJoinDistance at 1 m/s with MaxMassAtStart, the largest
+		// member mass when the call began (members only leave during a call).
+		bool JoinBalls(Workspace& Ws, double T, std::uint32_t Candidates, double* ReachAtOne, double MaxMassAtStart)
 		{
 			IslandState& I = Ws.Island;
 			if (Candidates == 0 || I.Solver.BodyCount() == 0)
@@ -1442,39 +1575,41 @@ namespace rb::sim
 				}
 				const BallSpec& Spec = SpecOf(Ws, Ball);
 				// Cheap pre-filter (every step, every event-mode ball): the segment's position and speed against the island bounds
-				// inflated by delta_cl's upper bound 0.01 v (valid above 1e-7 m/s; ContactTol below).
-				{
-					const MotionSegment& Seg = Ws.Balls[Ball].Seg;
-					const double Tau = Clamp(T - Seg.T0, 0.0, Seg.TauEnd);
-					const Vec3 Position = PositionAt(Seg, Tau);
-					const double Reach = Bb.MaxRadius + Spec.Radius + Max(P.Numerics.ContactTol, 0.01 * (Bb.MaxSpeed + Length(VelocityAt(Seg, Tau))));
-					if (Position.x < Bb.Box.Lo.x - Reach || Position.x > Bb.Box.Hi.x + Reach || Position.y < Bb.Box.Lo.y - Reach ||
-						Position.y > Bb.Box.Hi.y + Reach || Position.z < Bb.Box.Lo.z - Reach || Position.z > Bb.Box.Hi.z + Reach)
-					{
-						continue;
-					}
-				}
+				// inflated by delta_cl's upper bound 0.01 v (valid above 1e-7 m/s; ContactTol below). (WP-10: from the ball's state at T,
+				// which the exact test needs anyway: the same position and speed as the segment's at the clamped time, joining balls are
+				// never pivoting.)
 				const BallState S = BallStateAt(Ws, Ball, T);
-				// A ball over a pocket hole or over the rail would leave a cloth island at once (member exits): it stays in event
-				// mode; a ball rolling on the flat cap joins a rail-top island only.
-				const bool OnCap = Ws.Balls[Ball].Context.Support == SupportKind::RailCap && IsOnSurface(S.State);
-				if (OnCap ? !Bb.AnyRailTop
-						  : (PocketContaining(TableOf(Ws), P.Pockets, XY(S.Position)) >= 0 || OverRailRegion(TableOf(Ws), S.Position)))
-				{
-					continue;
-				}
 				const double Speed = Length(S.Velocity);
-				const double Reach = IslandJoinDistance(Bb.MaxSpeed + Speed, Max(Bb.MaxMass, Spec.Mass), P.Cli, P.Numerics.ContactTol);
-				const Aabb3 Box = Bb.Box.Inflated(Bb.MaxRadius + Spec.Radius + Reach);
-				if (S.Position.x < Box.Lo.x || S.Position.x > Box.Hi.x || S.Position.y < Box.Lo.y || S.Position.y > Box.Hi.y || S.Position.z < Box.Lo.z ||
-					S.Position.z > Box.Hi.z)
+				const double Delta = Max(P.Numerics.ContactTol, 0.01 * (Bb.MaxSpeed + Speed));
+				const double BoxReach = Bb.MaxRadius + Spec.Radius + Delta;
+				if (S.Position.x < Bb.Box.Lo.x - BoxReach || S.Position.x > Bb.Box.Hi.x + BoxReach || S.Position.y < Bb.Box.Lo.y - BoxReach ||
+					S.Position.y > Bb.Box.Hi.y + BoxReach || S.Position.z < Bb.Box.Lo.z - BoxReach || S.Position.z > Bb.Box.Hi.z + BoxReach)
 				{
 					continue;
 				}
+				// The exact test (WP-10 performance, the same joins in the same order): the members are scanned first, each culled by
+				// Reach (squared distances); the ball's own conditions (not over a pocket hole or the rail, inside the island's box
+				// inflated by Reach) are pure predicates, evaluated only for a member that would join it. A ball released inside the
+				// spread-out rack of a break passes the island's box every step (the pre-filter's 0.01 v is 10 cm at the break speed):
+				// evaluating its conditions for every member was the largest per-step cost of the 15-ball break. Reach bounds every
+				// member's delta_cl (IslandJoinDistance grows with the speed and the mass, the approach speed is at most MaxSpeed +
+				// Speed and the reduced mass at most MaxMass); the margins cover rounding.
+				// Reach bound without a power per step: IslandJoinDistance = max(eps_touch, c(m) v^0.8) <= max(eps_touch, c(m) max(1, v)),
+				// c(m) = its value at 1 m/s, which grows with the mass (the call's largest member mass bounds every later one).
+				if (!(ReachAtOne[Ball] >= 0.0))
+				{
+					ReachAtOne[Ball] = IslandJoinDistance(1.0, Max(MaxMassAtStart, Spec.Mass), P.Cli, P.Numerics.ContactTol);
+				}
+				const double Reach = Max(P.Numerics.ContactTol, ReachAtOne[Ball] * Max(1.0, Bb.MaxSpeed + Speed));
 				for (int k = 0; k < I.Solver.BodyCount(); ++k)
 				{
 					const IslandBody& Body = I.Solver.Body(k);
 					const Vec3 D = S.Position - Body.Position;
+					const double Limit = Body.Radius + Spec.Radius + Reach * (1.0 + 1e-6) + P.Numerics.ContactTol + 1e-12;
+					if (LengthSquared(D) > Limit * Limit)
+					{
+						continue; // beyond Reach: neither closing within delta_cl nor overlapping
+					}
 					const double Dist = Length(D);
 					const double Gap = Dist - (Body.Radius + Spec.Radius);
 					const double Approach = Dist > 0.0 ? Dot(Body.Velocity - S.Velocity, D / Dist) : 0.0;
@@ -1483,15 +1618,28 @@ namespace rb::sim
 					// come back at once.
 					const bool Closing = Approach > P.Numerics.ApproachSpeedTol &&
 						Gap <= IslandJoinDistance(Approach, ReducedMass(Body.Mass, Spec.Mass), P.Cli, P.Numerics.ContactTol);
-					if (Closing || Gap < -P.Numerics.ContactTol)
+					if (!(Closing || Gap < -P.Numerics.ContactTol))
+					{
+						continue;
+					}
+					// A ball over a pocket hole or over the rail would leave a cloth island at once (member exits): it stays in event
+					// mode; a ball rolling on the flat cap joins a rail-top island only.
+					const bool OnCap = Ws.Balls[Ball].Context.Support == SupportKind::RailCap && IsOnSurface(S.State);
+					const bool Blocked = OnCap ? !Bb.AnyRailTop
+											   : (PocketContaining(TableOf(Ws), P.Pockets, XY(S.Position)) >= 0 || OverRailRegion(TableOf(Ws), S.Position));
+					const double ExactReach = IslandJoinDistance(Bb.MaxSpeed + Speed, Max(Bb.MaxMass, Spec.Mass), P.Cli, P.Numerics.ContactTol);
+					const Aabb3 Box = Bb.Box.Inflated(Bb.MaxRadius + Spec.Radius + ExactReach);
+					const bool Outside = S.Position.x < Box.Lo.x || S.Position.x > Box.Hi.x || S.Position.y < Box.Lo.y || S.Position.y > Box.Hi.y ||
+						S.Position.z < Box.Lo.z || S.Position.z > Box.Hi.z;
+					if (!Blocked && !Outside)
 					{
 						FlushObservers(Ws, Ball, T);
 						if (AddMember(Ws, Ball, BallStateForEvent(Ws, Ball, T), T, false))
 						{
 							Joined = true;
 						}
-						break;
 					}
+					break;
 				}
 			}
 			if (Joined)
@@ -1778,6 +1926,13 @@ namespace rb::sim
 		}
 		Vec2 GuardFrom[kMaxBalls];
 		double GuardSquared[kMaxBalls] = {};
+		double ReachAtOne[kMaxBalls];
+		for (double& R : ReachAtOne)
+		{
+			R = -1.0;
+		}
+		const double MaxMassAtStart = Bounds(Ws).MaxMass;
+		EventPositions Positions;
 		while (I.Active)
 		{
 			const double Dt = StepSize(Ws);
@@ -1839,7 +1994,7 @@ namespace rb::sim
 			}
 			if (Test != 0)
 			{
-				MemberObservers(Ws, Pre, T0, T, Test);
+				MemberObservers(Ws, Pre, T0, T, Test, Positions);
 			}
 			for (int k = 0; k < I.Solver.BodyCount(); ++k)
 			{
@@ -1861,7 +2016,7 @@ namespace rb::sim
 					}
 				}
 			}
-			Changed = JoinBalls(Ws, T, Candidates) || Changed;
+			Changed = JoinBalls(Ws, T, Candidates, ReachAtOne, MaxMassAtStart) || Changed;
 			const int ReleaseSteps = I.Solver.Mode() == CliMode::Rigid ? kReleaseCheckStepsRigid : kReleaseCheckStepsCompliant;
 			if ((I.Solver.StepCount() & (ReleaseSteps - 1)) == 0)
 			{

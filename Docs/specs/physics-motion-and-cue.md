@@ -6,7 +6,7 @@
 | Module | `BilliardsCore` (engine-agnostic C++20, double precision, no exceptions, no RTTI) |
 | Scope | Part A: ball motion on cloth (all motion states, closed-form evolution, transition times). Part B: cue strike (cue tip -> cue ball), squirt, miscue, elevated cue (jump / masse). Part C: airborne motion and slate bounces. |
 | Out of scope (other specs) | ball-ball collisions, ball-cushion collisions, pockets / pocket rattles, rules, cue placement / collision of the cue body with rails and balls, rendering. |
-| Status | Draft v1.1 (2026-09-25): adversarially verified. All equations were re-derived and all test values recomputed independently. Corrections are listed in the "Verification log" at the end. |
+| Status | Draft v1.1 (2026-09-25): adversarially verified. All equations were re-derived and all test values recomputed independently. Corrections are listed in the "Verification log" at the end. v1.2 (2026-09-28, WP-10): B.5 tip re-contacts (friction along the slip; non-penetration completion), from the implementation. |
 
 Every formula below is plain text. Anything not taken directly from a cited source is marked **DERIVED** (with a short derivation) or **TUNING** (a gameplay/engineering choice that must be calibrated).
 
@@ -342,7 +342,9 @@ t_hat = (d - (d.n) n) / |d - (d.n) n|             tangential direction of the st
 p_hat = (n + mu_tip,k t_hat) / sqrt(1 + mu_tip,k^2)
 ```
 
-`mu_tip,k` is the kinetic tip friction; default = `mu_tip`, TUNING range 0.3-0.6. At `rho = rho_max` (with `mu_tip,k = mu_tip`), `p_hat = d`, so the model is continuous. Squirt (B.7) is **not** applied in the miscue branch; the deflection is already in `p_hat`. Set the `miscue` flag. Any randomness (the "click" and erratic outcome) belongs to the game layer and must be passed in as seeded input, never generated inside the core, for determinism.
+`mu_tip,k` is the kinetic tip friction; default = `mu_tip`, TUNING range 0.3-0.6. At `rho = rho_max` (with `mu_tip,k = mu_tip`), `p_hat = d`, so the model is continuous.
+
+**Tip re-contacts** (a double hit, a ball meeting the follow-through; architecture 8.6, `ResolveTipRecontact`) use the same formulas with the relative velocity `v_rel = V d - (v + w x Q)` of the tip over the ball's contact point. In the miscue branch `t_hat` is then the direction of the tangential **slip**, `v_rel - (v_rel.n) n` (kinetic friction opposes the slip), and the stroke direction above only when there is no slip. For the strike itself the ball is at rest, so the slip lies along `d - (d.n) n` and both definitions coincide. (WP-10 fix: taking the stroke direction for a moving or spinning ball could push its contact point along its own slip and add energy; test A-VAL-3.) **Non-penetration (implementation, integration round 2):** the cue is constrained to its axis, so after the miscue-branch impulse (or a grip impulse with `d` far from `n`) the pair can still approach along `n`: `v_n' = v_rel.n - J ((d.p_hat)(d.n)/M + (p_hat.n)/m) > 0`. A frictionless normal impulse `J_n = (1 + e_tip) v_n' / ((d.n)^2/M + 1/m)` then completes the contact, so it always separates (no re-contact at the same instant, no dome inside the ball); without it same-instant re-contact chains ran into the event cap. The strike itself is unaffected. Squirt (B.7) is **not** applied in the miscue branch; the deflection is already in `p_hat`. Set the `miscue` flag. Any randomness (the "click" and erratic outcome) belongs to the game layer and must be passed in as seeded input, never generated inside the core, for determinism.
 
 ### B.6 Ball velocity and spin after the tip impulse
 

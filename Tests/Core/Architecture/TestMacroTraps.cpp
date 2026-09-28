@@ -11,6 +11,7 @@
 // enumerator and member names everywhere, so no Unreal translation unit can have them defined; the
 // core uses them the same way (PocketId::None, ShotResult::Status). See architecture.md "Review resolution".
 
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>

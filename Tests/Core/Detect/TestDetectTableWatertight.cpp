@@ -494,6 +494,9 @@ namespace
 			{
 				Take(B, rb::PredictFacingOnShelf(S, kR, T.Facings[i], rb::FacingContactOffset(kR, T.Facings[i].TopHeight, T.Facings[i].Backdraft), rb::kInfinity, N),
 					TableFeatureKind::FacingFace, i, 0);
+				// The facing's back-end edge (WP-10, VAL ROB-11).
+				Take(B, rb::PredictFacingEndEdge(S, kR, T.Facings[i], rb::FacingEndEdgeTop(T, T.Facings[i]), rb::kInfinity, N), TableFeatureKind::FacingTopEdge, i,
+					rb::kFacingEndEdge);
 			}
 			for (int p = 0; p < T.Pockets.Size(); ++p)
 			{
@@ -519,6 +522,9 @@ namespace
 			{
 				Take(B, rb::PredictFacingAirborne(S, kR, T.Facings[i], rb::kInfinity, N), TableFeatureKind::FacingFace, i, 0);
 				Take(B, rb::PredictFacingTopEdge(S, kR, T.Facings[i], rb::kInfinity, N), TableFeatureKind::FacingTopEdge, i, 0);
+				Take(B, rb::PredictFacingEndEdge(S, kR, T.Facings[i], rb::FacingEndEdgeTop(T, T.Facings[i]), rb::kInfinity, N), TableFeatureKind::FacingTopEdge, i,
+					rb::kFacingEndEdge);
+				Take(B, rb::PredictFacingBottomEdge(S, kR, T.Facings[i], rb::kInfinity, N), TableFeatureKind::FacingTopEdge, i, rb::kFacingBottomEdge);
 			}
 		}
 		for (int p = 0; p < T.Pockets.Size(); ++p)

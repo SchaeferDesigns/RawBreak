@@ -236,6 +236,142 @@ namespace rb
 		return S;
 	}
 
+	namespace
+	{
+		// Upper bound of |d^3 r / d tau^3| of the true pivot center path for psi in [0, Psi] (DERIVED). In the meridian plane
+		// W(tau) = rho e_r(psi) with psi' = v / rho, v^2 = a + b sin^2(psi / 2), hence psi'' = b sin(psi) / (4 rho^2) and
+		// psi''' = b cos(psi) psi' / (4 rho^2); psi', sin(psi) grow with psi on [0, psi_leave] (psi_leave < 58 deg for every
+		// k in (0, 2/3]), so |W'| <= v, |W''| <= rho (psi'' + psi'^2), |W'''| <= rho (psi''' + psi'^3 + 3 psi' psi'') with the
+		// values at Psi and cos <= 1. The motion along the edge turns the meridian plane about the pocket's vertical axis at
+		// omega = |v_t| / a_d (PivotStateAtAngle), r = C + Rot(theta) W_h + W_z z_hat, where only the horizontal part W_h turns:
+		// |r'''| <= |W'''| + 3 omega |W''| + 3 omega^2 |W'| + omega^3 |W_h|, and |W_h| = a_d - rho sin(psi) <= a_d (the center
+		// moves toward the hole). (A path without the circle drifts linearly: no third derivative.)
+		double PivotJerkBound(const PivotPath& Path, double Psi)
+		{
+			const PivotIntegral I = MakeIntegral(Path.PivotSpeed0, Path.Rho, Path.InertiaK, Path.Gravity);
+			const double Rho = Path.Rho;
+			const double HalfSin = Sin(0.5 * Psi);
+			const double Speed = Sqrt(I.A + I.B * HalfSin * HalfSin);
+			const double W1 = Speed / Rho;
+			const double W2 = I.B * Sin(Psi) / (4.0 * Rho * Rho);
+			const double W3 = I.B * W1 / (4.0 * Rho * Rho);
+			const double M1 = Speed;
+			const double M2 = Rho * (W2 + W1 * W1);
+			double M3 = Rho * (W3 + W1 * W1 * W1 + 3.0 * W1 * W2);
+			if (Path.AxisRadius > 0.0 && Path.TangentialSpeed != 0.0)
+			{
+				const double Omega = Abs(Path.TangentialSpeed) / Path.AxisRadius;
+				M3 += 3.0 * Omega * M2 + 3.0 * Omega * Omega * M1 + Omega * Omega * Omega * Path.AxisRadius;
+			}
+			return M3;
+		}
+
+		// max over s in [0, 1] of |s (s - Mu) (s - 1)| (the Lagrange node polynomial of the nodes 0, Mu, 1).
+		double NodePolynomialMax(double Mu)
+		{
+			const double M = Clamp(Mu, 0.0, 1.0);
+			const double Disc = Sqrt(Max(0.0, 1.0 - M + M * M));
+			double Worst = 0.0;
+			for (int k = 0; k < 2; ++k)
+			{
+				const double S = ((1.0 + M) + (k == 0 ? -Disc : Disc)) / 3.0;
+				Worst = Max(Worst, Abs(S * (S - M) * (S - 1.0)));
+			}
+			return Worst;
+		}
+
+		// psi and local time tau of the substitution value U (the forward direction of PivotAngleAt: no inversion).
+		void PivotAtU(const PivotIntegral& I, int Panels, double U, double& Psi, double& Tau)
+		{
+			Tau = U > 0.0 ? I.Scale * SimpsonIntegral(U, I.Q, Panels) : 0.0;
+			Psi = U > 0.0 ? 2.0 * Asin(Min(1.0, Sqrt(I.Q) * Sinh(U))) : 0.0;
+		}
+	}
+
+	PivotProxyPiece MakePivotProxyPiece(const PivotPath& Path, double FromU, double T0, double Tolerance)
+	{
+		PivotProxyPiece Out;
+		Out.Seg.State = MotionState::PocketPivot;
+		Out.Seg.T0 = T0;
+		Out.Seg.Radius = Path.Radius;
+		Out.Seg.SupportZ = 0.0;
+		const double EndTime = Path.T0 + (Path.Result.Immediate ? 0.0 : Path.Result.Duration);
+		const double UpperLimit = Path.UpperLimit;
+		const PivotIntegral I = MakeIntegral(Path.PivotSpeed0, Path.Rho, Path.InertiaK, Path.Gravity);
+		const int Panels = EvenPanels(Path.SimpsonPanels);
+		double PsiA = 0.0;
+		double TauA = 0.0;
+		const double Ua = Clamp(FromU, 0.0, UpperLimit);
+		PivotAtU(I, Panels, Ua, PsiA, TauA);
+		const BallState A = Path.Result.Immediate ? EvaluatePivot(Path, 0.0) : PivotStateAtAngle(Path, PsiA, TauA);
+		Out.Seg.Pos0 = A.Position;
+		Out.Seg.Vel0 = A.Velocity;
+		Out.Seg.Omega0 = A.Omega;
+		if (Path.Result.Immediate || !(Ua < UpperLimit) || !(Tolerance > 0.0))
+		{
+			// Nothing left (or no tolerance asked: the whole remainder as one piece through the leave point).
+			Out.UpperU = UpperLimit;
+			Out.Last = true;
+			Out.Seg.TauEnd = Max(0.0, EndTime - T0);
+			if (Out.Seg.TauEnd > 0.0)
+			{
+				const Vec3 End = EvaluatePivot(Path, Path.Result.Duration).Position;
+				Out.Seg.Accel2 = (End - Out.Seg.Pos0 - Out.Seg.Vel0 * Out.Seg.TauEnd) / (Out.Seg.TauEnd * Out.Seg.TauEnd);
+			}
+			return Out;
+		}
+
+		// Largest span whose bound meets the tolerance: first guess from the jerk bound at the start and dtau/dU there, then
+		// shrink with the bound at the span's end (the bound grows with psi, so it is conservative for the whole span). The
+		// remainder of quadratic interpolation of a vector function is e(tau) = w(tau) r[t0, tm, tb, tau] with the node
+		// polynomial w and the divided difference r[...] = integral of B-spline x r''' (a non-negative kernel of mass 1/6), so
+		// |e| <= |w| max|r'''| / 6 in the Euclidean norm. kSafety covers the Simpson time law, whose derivatives differ from the
+		// ODE's (collisions 5.4: T_p itself within 1e-4) - measured margin ~3 (A-VAL-1).
+		constexpr double kSafety = 2.0;
+		const double Coefficient = kSafety / 6.0;
+		const double JerkStart = Max(PivotJerkBound(Path, PsiA), 1e-30);
+		const double SlopeStart = I.Scale * Integrand(Ua, I.Q); // dtau/dU at Ua (grows with U)
+		double DeltaU = Cbrt(Tolerance / (Coefficient * 0.0481125224324688 * JerkStart)) / SlopeStart;
+		double Ub = UpperLimit;
+		double PsiB = 0.0;
+		double TauB = 0.0;
+		double PsiM = 0.0;
+		double TauM = 0.0;
+		double Bound = 0.0;
+		for (int Iteration = 0; Iteration < 60; ++Iteration)
+		{
+			Ub = Ua + DeltaU < UpperLimit ? Ua + DeltaU : UpperLimit;
+			PivotAtU(I, Panels, Ub, PsiB, TauB);
+			PivotAtU(I, Panels, 0.5 * (Ua + Ub), PsiM, TauM);
+			const double Span = TauB - TauA;
+			const double Mu = Span > 0.0 ? (TauM - TauA) / Span : 0.5;
+			Bound = Coefficient * NodePolynomialMax(Mu) * PivotJerkBound(Path, PsiB) * Span * Span * Span;
+			if (Bound <= Tolerance || !(Span > 0.0))
+			{
+				break;
+			}
+			// tau is close to linear in U over a piece: scale the step to the target span (cube root of the ratio) with a margin.
+			DeltaU = (Ub - Ua) * Min(0.9 * Cbrt(Tolerance / Bound), 0.9);
+		}
+		Out.Last = !(Ub < UpperLimit);
+		Out.UpperU = Out.Last ? UpperLimit : Ub;
+		Out.Deviation = Bound;
+		const Vec3 Pm = PivotStateAtAngle(Path, PsiM, TauM).Position;
+		const Vec3 Pb = Out.Last ? EvaluatePivot(Path, Path.Result.Duration).Position : PivotStateAtAngle(Path, PsiB, TauB).Position;
+		const double Sm = TauM - TauA;
+		const double Sb = Out.Last ? EndTime - T0 : TauB - TauA;
+		Out.Seg.TauEnd = Max(0.0, Sb);
+		if (Sm > 0.0 && Sb > Sm)
+		{
+			// Quadratic through (0, Pa), (Sm, Pm), (Sb, Pb).
+			const Vec3 SlopeM = (Pm - A.Position) / Sm;
+			const Vec3 SlopeB = (Pb - A.Position) / Sb;
+			Out.Seg.Accel2 = (SlopeB - SlopeM) / (Sb - Sm);
+			Out.Seg.Vel0 = SlopeM - Out.Seg.Accel2 * Sm;
+		}
+		return Out;
+	}
+
 	MotionSegment PivotDetectionProxy(const PivotPath& Path)
 	{
 		// Quadratic through the start position and velocity and the leave position (the true path is a circle arc).
