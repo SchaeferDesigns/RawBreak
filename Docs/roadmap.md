@@ -14,10 +14,12 @@ Claude arbeitet autonom durch alle Limit-Fenster (Wiederaufnahme per Zeitplan-Ch
 - [ ] **Spielbarer Build** (gepackte .exe) + kurze Startanleitung, M1-Screenshots
 - [ ] Danach: Planung Vertical Slice „Dive Bar" (Raum-Layout, Licht, Props-Liste, Material-Pipeline), Sound-Plan
 
-## Fenster 3 (ab ca. 18:00, Nutzer ist da)
-- [ ] Nutzer spielt M1 → Feedback (vor allem Stoß-Gefühl, Kamera, Steuerung)
-- [ ] Tuning nach Feedback
-- [ ] Vertical Slice Dive Bar bauen (Blender-Pipeline, eigene Materialien, ggf. Meshy/Higgsfield-Tests), erste Sounds (Kugel-Klicks, Banden)
+## Fenster 3 (ab ca. 18:00) – Agents arbeiten durch, unabhängig vom Playtest
+- [ ] Vertical Slice Dive Bar: Raum-Layout, Modellierung (Blender-Pipeline), eigene Materialien, Licht inkl. Neon; ggf. Meshy/Higgsfield-Tests
+- [ ] Sound: Kugel-Klicks, Banden, Taschen, Bar-Atmo – gesteuert von den Physik-Events
+- [ ] KI-Gegner: Stoßplanung über den Simulator + Skill-Profile aus dem Human-Factors-Modell
+- [ ] UI/UX: Hauptmenü-Szene, Settings-Menü mit Grafik-Presets, Mockups
+- [ ] Sobald der Nutzer M1 gespielt hat: Feedback (Stoß-Gefühl, Kamera, Steuerung) parallel einarbeiten
 
 ## Später
 - Körper & Hände (MetaHuman – braucht einen Schritt vom Nutzer), Karriere, KI-Gegner, weitere Spielarten/Venues, Steam-Store-Page, Trailer (erst nach Freigabe durch den Nutzer)
