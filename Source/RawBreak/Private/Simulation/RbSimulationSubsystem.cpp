@@ -65,8 +65,8 @@ uint32 URbSimulationSubsystem::SubmitShot(FRbShotRequest&& Request)
 		},
 		UE::Tasks::ETaskPriority::High);
 	bInFlight = true;
+	bCollectWaitPending = true;
 	InFlightId = Shot->Id;
-	InFlightSubmitFrame = Shot->SubmitFrame;
 	++Stats.Submitted;
 	return Shot->Id;
 }
@@ -98,6 +98,7 @@ bool URbSimulationSubsystem::TryCollect(double MaxWaitSeconds)
 	// Free the service BEFORE broadcasting: a listener may submit the next shot from its handler.
 	InFlight = UE::Tasks::TTask<TSharedPtr<FRbShot>>();
 	bInFlight = false;
+	bCollectWaitPending = false;
 	InFlightId = 0;
 	check(Shot.IsValid());
 
@@ -147,6 +148,7 @@ void URbSimulationSubsystem::DiscardInFlight(const TCHAR* Reason)
 	InFlight = UE::Tasks::TTask<TSharedPtr<FRbShot>>();
 	UE_LOG(LogRawBreak, Log, TEXT("Shot %u dropped without hand-off (%s)"), InFlightId, Reason);
 	bInFlight = false;
+	bCollectWaitPending = false;
 	InFlightId = 0;
 	++Stats.Discarded;
 }
@@ -211,8 +213,14 @@ void URbSimulationSubsystem::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	if (bInFlight)
 	{
-		// Wait (bounded) only in the frame of the submission; afterwards poll without blocking the game thread.
-		TryCollect(InFlightSubmitFrame == GFrameCounter ? CollectBudgetSeconds : 0.0);
+		// Wait (bounded) once per shot, at the first Tick after its submission: the submit frame, or the next frame for a
+		// shot submitted after this Tick already ran (OnShotSimulated handler, later tick group, console command). The
+		// wait also retracts a task no worker has started yet and runs it in place, so such a shot is never left to a
+		// saturated worker pool. Afterwards poll without blocking the game thread. The flag is cleared BEFORE collecting:
+		// a listener may submit the next shot from its OnShotSimulated handler, and that shot gets its own wait.
+		const double Budget = bCollectWaitPending ? CollectBudgetSeconds : 0.0;
+		bCollectWaitPending = false;
+		TryCollect(Budget);
 	}
 }
 

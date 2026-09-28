@@ -1,7 +1,8 @@
 // Simulation service tests (UE-6a acceptance, Docs/ue-architecture.md 13): table context build + validation, InputHash
 // sensitivity, compact copy (< 1 MB for a break), ROB-10 against the standalone build (A5: break9 scenario, both hashes ==
-// Tools/rbsim/examples/break9.hash), worker hand-off in the same frame, worker results bitwise equal to RunShotBlocking,
-// SubmitShot refused while busy, CancelInFlight and Deinitialize with a shot in flight.
+// Tools/rbsim/examples/break9.hash), worker hand-off in the same frame (and at the next frame's Tick for a shot submitted
+// after the subsystem ticked), worker results bitwise equal to RunShotBlocking, SubmitShot refused while busy,
+// CancelInFlight and Deinitialize with a shot in flight.
 // Owner: UE-6a.
 
 #include "Simulation/RbShot.h"
@@ -145,6 +146,45 @@ namespace RbSimulationTests
 			X.U(static_cast<uint64>(F.OffReason));
 		}
 		const rb::ShotRecord& Rec = R.Record;
+		const rb::ShotStartSnapshot& Start = Rec.Start;
+		for (int32 Id = 0; Id < rb::kMaxBalls; ++Id)
+		{
+			X.U(static_cast<uint64>(Start.Presence[Id]));
+			X.V2(Start.Position[Id]);
+			X.D(Start.Radius[Id]);
+			X.U(static_cast<uint64>(Start.State[Id]));
+			X.U(Start.FrozenToRail[Id]);
+		}
+		X.U(Start.AllBallsAtRest);
+		X.U(static_cast<uint64>(Start.InHand));
+		X.V2(Start.PlacedPosition);
+		X.U(Start.PlacementOverPocket);
+		X.U(Start.TemplatePresent);
+		X.D(Start.ShotClockElapsed);
+		X.U(Start.FootOnFloor);
+		X.U(static_cast<uint64>(Rec.Stroke.Strokes.Size()));
+		for (const rb::StrokeInfo& S : Rec.Stroke.Strokes)
+		{
+			X.Id(S.Ball);
+			X.U(S.TipClothContact);
+			X.U(S.Miscue);
+			X.D(S.CueElevation);
+		}
+		X.U(static_cast<uint64>(Rec.Stroke.NonTipContacts.Size()));
+		for (const rb::NonTipContact& N : Rec.Stroke.NonTipContacts)
+		{
+			X.Id(N.Ball);
+			X.U(static_cast<uint64>(N.Source));
+			X.D(N.Time);
+		}
+		X.U(Rec.Stroke.Overflow);
+		X.U(static_cast<uint64>(Rec.End.Supported.Size()));
+		for (const rb::SupportedBall& S : Rec.End.Supported)
+		{
+			X.Id(S.Ball);
+			X.U(static_cast<uint64>(S.Pocket));
+			X.U(S.Supporters);
+		}
 		X.U(Rec.Events.size());
 		for (const rb::RecordEvent& E : Rec.Events)
 		{
@@ -167,6 +207,7 @@ namespace RbSimulationTests
 			X.D(E.Value);
 		}
 		X.U(Rec.Start.FrozenToCueBall);
+		X.U(static_cast<uint64>(Rec.Stroke.TipContacts.Size()));
 		for (const rb::TipContact& T : Rec.Stroke.TipContacts)
 		{
 			X.Id(T.Ball);
@@ -818,6 +859,66 @@ bool FRbSimulationRefuseBusy::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbSimulationLateSubmit, "RawBreak.Unit.Simulation.Worker_LateSubmitNextTick", RB_UNIT_TEST_FLAGS)
+bool FRbSimulationLateSubmit::RunTest(const FString& Parameters)
+{
+	// A shot submitted AFTER the subsystem's Tick of a frame (here from the OnShotSimulated handler, which runs inside that
+	// Tick) gets its bounded wait at the first Tick after the submission, i.e. the next frame: it must not be left to
+	// polling (a task no worker has started is only retracted by a wait). The budget is generous here so that the test
+	// checks the policy, not the machine's load.
+	FServiceWorld World;
+	if (!World.Create(*this))
+	{
+		return false;
+	}
+	URbSimulationSubsystem* Service = World.Service;
+	Service->CollectBudgetSeconds = 0.25;
+
+	FString Error;
+	TUniquePtr<FRbShotRequest> A = MakeUnique<FRbShotRequest>();
+	TUniquePtr<FRbShotRequest> B = MakeUnique<FRbShotRequest>();
+	if (!TestTrue(*(TEXT("scenarios: ") + Error), MakeTwoBallShot(*A, Error) && MakeBreak9(*B, Error)))
+	{
+		return false;
+	}
+	const uint32 IdA = Service->SubmitShot(MoveTemp(*A));
+	TestTrue(TEXT("first shot accepted"), IdA > 0);
+	uint32 IdB = 0;
+	Service->OnShotSimulated.AddLambda([&](const TSharedRef<const FRbShot>& Shot)
+	{
+		if (Shot->Id == IdA)
+		{
+			IdB = Service->SubmitShot(MoveTemp(*B));
+		}
+	});
+
+	World.Tick(); // frame N: A handed off (same frame); B submitted from the handler, after this frame's wait
+	if (!TestEqual(TEXT("first shot handed off in its submit frame"), World.Received.Num(), 1))
+	{
+		Service->CancelInFlight();
+		return false;
+	}
+	TestTrue(TEXT("second shot submitted from the handler"), IdB > 0);
+	TestTrue(TEXT("second shot in flight after frame N"), Service->IsBusy());
+
+	World.Tick(); // frame N + 1: the first Tick after B's submission waits for it
+	if (!TestEqual(TEXT("late-submitted shot handed off by the first Tick after its submission"), World.Received.Num(), 2))
+	{
+		Service->CancelInFlight();
+		return false;
+	}
+	const TSharedRef<const FRbShot> Shot = World.Received[1];
+	TestEqual(TEXT("handed-off id"), Shot->Id, IdB);
+	TestEqual(TEXT("hand-off one frame after the submit frame"), Shot->HandOffFrame, Shot->SubmitFrame + 1);
+	TestFalse(TEXT("service free"), Service->IsBusy());
+	const FRbSimulationStats& Stats = Service->GetStats();
+	TestEqual(TEXT("stats: handed off"), Stats.HandedOff, 2);
+	TestEqual(TEXT("stats: only the first shot counts as a same-frame hand-off"), Stats.SameFrameHandOffs, 1);
+	AddInfo(FString::Printf(TEXT("late-submitted break: sim %.3f ms %s, hand-off +%llu frame"), Shot->SimMilliseconds,
+		Shot->bSimulatedOnWorker ? TEXT("on a worker") : TEXT("in place (retracted by the wait)"), Shot->HandOffFrame - Shot->SubmitFrame));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbSimulationCancel, "RawBreak.Unit.Simulation.Worker_CancelInFlight", RB_UNIT_TEST_FLAGS)
 bool FRbSimulationCancel::RunTest(const FString& Parameters)
 {
@@ -884,7 +985,13 @@ bool FRbSimulationDeinitialize::RunTest(const FString& Parameters)
 				FPlatformProcess::Sleep(0.0005f * static_cast<float>(Round % 4) * static_cast<float>(Round % 4)); // 0.5, 2, 4.5 ms
 			}
 			TestTrue(TEXT("still in flight at teardown"), World.Service->IsBusy());
-			World.Wrapper.DestroyTestWorld(false); // -> URbSimulationSubsystem::Deinitialize
+			URbSimulationSubsystem* const Service = World.Service;
+			World.Wrapper.DestroyTestWorld(false); // -> UWorld::CleanupWorld -> URbSimulationSubsystem::Deinitialize
+			// No garbage collection ran (DestroyTestWorld(false)), so the deinitialized subsystem is still readable: the world
+			// teardown itself (not a later BeginDestroy) must have waited for the task and dropped the shot.
+			TestFalse(*FString::Printf(TEXT("round %d: Deinitialize waited for the in-flight shot"), Round), Service->IsBusy());
+			TestEqual(*FString::Printf(TEXT("round %d: the in-flight shot was discarded by Deinitialize"), Round), Service->GetStats().Discarded, 1);
+			TestEqual(*FString::Printf(TEXT("round %d: never handed off"), Round), Service->GetStats().HandedOff, 0);
 		}
 		TestEqual(*FString::Printf(TEXT("round %d: no broadcast from a torn-down world"), Round), Broadcasts, 0);
 	}

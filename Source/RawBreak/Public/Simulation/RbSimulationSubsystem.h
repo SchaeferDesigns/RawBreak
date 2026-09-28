@@ -7,10 +7,12 @@
 //
 // Hand-off: SubmitShot at the tip contact (pawn tick, TG_PrePhysics) -> the subsystem's Tick (end of the world
 // tick, after TG_PostPhysics) waits up to CollectBudgetSeconds for the task (a break takes < 2 ms, plan 9.1), so the
-// result is normally broadcast in the SAME frame; otherwise it is polled (no wait) every later frame. A task that no
-// worker has started yet when the wait begins is retracted and run in place on the game thread (UE::Tasks Wait), so a
-// saturated worker pool never delays the hand-off beyond the simulation time itself. Playback is anchored at the
-// contact time, so a late hand-off never changes what is shown, only when.
+// result is normally broadcast in the SAME frame; otherwise it is polled (no wait) every later frame. The bounded wait
+// happens once per shot, at the FIRST Tick after its submission: the submit frame, or the next frame for a shot
+// submitted after this frame's Tick already ran (from an OnShotSimulated handler, a later tick group, a console
+// command). A task that no worker has started yet when the wait begins is retracted and run in place on the game
+// thread (UE::Tasks Wait), so a saturated worker pool never delays the hand-off beyond the simulation time itself.
+// Playback is anchored at the contact time, so a late hand-off never changes what is shown, only when.
 //
 // Lifetime: one shot in flight at a time (SubmitShot refuses while busy). Deinitialize (world teardown) and
 // CancelInFlight wait for the in-flight task - Simulator::Run cannot be interrupted, but it is bounded by its
@@ -84,7 +86,8 @@ public:
 	// Fired on the game thread once per submitted shot, in submission order.
 	FRbOnShotSimulated OnShotSimulated;
 
-	// Wait budget inside Tick for a same-frame hand-off [s] (only in the frame of the submission).
+	// Wait budget inside Tick for a same-frame hand-off [s] (only at the first Tick after the submission, normally in
+	// the frame of the submission).
 	double CollectBudgetSeconds = 0.004;
 
 	// UTickableWorldSubsystem
@@ -105,8 +108,8 @@ private:
 	TUniquePtr<rb::ShotResult> WorkResult;          // reserved by the first Run (ReserveShotResult), reused across shots
 	UE::Tasks::TTask<TSharedPtr<FRbShot>> InFlight; // valid while a shot is in flight
 	bool bInFlight = false;
+	bool bCollectWaitPending = false;               // the in-flight shot has not had its bounded Tick wait yet
 	uint32 InFlightId = 0;
-	uint64 InFlightSubmitFrame = 0;
 	uint32 NextShotId = 1;
 	TSharedPtr<const FRbShot> LastShot;
 	FRbSimulationStats Stats;
