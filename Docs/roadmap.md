@@ -5,7 +5,7 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 
 ## Fenster 1 (bis ca. 13:10)
 - [x] Unreal-Welle A fertig: UE-1 Tisch-Meshes, UE-2 Kugeln & Playback, UE-5a Input & Stoß, UE-6a Simulation (fertig, Review läuft), UE-6b Match-Ablauf – jeweils mit Review
-- [ ] Runde 3 / WP-10: Validierung gegen Messwerte + pooltool, Taschenkanten-Überlappungen, 15-Kugel-Break-Performance
+- [x] Runde 3 / WP-10 (gemergt; 7 Kalibrier-Abweichungen bewusst offen, O-18..O-22): Validierung gegen Messwerte + pooltool, Taschenkanten-Überlappungen, 15-Kugel-Break-Performance
 - [x] Merge + Tests + Push (100/100 UE-Tests, 896/896 Core-Tests), Welle B gestartet
 
 ## Fenster 2 (ca. 13:10–18:00)
@@ -17,7 +17,7 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 ## Fenster 3 (ab ca. 18:00) – Agents arbeiten durch, unabhängig vom Playtest
 - [ ] Vertical Slice Dive Bar: Raum-Layout, Modellierung (Blender-Pipeline), eigene Materialien, Licht inkl. Neon; ggf. Meshy/Higgsfield-Tests
 - [ ] Sound: Kugel-Klicks, Banden, Taschen, Bar-Atmo – gesteuert von den Physik-Events. Vergleichstest: echte Aufnahmen (lizenzfreie Libraries) vs. physikbasierte Klick-Synthese vs. KI-SFX (Higgsfield Mirelo); Higgsfield-SFX/Musik sind nur in deren Game-Pipeline nutzbar (nicht für uns) → Klicks per Synthese, Rest aus lizenzfreien Libraries (Sonniss GDC, Freesound CC0, Pixabay) bzw. ElevenLabs SFX; Sprachzeilen per Higgsfield-TTS (~2 Credits Test); Jukebox-/Menü-Musik: Claude schreibt Prompts, Nutzer generiert mit Gemini (kostenlos) – vorher Googles Nutzungsbedingungen für kommerzielle Nutzung prüfen
-- [ ] KI-Gegner: Stoßplanung über den Simulator + Skill-Profile aus dem Human-Factors-Modell
+- [ ] (läuft seit Fenster 2) KI-Gegner: Stoßplanung über den Simulator + Skill-Profile aus dem Human-Factors-Modell
 - [ ] UI/UX: Hauptmenü-Szene, Settings-Menü mit Grafik-Presets, Mockups
 - [ ] Sobald der Nutzer M1 gespielt hat: Feedback (Stoß-Gefühl, Kamera, Steuerung) parallel einarbeiten
 
