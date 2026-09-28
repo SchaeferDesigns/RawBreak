@@ -180,6 +180,11 @@ def cmd_game(a: argparse.Namespace) -> int:
 
 
 def main() -> int:
+	# UE logs contain non-ASCII text (localized engine messages, paths): never die on the Windows console code page (UE-4 / UE-7
+	# review requests; PYTHONIOENCODING=utf-8 is no longer needed).
+	for stream in (sys.stdout, sys.stderr):
+		if hasattr(stream, "reconfigure"):
+			stream.reconfigure(encoding="utf-8", errors="replace")
 	p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	sub = p.add_subparsers(dest="command", required=True)
 

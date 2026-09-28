@@ -12,6 +12,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/PlatformTime.h"
+#include "Math/RandomStream.h"
 #include "Misc/DateTime.h"
 
 #include "rb/Human/BallMarks.h"
@@ -55,6 +56,25 @@ namespace
 	}
 
 	// A ball at rest on the cloth at plan position P (z = R).
+	// A racked ball lies in whatever orientation the racker left it (M1 integration: every rack used to show the same
+	// orientation - all numbers upside down from the head end, every stripe vertical): a uniformly random rotation (Shoemake),
+	// deterministic per match seed, rack and ball, so replays and seeded tests stay reproducible. Orientation has no effect on
+	// the motion (it carries the chalk marks and the rendering only).
+	rb::Quat RackOrientation(uint64 MatchSeed, int32 Rack, int32 Ball)
+	{
+		FRandomStream Stream(static_cast<int32>(HashCombineFast(HashCombineFast(GetTypeHash(MatchSeed), GetTypeHash(Rack)), GetTypeHash(Ball))));
+		const double U1 = Stream.FRand();
+		const double U2 = Stream.FRand();
+		const double U3 = Stream.FRand();
+		const double A = FMath::Sqrt(1.0 - U1);
+		const double B = FMath::Sqrt(U1);
+		const double T2 = 2.0 * UE_DOUBLE_PI * U2;
+		const double T3 = 2.0 * UE_DOUBLE_PI * U3;
+		rb::Quat Q(B * FMath::Cos(T3), A * FMath::Sin(T2), A * FMath::Cos(T2), B * FMath::Sin(T3));
+		const double Norm = FMath::Sqrt(Q.w * Q.w + Q.x * Q.x + Q.y * Q.y + Q.z * Q.z);
+		return Norm > 0.0 ? rb::Quat(Q.w / Norm, Q.x / Norm, Q.y / Norm, Q.z / Norm) : rb::Quat::Identity();
+	}
+
 	rb::BallState RestingAt(const rb::Vec2& P, double Radius)
 	{
 		rb::BallState S;
@@ -358,6 +378,10 @@ void URbMatchDirector::RackNext()
 		return;
 	}
 	SyncTableState(nullptr, nullptr);
+	for (int32 Id = 0; Id < rb::kMaxBalls; ++Id)
+	{
+		TableState.Balls[Id].Orientation = RackOrientation(MatchSeed, State.RackNumber, Id);
+	}
 	ShowTableState();
 	BeginTurn();
 }

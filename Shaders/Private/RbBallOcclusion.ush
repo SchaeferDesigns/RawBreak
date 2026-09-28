@@ -1,15 +1,39 @@
-// RAW BREAK - analytic ball occlusion on the cloth (ue5-realism-plan 6.5, test T19; Docs/ue-architecture.md 8.3).
-// Occ(rho) = R^3 / (rho^2 + R^2)^(3/2) for a sphere of radius R resting on the plane, rho = horizontal distance
-// from the contact point. The cloth multiplies ambient / indirect light by prod_i (1 - Occ_i) over the balls,
-// whose positions arrive through the material parameter collection MPC_RbBalls (RbAssetPaths.h).
-// Units: world centimetres everywhere (pitfall 24).
-//
-// TODO(UE-3): implement RbBallOcclusion over up to 16 balls read from the MPC.
+// RAW BREAK - analytic ball occlusion on the cloth (ue5-realism-plan 6.5, test T19; Docs/ue-architecture.md 8.2).
+// A sphere of radius R entirely above a surface point's horizon occludes the cosine-weighted hemisphere by exactly
+//   Occ = (R / d)^2 * cos(theta)        d = |C - P|, theta = angle between the surface normal and C - P,
+// which on the bed plane (C = contact point + R up, d^2 = rho^2 + R^2, cos(theta) = R / d) is the plan's formula
+//   Occ(rho) = R^3 / (rho^2 + R^2)^(3/2)        Occ(0) = 1, Occ(R) = 0.3536, Occ(2R) = 0.0894.
+// The general form also serves the cushion faces (vertical normals). The cloth multiplies its material ambient
+// occlusion (applied by Lumen / sky light to indirect diffuse light only) by prod_i (1 - Occ_i) over the balls, whose
+// centres arrive through the material parameter collection MPC_RbBalls (Ball00..Ball15 = world XYZ [cm], W = 1 while the
+// ball lies on the cloth, 0 when hidden / pocketed; BallRadiusCm). Units: world centimetres everywhere (pitfall 24).
 
 #pragma once
 
+// T19 form (horizontal distance from the contact point).
 float RbSphereOcclusion(float Rho, float R)
 {
 	const float D2 = Rho * Rho + R * R;
 	return (R * R * R) / (D2 * sqrt(D2));
+}
+
+// General form: surface point P with unit normal N, sphere centre C, radius R.
+float RbSphereOcclusionAt(float3 P, float3 N, float3 C, float R)
+{
+	const float3 D = C - P;
+	const float D2 = max(dot(D, D), R * R);
+	const float CosTheta = saturate(dot(N, D) * rsqrt(D2));
+	return saturate(R * R / D2 * CosTheta);
+}
+
+// Visibility (1 = unoccluded) of the cloth point P (world cm, normal N) over the 16 balls of MPC_RbBalls.
+float RbBallOcclusion(float3 P, float3 N, float4 Balls[16], float R)
+{
+	float Visibility = 1.0;
+	[unroll]
+	for (int I = 0; I < 16; ++I)
+	{
+		Visibility *= 1.0 - saturate(Balls[I].w) * RbSphereOcclusionAt(P, N, Balls[I].xyz, R);
+	}
+	return Visibility;
 }
