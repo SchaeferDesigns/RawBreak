@@ -4,6 +4,7 @@
   python Tools/unreal/rbue.py capture --map /Game/Dev/UE2/L_DevUE2_Rack  --camera UE2_Rack      --out Docs/images/dev/UE-2/rack.png
   python Tools/unreal/rbue.py capture --map /Game/Dev/UE2/L_DevUE2_Rack  --camera UE2_RackClose --out Docs/images/dev/UE-2/rack_closeup.png
   python Tools/unreal/rbue.py capture --map /Game/Dev/UE2/L_DevUE2_Rack  --camera UE2_Overhead  --out Docs/images/dev/UE-2/rack_overhead.png
+  python Tools/unreal/rbue.py capture --map /Game/Dev/UE2/L_DevUE2_Rack  --camera UE2_Macro     --out Docs/images/dev/UE-2/ball_macro.png
   python Tools/unreal/rbue.py capture --map /Game/Dev/UE2/L_DevUE2_Break --camera UE2_Overhead  --out Docs/images/dev/UE-2/break_overhead.png
   python Tools/unreal/rbue.py capture --map /Game/Dev/UE2/L_DevUE2_Break --camera UE2_Low       --out Docs/images/dev/UE-2/break_low.png
 (PowerShell, or Git Bash with MSYS_NO_PATHCONV=1.)
@@ -224,6 +225,9 @@ def build_level(path: str, materials: dict, ball_material: str | None, play_brea
 	_camera("UE2_RackClose", (22.0, -36.0, z + 15.0), (75.0, 0.0, z + 2.0), fov=40.0)
 	_camera("UE2_Overhead", (0.0, 0.0, z + 215.0), rotation=(-90.0, -90.0, 0.0), fov=70.0)  # below the 300 cm ceiling
 	_camera("UE2_Low", (-150.0, -95.0, z + 55.0), (55.0, 0.0, z), fov=45.0)
+	# Macro look-dev (plan 6.6 / 6.7): ~21 cm from the apex ball on the foot spot, its outline against the cloth - silhouette
+	# facets would show here first (128 segments: 0.3 px sagitta at this distance).
+	_camera("UE2_Macro", (45.0, -10.0, z + 6.0), (63.5, 0.0, z + 2.9), fov=30.0)
 	rb.spawn(unreal.PlayerStart, (-300.0, 200.0, 100.0), (0.0, 0.0, 0.0), "PlayerStart")
 
 	rb.save_current_level(path)
@@ -233,7 +237,6 @@ def build_level(path: str, materials: dict, ball_material: str | None, play_brea
 
 def main() -> None:
 	rb.ensure_dir(DEV)
-	rb.delete_asset_if_exists(DEV + "/Probe/M_Probe")
 	materials = {
 		"cloth": make_surface_material("M_DevCloth", (0.04, 0.20, 0.07), 0.85),
 		"rail": make_surface_material("M_DevRail", (0.10, 0.045, 0.02), 0.35),

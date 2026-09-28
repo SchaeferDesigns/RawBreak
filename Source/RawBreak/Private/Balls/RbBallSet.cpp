@@ -247,6 +247,13 @@ void ARbBallSet::SetBallVisible(int32 BallId, bool bVisible)
 	{
 		if (Ball->IsVisible() != bVisible)
 		{
+			if (!bVisible)
+			{
+				// The renderer keeps a hidden primitive's last transform as its previous one: a ball shown again elsewhere (spotted,
+				// a replay start, a seek back before its capture) would streak from where it disappeared. Drop it while the proxy
+				// still exists (a hidden ball has none).
+				Ball->ResetSceneVelocity();
+			}
 			Ball->SetVisibility(bVisible);
 		}
 		UpdateOcclusionParameter(BallId);
@@ -293,8 +300,12 @@ void ARbBallSet::ResetBallMotion(int32 BallId)
 {
 	if (UStaticMeshComponent* Ball = GetBallComponent(BallId))
 	{
-		// A fresh render proxy has no previous transform, so the jump leaves no velocity streak (no-op while unregistered
-		// or already dirty this frame; a visibility change re-creates the proxy anyway).
+		// UE 5.8 keeps a primitive's previous transform ACROSS render-state re-creation (FSceneVelocityData: "persistent across
+		// rendering state recreates"), and the first transform update of a primitive without velocity data takes the proxy's OLD
+		// transform as the previous one - so neither a new proxy alone nor ResetSceneVelocity alone removes the streak of a jump.
+		// Both together do: ResetSceneVelocity drops the velocity data by a render command that runs before this frame's scene
+		// update, and the re-created proxy registers with previous = current. (Harmless while hidden / unregistered.)
+		Ball->ResetSceneVelocity();
 		Ball->MarkRenderStateDirty();
 	}
 }

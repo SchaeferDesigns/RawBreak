@@ -21,6 +21,9 @@
 //    * Rate, clamped to [0, FinishTime].
 //  * Rate >= 0 (negative rates are clamped to 0; scrub backwards with SeekTo). SetRate / SetPaused / SeekTo re-anchor the
 //    clock at the current value, so the shown time never jumps.
+//  * A paused WORLD (UWorld::IsPaused: pause command / menu, PIE pause) holds the playback like SetPaused (the component
+//    ticks while paused to notice it), and it resumes where it stopped: the real clock running on during a pause never
+//    makes the shot jump forward or finish at once. Time dilation still has no effect.
 //  * Events fire when the playing clock passes them (Play fires those up to the anchored "now"); a seek does not fire the
 //    events it jumps over, and events at or after the seek target fire again as the clock passes them.
 //  * FinishTime = Result.StopTime, extended to capture time + DropHideDelay of the last captured ball and to the end of
@@ -32,8 +35,9 @@
 //  * Stop never broadcasts OnFinished (a deliberate stop; the caller knows).
 //  * Continuous playback never teleports (ETeleportType::None, motion vectors kept). DISCONTINUOUS re-placements drop the
 //    motion history of the balls that jump (ARbBallSet::ResetBallMotion): SeekTo, Stop(true) and a Play whose balls are
-//    not shown at the shot's start pose (a replay started from another table state; a live shot starts where the table
-//    shows its balls, so its first frame keeps the motion vectors). No streak across a jump in motion blur / TSR.
+//    not shown at the shot's pose at the clock origin (t = 0 live, StartShotTime for a replay: a replay started from another
+//    table state or from t0 > 0; a live shot starts where the table shows its balls, so its first frame keeps the motion
+//    vectors). No streak across a jump in motion blur / TSR.
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
@@ -90,6 +94,8 @@ public:
 
 	float GetRate() const { return Rate; }
 	bool IsPaused() const { return bPaused; }
+	// Paused by SetPaused or by a paused world (the clock is held).
+	bool IsHeld() const { return bPaused || bWorldPaused; }
 
 	// Shot time at which the playback finishes (see the file comment); 0 when not playing.
 	double GetFinishTime() const { return FinishTime; }
@@ -125,6 +131,9 @@ private:
 	int32 FirstEventAtOrAfter(double T) const;
 	// Fires the events up to T (inclusive); false if a listener stopped / replaced this playback.
 	bool FireEventsUpTo(double T);
+	// World pause hold (from the tick) and the common freeze / re-anchor of SetPaused and SetWorldPaused.
+	void SetWorldPaused(bool bPause);
+	void OnHoldChanged(bool bWasHeld);
 	// Shows Result.Finals (on-table balls at their final pose, everything else hidden) and the cue at rest.
 	void ApplyFinals(const FRbShot& FinalShot);
 	void Finish();
@@ -142,6 +151,7 @@ private:
 	double ClockOriginShotTime = 0.0;
 	float Rate = 1.0f;
 	bool bPaused = false;
+	bool bWorldPaused = false;              // the owning world was paused at the last tick
 	int32 NextEventIndex = 0;
 	TWeakObjectPtr<ARbCue> Cue;
 

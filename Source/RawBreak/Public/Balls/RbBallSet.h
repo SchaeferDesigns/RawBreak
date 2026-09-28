@@ -25,10 +25,12 @@
 //  * Poses are exact: the quaternion goes into the component's rotation cache (no FRotator round trip, pitfall 3; the
 //    engine's SetRelativeLocationAndRotation would snap near pitch +-90 deg and drop changes below 1e-4 cm / deg), then an
 //    ordinary UpdateComponentToWorld with ETeleportType::None.
-//  * ShowSimBalls re-creates the render proxy of every ball that JUMPS (a new rack, a replay start, restoring the live
-//    table; ResetBallMotion), so a discontinuous re-placement never smears into motion blur / TSR history; continuous
-//    updates (SetBallCore every frame, cue-ball placement) keep their motion vectors. The playback does the same for
-//    seeks, replays started from another table state and Stop(true).
+//  * ShowSimBalls drops the motion history of every ball that JUMPS (a new rack, a replay start, restoring the live table;
+//    ResetBallMotion), so a discontinuous re-placement never smears into motion blur / TSR history; continuous updates
+//    (SetBallCore every frame, cue-ball placement) keep their motion vectors. The playback does the same for seeks, replays
+//    started from another table state and Stop(true). Hiding a ball drops its history too (the renderer would otherwise
+//    streak a ball shown again elsewhere from where it disappeared). Checked on the renderer's velocity data by
+//    RawBreak.Unit.Playback.JumpsLeaveNoVelocity (--render).
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -96,9 +98,10 @@ public:
 	// Pushes ExposureTime to every ball material (the camera model calls this when the shutter changes).
 	void SetExposureTime(float Seconds);
 
-	// Drops the motion history of one ball: its render proxy is re-created at the end of the frame, so the next frame has
-	// no previous transform and no velocity. For DISCONTINUOUS re-placements only (a new rack, a seek, a replay start,
-	// a snap to the finals) - a jump must never smear into motion blur / TSR history. Continuous updates keep it.
+	// Drops the motion history of one ball: its scene velocity data is reset and its render proxy re-created at the end of
+	// the frame, so this frame renders it with previous = current transform (no velocity). For DISCONTINUOUS re-placements
+	// only (a new rack, a seek, a replay start, a snap to the finals) - a jump must never smear into motion blur / TSR
+	// history. Continuous updates keep it.
 	void ResetBallMotion(int32 BallId);
 
 	// Radius of ball BallId [cm] as built (0 for an unknown id).

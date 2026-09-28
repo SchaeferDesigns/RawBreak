@@ -2,8 +2,9 @@
 // drawn back) played on a ball set of a translated + yawed table: transforms == FRbCoords(rb::StateAt) at 200 random times,
 // cursor playback == random access bitwise, seek back, rate / pause without time jumps, anchored Play shows the state of
 // now, Terminal hide, snap to the finals, every event once in order, ETeleportType::None (E3), jumps (seek, replay start,
-// Stop(true)) drop the motion history while continuous frames keep it. The render-state checks need a scene, i.e. a real
-// RHI: rbue.py test --filter RawBreak.Unit.Playback --render (under -NullRHI they are skipped). Owner: UE-2.
+// Stop(true), a ball re-shown elsewhere) leave no velocity in the renderer's scene velocity data while continuous frames keep
+// their motion vectors. The render-state / velocity checks need a scene, i.e. a real RHI:
+// rbue.py test --filter RawBreak.Unit.Playback --render (under -NullRHI they are skipped). Owner: UE-2.
 
 #include "Balls/RbBallSet.h"
 #include "Balls/RbBallTestSupport.h"
@@ -12,8 +13,16 @@
 #include "Cue/RbCue.h"
 #include "Tests/RbTestFlags.h"
 
+#include "AssetCompilingManager.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/WorldSettings.h"
 #include "Math/RandomStream.h"
+#include "Misc/App.h"
+#include "PrimitiveSceneProxy.h"
+#include "RenderingThread.h"
+#include "SceneInterface.h"
 
 #include "rb/Equipment/Cue.h"
 
@@ -21,6 +30,72 @@
 
 namespace
 {
+	// Drives the test world's renderer scene through emulated engine frames, in the engine's order: FScene::StartFrame
+	// (enqueued by the engine loop before the game-thread tick: previous transform := last transform), the game-thread
+	// work, the end-of-frame render updates (transforms, proxy re-creation) and the scene update that starts rendering
+	// (UpdateAllPrimitiveSceneInfos: proxies added / removed, transforms and velocity data). Then Probe reads the motion
+	// vector state the renderer uses for a primitive this frame (FSceneInterface::GetPrimitiveUniformShaderParameters_RenderThread:
+	// its PreviousLocalToWorld and whether it outputs velocity). Needs a real RHI (World->Scene).
+	struct FRenderFrames
+	{
+		UWorld* World = nullptr;
+
+		struct FVelocity
+		{
+			bool bInScene = false;          // the primitive has a proxy in the scene
+			bool bOutputsVelocity = false;  // previous != current transform (a motion vector / blur streak this frame)
+			FVector Previous = FVector::ZeroVector;
+			FVector Current = FVector::ZeroVector;
+		};
+
+		void Begin() const
+		{
+			UE::RenderCommandPipe::FSyncScope SyncScope; // no render command pipe replays while the scene updates (engine pattern)
+			FSceneInterface* Scene = World->Scene;
+			ENQUEUE_RENDER_COMMAND(RbTestStartFrame)([Scene](FRHICommandListImmediate&) { Scene->StartFrame(); });
+		}
+
+		void End() const
+		{
+			World->SendAllEndOfFrameUpdates();
+			UE::RenderCommandPipe::FSyncScope SyncScope;
+			FSceneInterface* Scene = World->Scene;
+			ENQUEUE_RENDER_COMMAND(RbTestUpdateScene)([Scene](FRHICommandListImmediate& RHICmdList) { Scene->UpdateAllPrimitiveSceneInfos(RHICmdList); });
+			FlushRenderingCommands();
+		}
+
+		FVelocity Probe(const UPrimitiveComponent* Component) const
+		{
+			FVelocity Out;
+			const FPrimitiveSceneProxy* Proxy = Component ? Component->GetSceneProxy() : nullptr;
+			if (!Proxy)
+			{
+				return Out;
+			}
+			UE::RenderCommandPipe::FSyncScope SyncScope;
+			FSceneInterface* Scene = World->Scene;
+			ENQUEUE_RENDER_COMMAND(RbTestProbeVelocity)([Scene, Proxy, &Out](FRHICommandListImmediate&)
+			{
+				const FPrimitiveSceneInfo* Info = Proxy->GetPrimitiveSceneInfo();
+				if (!Info)
+				{
+					return;
+				}
+				bool bVolumetricLightmap = false;
+				int32 CaptureIndex = 0;
+				FMatrix Previous = FMatrix::Identity;
+				bool bVelocity = false;
+				Scene->GetPrimitiveUniformShaderParameters_RenderThread(Info, bVolumetricLightmap, Previous, CaptureIndex, bVelocity);
+				Out.bInScene = true;
+				Out.bOutputsVelocity = bVelocity;
+				Out.Previous = Previous.GetOrigin();
+				Out.Current = Proxy->GetLocalToWorld().GetOrigin();
+			});
+			FlushRenderingCommands();
+			return Out;
+		}
+	};
+
 	// World + table + ball set + the reference shot + a controllable clock.
 	struct FPlaybackFixture
 	{
@@ -372,6 +447,65 @@ bool FRbPlaybackRatePause::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbPlaybackWorldPause, "RawBreak.Unit.Playback.WorldPauseHolds", RB_UNIT_TEST_FLAGS)
+bool FRbPlaybackWorldPause::RunTest(const FString& Parameters)
+{
+	// The real clock runs on while the world is paused: the shot must hold and resume without a jump (before the review it
+	// jumped forward by the pause - or finished at once, snapping to the finals and firing every event in one frame).
+	FPlaybackFixture F;
+	if (!F.Init(*this))
+	{
+		return false;
+	}
+	URbShotPlaybackComponent* P = F.Playback;
+	UWorld* World = F.TestWorld.World;
+	TestTrue(TEXT("the playback ticks in a paused world (to hold its clock)"), P->PrimaryComponentTick.bTickEvenWhenPaused);
+	int32 Finished = 0;
+	int32 Fired = 0;
+	P->OnFinished.AddLambda([&Finished](const TSharedRef<const FRbShot>&) { ++Finished; });
+	P->Play(F.ShotRef(), false);
+	F.Now += 0.2;
+	P->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestNearlyEqual(TEXT("playing"), P->GetShotTime(), 0.2, 1e-12);
+	P->OnShotEvent.AddLambda([&Fired](const TSharedRef<const FRbShot>&, int32) { ++Fired; });
+
+	// Pause the world (as the pause command does): the next tick holds at the clock's value.
+	APlayerState* Pauser = World->SpawnActor<APlayerState>();
+	World->GetWorldSettings()->SetPauserPlayerState(Pauser);
+	if (!TestTrue(TEXT("world paused"), World->IsPaused()))
+	{
+		return false;
+	}
+	P->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("held by the world pause"), P->IsHeld() && !P->IsPaused());
+	const FVector Held = F.Scene.Balls->GetBallComponent(0)->GetRelativeLocation();
+	F.Now += 100.0; // far beyond the end of the shot
+	P->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestNearlyEqual(TEXT("time held during the pause"), P->GetShotTime(), 0.2, 1e-12);
+	TestTrue(TEXT("balls held during the pause"), F.Scene.Balls->GetBallComponent(0)->GetRelativeLocation() == Held);
+	TestEqual(TEXT("not finished during the pause"), Finished, 0);
+	TestEqual(TEXT("no event during the pause"), Fired, 0);
+
+	// A user pause taken during the world pause survives the world's resume; a rate change while held applies later.
+	P->SetPaused(true);
+	P->SetRate(0.5f);
+	World->GetWorldSettings()->SetPauserPlayerState(nullptr);
+	F.Now += 1.0;
+	P->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("still held by the user pause"), P->IsHeld());
+	TestNearlyEqual(TEXT("time still held"), P->GetShotTime(), 0.2, 1e-12);
+	P->SetPaused(false);
+	P->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestNearlyEqual(TEXT("resumes where it stopped"), P->GetShotTime(), 0.2, 1e-12);
+	F.Now += 0.2;
+	P->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestNearlyEqual(TEXT("then runs at the new rate"), P->GetShotTime(), 0.3, 1e-12);
+	TestEqual(TEXT("state after the pauses"), F.CheckShownState(*this, TEXT("world pause")), 0);
+	TestTrue(TEXT("still playing"), P->IsPlaying() && Finished == 0);
+	Pauser->Destroy();
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbPlaybackAnchored, "RawBreak.Unit.Playback.AnchoredPlayShowsNow", RB_UNIT_TEST_FLAGS)
 bool FRbPlaybackAnchored::RunTest(const FString& Parameters)
 {
@@ -712,8 +846,9 @@ bool FRbPlaybackJumps::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	// Discontinuous re-placements (seek, replay start from another table state, Stop(true)) re-create the ball's render
-	// proxy (no previous transform -> no velocity streak in motion blur / TSR); continuous ones never do.
+	// Discontinuous re-placements (seek, replay start from another table state, Stop(true)) reset the ball's motion history
+	// (ResetBallMotion: velocity data reset + render proxy re-created); continuous ones never do. Which balls get it is checked
+	// here; that the renderer then really has no velocity for them is JumpsLeaveNoVelocity.
 	UWorld* World = F.TestWorld.World;
 	URbShotPlaybackComponent* P = F.Playback;
 	UStaticMeshComponent* CueBall = F.Scene.Balls->GetBallComponent(0);
@@ -783,6 +918,146 @@ bool FRbPlaybackJumps::RunTest(const FString& Parameters)
 	F.Scene.Balls->ShowSimBalls(Moved.Balls, rb::kMaxBalls);
 	TestTrue(TEXT("ShowSimBalls of a moved ball drops its history"), CueBall->IsRenderStateDirty());
 	TestFalse(TEXT("... and only its own"), F.Scene.Balls->GetBallComponent(1)->IsRenderStateDirty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbPlaybackJumpVelocity, "RawBreak.Unit.Playback.JumpsLeaveNoVelocity", RB_UNIT_TEST_FLAGS)
+bool FRbPlaybackJumpVelocity::RunTest(const FString& Parameters)
+{
+	// What the renderer really uses for motion blur / TSR reprojection (the scene's velocity data), frame by frame: continuous
+	// playback has motion vectors from the previous frame's pose; a jump (seek, Stop(true), a replay from another table state,
+	// a ball that re-appears somewhere else) has none. The engine keeps a primitive's previous transform across render-state
+	// re-creation and across hide / show, so re-creating the proxy alone is not enough (review UE-2).
+	FPlaybackFixture F;
+	if (!F.Init(*this))
+	{
+		return false;
+	}
+	UWorld* World = F.TestWorld.World;
+	if (!World->Scene || !FApp::CanEverRender())
+	{
+		AddInfo(TEXT("no render scene under -NullRHI: velocity checks skipped (run with --render)"));
+		return true;
+	}
+	const FRenderFrames Frames{World};
+	URbShotPlaybackComponent* P = F.Playback;
+	UStaticMeshComponent* CueBall = F.Scene.Balls->GetBallComponent(0);
+	UStaticMeshComponent* ObjectBall = F.Scene.Balls->GetBallComponent(1);
+	const double Tolerance = 1e-3; // cm (the renderer stores float-precision relative matrices)
+
+	// The live table shows the start state; after a few frames at rest nothing moves. (In the editor the ball mesh builds its
+	// render data asynchronously; a component gets its proxy once that is done.)
+	for (int32 Frame = 0; Frame < 3; ++Frame)
+	{
+		Frames.Begin();
+		F.Scene.Balls->ShowSimBalls(F.Shot->Request.Input.Balls, rb::kMaxBalls);
+		FAssetCompilingManager::Get().FinishAllCompilation();
+		Frames.End();
+	}
+	FRenderFrames::FVelocity V = Frames.Probe(CueBall);
+	if (!TestTrue(FString::Printf(TEXT("the cue ball is in the render scene (proxy %s, mesh %s)"), CueBall->GetSceneProxy() ? TEXT("yes") : TEXT("none"),
+		CueBall->GetStaticMesh() ? *CueBall->GetStaticMesh()->GetPathName() : TEXT("none")), V.bInScene))
+	{
+		return false;
+	}
+	TestFalse(TEXT("at rest: no velocity"), V.bOutputsVelocity);
+
+	// A live (anchored) shot one frame after the contact: its first frame keeps the motion vectors.
+	Frames.Begin();
+	const TSharedRef<FRbShot> Live = MakeShared<FRbShot>(*F.Shot);
+	Live->Request.ContactTime = F.Now - 1.0 / 60.0;
+	FVector Before = CueBall->GetComponentLocation();
+	P->Play(Live, true);
+	Frames.End();
+	V = Frames.Probe(CueBall);
+	TestTrue(TEXT("live shot, first frame: motion vector"), V.bOutputsVelocity);
+	TestTrue(TEXT("live shot, first frame: previous = the shown start pose"), V.Previous.Equals(Before, Tolerance));
+
+	// Continuous frames: the previous transform is the previous frame's pose.
+	int32 Continuous = 0;
+	for (int32 Frame = 0; Frame < 8; ++Frame)
+	{
+		Frames.Begin();
+		Before = CueBall->GetComponentLocation();
+		F.Now += 1.0 / 60.0;
+		P->Advance();
+		Frames.End();
+		V = Frames.Probe(CueBall);
+		Continuous += (V.bOutputsVelocity && V.Previous.Equals(Before, Tolerance) && V.Current.Equals(CueBall->GetComponentLocation(), Tolerance)) ? 1 : 0;
+	}
+	TestEqual(TEXT("continuous frames: previous = last frame's pose (motion vectors kept)"), Continuous, 8);
+
+	// Seek back: a jump of several cm - no velocity in the jump frame, motion vectors again from the next frame on.
+	Frames.Begin();
+	Before = CueBall->GetComponentLocation();
+	P->SeekTo(0.02);
+	Frames.End();
+	TestTrue(TEXT("the seek moved the cue ball by > 5 cm"), FVector::Dist(Before, CueBall->GetComponentLocation()) > 5.0);
+	V = Frames.Probe(CueBall);
+	TestFalse(TEXT("seek: no velocity streak across the jump"), V.bOutputsVelocity);
+	Frames.Begin();
+	Before = CueBall->GetComponentLocation();
+	F.Now += 1.0 / 60.0;
+	P->Advance();
+	Frames.End();
+	V = Frames.Probe(CueBall);
+	TestTrue(TEXT("after the seek: motion vectors again"), V.bOutputsVelocity && V.Previous.Equals(Before, Tolerance));
+
+	// A ball that disappears and re-appears elsewhere (captured -> seek back before the capture): no streak from its old place.
+	const double Capture = F.Result().Finals[1].Time;
+	Frames.Begin();
+	P->SeekTo(Capture - 0.02);
+	Frames.End();
+	const FVector NearPocket = ObjectBall->GetComponentLocation();
+	Frames.Begin();
+	P->SeekTo(Capture + static_cast<double>(P->DropHideDelay) + 0.01);
+	Frames.End();
+	TestFalse(TEXT("captured ball hidden"), F.Scene.Balls->IsBallVisible(1));
+	Frames.Begin();
+	P->SeekTo(Capture - 0.3);
+	Frames.End();
+	TestTrue(TEXT("re-shown away from the pocket"), F.Scene.Balls->IsBallVisible(1) && FVector::Dist(NearPocket, ObjectBall->GetComponentLocation()) > 5.0);
+	V = Frames.Probe(ObjectBall);
+	TestTrue(TEXT("re-shown ball is in the scene"), V.bInScene);
+	TestFalse(TEXT("re-shown ball: no velocity from where it was last seen"), V.bOutputsVelocity);
+
+	// Stop(true) from mid-shot snaps to the finals: a jump.
+	Frames.Begin();
+	P->Stop(true);
+	Frames.End();
+	V = Frames.Probe(CueBall);
+	TestFalse(TEXT("Stop(true): no velocity"), V.bOutputsVelocity);
+
+	// A replay started while the table shows the end state: both balls jump back to the start.
+	Frames.Begin();
+	P->Play(F.ShotRef(), false);
+	Frames.End();
+	TestFalse(TEXT("replay start: cue ball without velocity"), Frames.Probe(CueBall).bOutputsVelocity);
+	V = Frames.Probe(ObjectBall);
+	TestTrue(TEXT("replay start: object ball shown"), V.bInScene);
+	TestFalse(TEXT("replay start: object ball (hidden since its capture) without velocity"), V.bOutputsVelocity);
+
+	// A replay from t0 > 0 while the table shows the shot's START state (the replay shows Request.Input first): the balls
+	// jump to their t0 poses.
+	P->Stop(false);
+	Frames.Begin();
+	F.Scene.Balls->ShowSimBalls(F.Shot->Request.Input.Balls, rb::kMaxBalls);
+	Frames.End();
+	Frames.Begin();
+	Before = CueBall->GetComponentLocation();
+	P->Play(F.ShotRef(), false, 0.3);
+	Frames.End();
+	TestTrue(TEXT("replay from 0.3 s: the cue ball is far from its start"), FVector::Dist(Before, CueBall->GetComponentLocation()) > 5.0);
+	TestFalse(TEXT("replay from 0.3 s shown from the start state: no velocity"), Frames.Probe(CueBall).bOutputsVelocity);
+
+	// A re-rack with a moved cue ball (ShowSimBalls): a jump.
+	P->Stop(false);
+	rb::SimInput Moved = F.Shot->Request.Input;
+	Moved.Balls[0].State.Position.x -= 0.3;
+	Frames.Begin();
+	F.Scene.Balls->ShowSimBalls(Moved.Balls, rb::kMaxBalls);
+	Frames.End();
+	TestFalse(TEXT("ShowSimBalls of a moved ball: no velocity"), Frames.Probe(CueBall).bOutputsVelocity);
 	return true;
 }
 

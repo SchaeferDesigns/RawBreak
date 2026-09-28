@@ -5,6 +5,7 @@
 #include "Cue/RbCue.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Misc/App.h"
 
 // Owner: UE-2.
@@ -39,6 +40,7 @@ URbShotPlaybackComponent::URbShotPlaybackComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+	PrimaryComponentTick.bTickEvenWhenPaused = true; // to hold the clock while the world is paused (not to advance it)
 	rb::ResetCursor(Cursor);
 	FMemory::Memset(ShownCache, -1, sizeof(ShownCache));
 }
@@ -120,16 +122,23 @@ void URbShotPlaybackComponent::Play(const TSharedRef<const FRbShot>& InShot, boo
 	ShotTime = ClampShotTime(ClockShotTime(Now));
 	NextEventIndex = FirstEventAtOrAfter(ClockOriginShotTime);
 
-	// A ball that is not shown at the shot's start pose (a replay started from another table state) jumps: its motion
-	// history is dropped after the first evaluation. A live shot starts where the table shows its balls (continuous).
+	// A ball that is not shown at the shot's pose at the clock origin (t = 0 of a live shot, StartShotTime of a replay) jumps:
+	// its motion history is dropped after the first evaluation (a replay started from another table state, or from t0 > 0
+	// while the table shows the start). A live shot starts where the table shows its balls (continuous). Random access at
+	// the origin: t = 0 gives the input pose bitwise.
 	FVector Locations[rb::kMaxBalls];
 	FQuat Rotations[rb::kMaxBalls];
 	uint32 Jumping = CaptureShownPoses(Locations, Rotations);
 	for (int32 Ball = 0; Ball < rb::kMaxBalls; ++Ball)
 	{
-		const rb::SimBall& Start = InShot->Request.Input.Balls[Ball];
-		if (((Jumping >> Ball) & 1u) && ((InShot->Result.BallsInPlay >> Ball) & 1u)
-			&& SamePose(Locations[Ball], Rotations[Ball], FRbCoords::PositionToUE(Start.State.Position), FRbCoords::OrientationToUE(Start.Orientation)))
+		if (!((Jumping >> Ball) & 1u) || !((InShot->Result.BallsInPlay >> Ball) & 1u))
+		{
+			continue;
+		}
+		rb::BallState Origin;
+		rb::Quat OriginOrientation;
+		if (rb::StateAt(InShot->Result, Ball, ClockOriginShotTime, Origin) && rb::OrientationAt(InShot->Result, Ball, ClockOriginShotTime, OriginOrientation)
+			&& SamePose(Locations[Ball], Rotations[Ball], FRbCoords::PositionToUE(Origin.Position), FRbCoords::OrientationToUE(OriginOrientation)))
 		{
 			Jumping &= ~(1u << Ball);
 		}
@@ -182,7 +191,7 @@ void URbShotPlaybackComponent::Stop(bool bSnapToEnd)
 void URbShotPlaybackComponent::SetRate(float NewRate)
 {
 	NewRate = FMath::Max(0.0f, NewRate);
-	if (Shot.IsValid() && !bPaused)
+	if (Shot.IsValid() && !IsHeld())
 	{
 		// Re-anchor at the current clock value: the shown time is continuous, only its speed changes.
 		const double Now = ClockNow();
@@ -194,23 +203,41 @@ void URbShotPlaybackComponent::SetRate(float NewRate)
 
 void URbShotPlaybackComponent::SetPaused(bool bPause)
 {
-	if (bPause == bPaused)
+	if (bPause != bPaused)
+	{
+		const bool bWasHeld = IsHeld();
+		bPaused = bPause;
+		OnHoldChanged(bWasHeld);
+	}
+}
+
+void URbShotPlaybackComponent::SetWorldPaused(bool bPause)
+{
+	if (bPause != bWorldPaused)
+	{
+		const bool bWasHeld = IsHeld();
+		bWorldPaused = bPause;
+		OnHoldChanged(bWasHeld);
+	}
+}
+
+void URbShotPlaybackComponent::OnHoldChanged(bool bWasHeld)
+{
+	const bool bHeld = IsHeld();
+	if (bHeld == bWasHeld)
 	{
 		return;
 	}
 	const double Now = ClockNow();
-	if (bPause)
+	if (bHeld && Shot.IsValid())
 	{
-		if (Shot.IsValid())
-		{
-			// Freeze at the clock's current value (events up to it fire when the playback resumes).
-			ShotTime = ClampShotTime(ClockShotTime(Now));
-			ApplyAt(ShotTime);
-		}
+		// Freeze at the clock's current value (events up to it fire when the playback resumes).
+		ShotTime = ClampShotTime(ClockShotTime(Now));
+		ApplyAt(ShotTime);
 	}
+	// Holding or resuming: the clock continues from the shown time.
 	ClockOrigin = Now;
 	ClockOriginShotTime = ShotTime;
-	bPaused = bPause;
 }
 
 void URbShotPlaybackComponent::SeekTo(double Time)
@@ -238,12 +265,14 @@ void URbShotPlaybackComponent::SetCue(ARbCue* InCue)
 void URbShotPlaybackComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	const UWorld* World = GetWorld();
+	SetWorldPaused(World != nullptr && World->IsPaused());
 	Advance();
 }
 
 void URbShotPlaybackComponent::Advance()
 {
-	if (!Shot.IsValid() || bPaused)
+	if (!Shot.IsValid() || IsHeld())
 	{
 		return;
 	}
@@ -419,7 +448,7 @@ void URbShotPlaybackComponent::ResetMovedBalls(uint32 VisibleBefore, const FVect
 	const int32 Count = FMath::Min(Balls->GetBallCount(), rb::kMaxBalls);
 	for (int32 Ball = 0; Ball < Count; ++Ball)
 	{
-		// A ball that appeared or disappeared gets a new render proxy anyway (visibility change).
+		// A ball that disappeared needs nothing; one that appeared starts without history (ARbBallSet::SetBallVisible drops it on hiding).
 		const UStaticMeshComponent* Component = Balls->GetBallComponent(Ball);
 		if (((VisibleBefore >> Ball) & 1u) && Component && Balls->IsBallVisible(Ball)
 			&& !SamePose(Locations[Ball], Rotations[Ball], Component->GetRelativeLocation(), Balls->GetBallOrientationUE(Ball)))
