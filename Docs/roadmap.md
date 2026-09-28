@@ -22,4 +22,6 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 - [ ] Sobald der Nutzer M1 gespielt hat: Feedback (Stoß-Gefühl, Kamera, Steuerung) parallel einarbeiten
 
 ## Später
+- Pool hall mit ~8 Tischen: KI-Stammgäste spielen echte simulierte Partien an den Nachbartischen; später online geteilte Hallen (nur Stoß-Eingaben übertragen, deterministische Physik rechnet überall identisch). Voraussetzung ab jetzt: mehrere Tische + Matches pro Level.
+- Vom Tisch gesprungene Kugeln: Übergabe an Unreal-Physik (Boden, rollt unter Hocker), Aufheben als Chore.
 - Körper & Hände (MetaHuman – braucht einen Schritt vom Nutzer), Karriere, KI-Gegner, weitere Spielarten/Venues, Steam-Store-Page, Trailer (erst nach Freigabe durch den Nutzer)
