@@ -1,0 +1,5 @@
+# click_synth.py renders are regenerated on every run (the root .gitignore ignores every out/ folder).
+# Only the small reference set in out/ref/ is committed (WAVs go through Git LFS, see .gitattributes).
+!out/
+out/*
+!out/ref/
