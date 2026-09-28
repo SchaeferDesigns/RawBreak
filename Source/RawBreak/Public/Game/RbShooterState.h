@@ -19,6 +19,8 @@
 // position - spotted balls included, the rules' GameState is authoritative for status and position) and Result.Finals
 // (orientation, ChalkMarks, z = R); balls not OnTable get InPlay = false; the cue ball in hand stays out until placed
 // (review R-12). ChalkMarks carry over (HF 4.3).
+// Every entry carries the table context's BallSpec of its id (also balls out of play), balls in play lie at rest on the
+// cloth: State = {(x, y, R), 0, 0, Stationary}.
 struct FRbTableState
 {
 	rb::SimBall Balls[rb::kMaxBalls];
@@ -37,4 +39,5 @@ struct FRbShooterState
 	uint32 ShooterId = 0;                         // NoiseKey::ShooterId
 	uint32 ShooterShotIndex = 0;                  // revealed per-shot draws so far (NoiseKey::ShooterShotIndex)
 	uint32 CuePickupIndex = 0;
+	int32 LastChalkTwists = 0;                    // twists of the last auto-chalk (F2 debug block)
 };
