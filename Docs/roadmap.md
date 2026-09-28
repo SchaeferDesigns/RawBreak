@@ -1,7 +1,7 @@
 ﻿# Roadmap (Arbeitsplan)
 
 Stand: 28.09.2026. Der Nutzer ist tagsüber in der Schule und schaut ab ca. 18:00 Uhr auf die Ergebnisse.
-Claude arbeitet autonom durch alle Limit-Fenster (Wiederaufnahme per Zeitplan-Check alle ~30 min).
+Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Fortsetzung nach einem Limit ist beim Nutzer automatisiert).
 
 ## Fenster 1 (bis ca. 13:10)
 - [x] Unreal-Welle A fertig: UE-1 Tisch-Meshes, UE-2 Kugeln & Playback, UE-5a Input & Stoß, UE-6a Simulation (fertig, Review läuft), UE-6b Match-Ablauf – jeweils mit Review
