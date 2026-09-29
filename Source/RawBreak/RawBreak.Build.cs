@@ -50,7 +50,10 @@ public class RawBreak : ModuleRules
 			"ApplicationCore",
 			// FImageView for the headless capture (PNG writing via FImageUtils).
 			"ImageCore",
+			// The headless capture's frame-time recording (M2-A9): GGameThreadTime / GRenderThreadTime / GRHIThreadTime (RenderCore)
+			// and RHIGetGPUFrameCycles / GRHIAdapterName (RHI), the values `stat unit` shows.
 			"RenderCore",
+			"RHI",
 		});
 	}
 }

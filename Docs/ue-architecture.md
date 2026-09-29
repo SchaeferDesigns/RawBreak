@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Document | `Docs/ue-architecture.md` |
-| Status | v1.1 (2026-09-27), UE-0 delivered and adversarially reviewed (section 16): module layout, compiling skeleton of every class (TODO(UE-x) markers), config, headless pipeline proven on the dev PC (build, Python level + bake, PIE tests, headless screenshot). Frozen for the parallel work packages UE-1..UE-8. v1.2 (2026-09-28): M1 integrated (section 17). **v1.3 (2026-09-29): M2 plan (section 18): 7 packages M2-F / M2-L / M2-A / M2-B / M2-C / M2-D / M2-E with disjoint owned files, the new contracts and compiling stubs (TODO(M2-x) markers), config and pipeline additions.** |
+| Status | v1.1 (2026-09-27), UE-0 delivered and adversarially reviewed (section 16): module layout, compiling skeleton of every class (TODO(UE-x) markers), config, headless pipeline proven on the dev PC (build, Python level + bake, PIE tests, headless screenshot). Frozen for the parallel work packages UE-1..UE-8. v1.2 (2026-09-28): M1 integrated (section 17). **v1.3 (2026-09-29): M2 plan (section 18): 7 packages M2-F / M2-L / M2-A / M2-B / M2-C / M2-D / M2-E with disjoint owned files, the new contracts and compiling stubs (TODO(M2-x) markers), config and pipeline additions.** v1.4 (2026-09-29): M2-0 (architect package, 18.12): multi-view / UI / hide-tag / EV100 captures, frame-time recorder, `rbue.py perf / package / ledger / core / owners / selftest`, contract and level-smoke tests, integration runbook. |
 | Scope | The Unreal Engine 5.8.3 side of RAW BREAK up to milestone **M1 "first playable"** (sections 0-17) and the **M2 plan** (section 18: feel fixes from the M1 playtest, table / cloth look-dev, dive-bar slice v1, audio v1, menus / settings, balls off the table, multi-table groundwork). The engine-agnostic core `BilliardsCore` (Docs/architecture.md) is complete and stays untouched. |
 | Sources of truth | `Docs/specs/ue5-realism-plan.md` (**UE** below: camera 4.x, body/input/cue 5.x, adapter 5.6, playback 5.7, rendering 6.x, settings 9.4, tests 13), `Docs/specs/human-factors.md` (**HF**, layers UG/UA/US), `Docs/specs/rules.md` (**RUL**, what the match UI must show), `Docs/decisions.md`, `Docs/architecture.md` sections 7 and 13 (the core API and the integration contract). |
 | Code | `Source/RawBreak/**` (game module), `Source/RawBreakEditor/**` (editor tools), `Source/RawBreakShaders/**` + `Shaders/**` (shader directory), `Tools/unreal/**` (headless pipeline), `Config/*.ini`, `RawBreak.uproject` |
@@ -374,6 +374,7 @@ python Tools/unreal/rbue.py capture --map /Game/... --camera <tag|name> --res 19
         -RBCapture="<abs png>" -RBCaptureWarmup=120 -RBCaptureCamera="<tag>" -unattended -nosplash -NoSound ...
 ```
 `URbHeadlessCaptureSubsystem` (only created when `-RBCapture=` is present): view through the camera actor with that tag/name (hides the pawn), wait until shader + asset compilers are idle, stream everything, render at least `Warmup` frames AND `-RBCaptureWarmupSeconds` (default 4 s) of game time (auto exposure adapts in EV per second, 0.7 EV/s down for Eyes; Lumen, TSR converge; review R-09), capture through `UGameViewportClient::OnScreenshotCaptured`, write the PNG, `RequestExit`. `-ForceRes` is required (without it a windowed 1920x1080 is clamped below the desktop work area; observed 888x500). Full renderer (DX12 SM6, HWRT Lumen, VSM, Substrate) — not a NullRHI approximation.
+M2 additions (18.12): several cameras in one process (`--camera A,B,C --out .../{camera}.png`), `--show-ui` (with the viewport's Slate UI), `--hide-tags`, the adapted EV100 of every view in the log, a missing named camera fails the run, and the `-RBPerf` frame-time recorder behind `rbue.py perf`.
 Measured: first start with a cold DDC under Substrate: global shaders ~66 s + engine default materials ~85 s (~3 min); warm DDC: 12 s end to end (+ the 4 s warm-up floor). `rbue.py capture` fails when the log reports a material / shader compile error (`Failed to compile Material`, `Default Material will be used`, `LogShaderCompilers: Error`, `LogMaterial: Error`) unless `--allow-shader-errors`. Look-dev and acceptance captures use `ARbLookDevCamera` actors (a cine camera with the game's camera preset), never plain `ACameraActor`s with engine-default exposure / DoF.
 
 ### 9.5 Running the game, cheats
@@ -382,7 +383,7 @@ Measured: first start with a cold DDC under Substrate: global shaders ~66 s + en
 python Tools/unreal/rbue.py game [--map /Game/Generated/Maps/L_M1_TestRoom]      # windowed 1920x1080, for the human playtest
 UnrealEditor-Cmd.exe <uproject> <map>?Mode=HotSeat -game -RenderOffscreen -ExecCmds="RbStrike 8 0 0 0 0; RbDumpState"   # scripted
 ```
-The editor binary in `-game` mode runs uncooked content; packaging (cook + Game target) is a later milestone.
+The editor binary in `-game` mode runs uncooked content. A cooked build: `rbue.py package --label <name>` (M2-0, 18.12) -> `<RB_BUILDS_DIR>/<name>/Windows/RawBreak.exe`; `capture` / `perf` take `--exe <that exe>`.
 
 ### 9.6 Automation tests
 
@@ -433,7 +434,8 @@ Naming: `RawBreak.Unit.<Area>.<Name>` (module RawBreak, pure logic), `RawBreak.F
 
 ```
 Tools/unreal/
-  rbue.py                  host runner: build | py | capture | test | game                         UE-0
+  rbue.py                  host runner: build | py | capture | test | game | perf | package |    UE-0 / M2-0
+                           ledger | core | owners | selftest (M2 additions: 18.12)
   capture_m1.py            host: all M1 acceptance captures (4 cameras, High, 1920x1080)          UE-8
   editor/                  run INSIDE Unreal (commandlet)
     rb_common.py           helpers: new_level, spawn, spawn_mesh, save, fail (RBUE_FAIL)          UE-0
@@ -669,7 +671,7 @@ three packages compile shaders / capture at the same time; never leave an Unreal
 | **M2-C** | Audio v1 | `Source/RawBreakAudioDsp/**`, `Audio/*`, the audio block of `Config/DefaultEngine.ini` (between its markers), `Tools/audio/**`, `Tools/unreal/editor/rb_make_audio.py`; tests new RbAudioDspTests, RbAudioTests, RbAudioFunctionalTest (PIE, `--sound`); content `/Game/Generated/Audio/**`; `Docs/audio/m2/**`, `Docs/images/dev/m2c/**` | architect step (playback clock contract, footstep delegate, loose-ball impact delegate, volumes) | 18.5: AU-T01..T13 offline subset, engine AU-T08 / AU-T21 (sample-accurate), T16, T19; every sound class audible in a recorded break; venue room tone + reverb; volumes + pause mix |
 | **M2-D** | Menus & settings | `UI/**` (incl. M1's SRbInfoOverlay / RbOverlayComponent), `Settings/**` (RbGameUserSettings, RbSettingsRegistry, RbSettingsTypes), `Config/DefaultScalability.ini`, `Tools/unreal/editor/rb_make_title.py`, `rb_dev_m2d.py`; tests RbSettingsTests, RbOverlayTests, new RbUiTests, RbMenuFlowTest (PIE); content `/Game/Generated/Maps/L_Title`, `/Game/Generated/UI/**`; `Docs/images/dev/m2d/**` | architect step; reads M2-F's stroke / ball-in-hand state and M2-E's interaction verbs (public getters) for the key hints | 18.4: UX-T01 (EN), T02, T05, T07, T09 (keyboard + mouse), T10, T20, T25 (with M2-E), T26; settings persist across a restart; the title opens both venues in Practice / Hot-seat |
 | **M2-E** | Balls off the table, multi-table groundwork, match, interaction | `Balls/*` (RbBallSet, RbShotPlaybackComponent, RbBallMeshBuilder, RbLooseBall, RbLooseBallSubsystem, demo actors), `Game/*` except `RbTestRoom` (RbGameMode, RbMatchDirector, RbShooterState, RbTableSubsystem), `Interaction/*`, `Replay/*`, `Simulation/*`, `Dev/RbCheatManager.*`, `RawBreakEditor/Private/RbAssetBake_Ball.cpp`, `Tools/unreal/editor/rb_bake_ball.py`, `rb_make_physics.py`, `rb_dev_m2e.py`; tests RbBallTests, RbPlaybackTests, RbMatchTests, RbSimulationTests, new RbLooseBallTests, RbMultiTableTests, and (PIE) RbMatchFlowTest, RbReplayTest, RbM1FlowTest, RbM1RackTest, new RbLooseBallFunctionalTest, RbMultiTableFunctionalTest; content `/Game/Generated/Physics/**`, `/Game/Generated/Balls/**`; `Docs/images/dev/m2e/**` | architect step | 18.6: hand-off at the exact core state, rules untouched (hashes), floor bounce and rest, pick-up and automatic returns, replays hide, a two-table dev level with independent sessions, grep test "no single-table lookups", M1 flows green |
-| **M2-0** | Architect: contracts, config, integration | `RawBreak.uproject`, `Source/*.Target.cs`, every `*.Build.cs`, `Config/DefaultEngine.ini` (except the audio block), `Config/DefaultGame.ini`, `Core/*` (except the `ERbTablePart` block), `RawBreak.h`, `RawBreakModule.cpp`, `Dev/RbHeadlessCaptureSubsystem.*`, `RbTestFlags.h`, `RbCoordsTests`, `RbPieSmokeTest`, the `RawBreakEditor` module, `RbAssetBake_Common.cpp`, `RbAssetBakeLibrary.h`, `Tools/unreal/rbue.py`, `editor/rb_common.py`, `rb_make_all.py`, `rb_pipeline_proof.py`, `rb_bake_selftest.py`, `Tools/blender/divebar/db_build_all.py`, `Docs/licenses/asset-ledger.csv`, `.gitignore`, this document | — | 18.10 |
+| **M2-0** | Architect: contracts, config, integration | `RawBreak.uproject`, `Source/*.Target.cs`, every `*.Build.cs`, `Config/DefaultEngine.ini` (except the audio block), `Config/DefaultGame.ini`, `Core/*` (except the `ERbTablePart` block), `RawBreak.h`, `RawBreakModule.cpp`, `Dev/RbHeadlessCaptureSubsystem.*`, `RbTestFlags.h`, `RbCoordsTests`, new `RbContractTests`, `RbPieSmokeTest`, the `RawBreakEditor` module, `RbAssetBake_Common.cpp`, `RbAssetBakeLibrary.h`, `Tools/unreal/rbue.py`, `editor/rb_common.py`, `rb_make_all.py`, `rb_pipeline_proof.py`, `rb_bake_selftest.py`, `Tools/blender/divebar/db_build_all.py`, `Docs/licenses/asset-ledger.csv`, `.gitignore`, `Docs/perf/**`, `Docs/images/dev/m20/**`, this document | — | 18.10 (18.12: what M2-0 delivered before the merges) |
 
 **Ownership boundaries that are easy to get wrong**
 
@@ -969,7 +971,9 @@ only.
 
 * `DefaultEngine.ini`: see 18.1. `DefaultGame.ini` (at integration): `MapsToCook` + `L_DiveBar`, `L_Title`; `GameDefaultMap` ->
   `L_Title` once it exists. `DefaultInput.ini` is M2-F's (mouse smoothing / axis config), `DefaultScalability.ini` M2-D's.
-* `rbue.py`: `test --sound` (keeps the audio device for `RawBreak.Functional.Audio.*`), `capture` / `test --extra <UE args>`.
+* `rbue.py`: `test --sound` (keeps the audio device for `RawBreak.Functional.Audio.*`), `capture` / `test --extra <UE args>`; M2-0
+  (18.12): `capture --camera A,B,... --out <dir>/{camera}.png [--show-ui] [--hide-tags T] [--exe <packaged exe>]`, `perf`, `package`,
+  `ledger`, `core`, `owners` (the 18.2 ownership check of a package branch), `selftest`.
 * `rb_make_all.py` order: materials (M2-L) -> physics (M2-E) -> table playfield bake + table-body import (M2-L) -> ball (M2-E) -> cue (M2-F) -> player (M2-F) -> audio
   (M2-C) -> test room (M2-L) -> venue materials (M2-B) -> dive-bar import + level (M2-A) -> title (M2-D); validators: M1 level,
   venue level. Blender first: `python Tools/blender/rbbl.py all` (`db_build_all.py`: M2-A shell / neon, M2-L
@@ -984,16 +988,16 @@ only.
 
 | # | Check | How |
 |---|---|---|
-| M2-A1 | Build clean | editor and game target: 0 errors, 0 project warnings |
-| M2-A2 | Regenerate | `rbbl.py all` + `rb_make_all.py --strict` from a clean `Content/Generated` recreate everything; a second run with `--compare` gives equal metrics; validators OK for `L_M1_TestRoom` and `L_DiveBar` |
-| M2-A3 | Tests | all `RawBreak.Unit.*` and `RawBreak.Functional.*` green (M1's 163 + the packages'), core 904 green; `RawBreak.Functional.Audio.*` with `--sound` |
+| M2-A1 | Build clean | editor and game target: 0 errors, 0 project warnings (`rbue.py build`, `rbue.py build --target RawBreak`) |
+| M2-A2 | Regenerate | `rbbl.py all -- --strict` + `rb_make_all.py --strict` from a clean `Content/Generated` recreate everything; a second run with `--compare` gives equal metrics; validators OK for `L_M1_TestRoom` and `L_DiveBar` |
+| M2-A3 | Tests | all `RawBreak.Unit.*` and `RawBreak.Functional.*` green (M1's 163 + M2-0's 10 unit tests and one `Functional.LevelSmoke.<Map>` per playable level + the packages'), core 904 green (`rbue.py core`); `RawBreak.Functional.Audio.*` with `--sound`; `rbue.py ledger --check` clean |
 | M2-A4 | Feel | 18.3 F1-F9 green; the owner re-tests P1, P2, P3, P5 |
 | M2-A5 | Look | 18.7 captures (both tables) + `Docs/images/divebar/m2/{V01..V09,TH1..TH7}.png`, strict, inspected; the owner re-tests P4 |
 | M2-A6 | Venue | the 18.8 table |
 | M2-A7 | Audio | the 18.5 list; the owner hears a full dive-bar rack |
 | M2-A8 | Menus | the 18.4 list; the owner plays from the title screen into both venues and back |
-| M2-A9 | Performance (logged, no gate yet) | `L_DiveBar`, High, 1440p, TSR at the DLSS-Q internal resolution: GPU mean / P95 logged against the 10.3 / 11.1 ms target; game thread < 6 ms in a break; P95 <= 16.7 ms is the floor that must hold |
-| M2-A10 | **Owner playtest** | packaged Development build: title -> dive bar hot-seat and test-room practice; P1-P5 verdicts recorded in `Docs/playtests/` |
+| M2-A9 | Performance (logged, no gate yet) | `L_DiveBar`, High, 1440p, TSR at the DLSS-Q internal resolution: GPU mean / P95 logged against the 10.3 / 11.1 ms target; game thread < 6 ms in a break; P95 <= 16.7 ms is the floor that must hold. `rbue.py perf --exe <build>/Windows/RawBreak.exe --map "/Game/Generated/Maps/L_DiveBar?Mode=Practice" --perf-exec "rb.Match.Break 9" --out Docs/perf/m2/divebar_1440p.json` (defaults: 2560x1440, `rb.Quality High`, `r.ScreenPercentage 66.67`, 600 frames) |
+| M2-A10 | **Owner playtest** | packaged Development build (`rbue.py package --label M2`): title -> dive bar hot-seat and test-room practice; P1-P5 verdicts recorded in `Docs/playtests/` |
 
 ### 18.11 Risks
 
@@ -1008,3 +1012,69 @@ only.
 | Table look without the owner's photos | web references first (URLs only); the owner's photos replace them in a later round |
 | Loose balls vs replays / determinism | loose balls are presentation only; hashes compared with the subsystem disabled; replays never spawn them |
 | M2-F is the largest package | it may run as one agent with a reviewer per sub-feature; P1 / P3 land first (smallest, highest value), then P2, then P5 |
+
+### 18.12 M2-0 — what the architect package delivered before the merges, and the integration runbook
+
+M2-0 is the architect's own package: the contracts, config and stubs of 18.1 (merged with the plan), plus the tooling and tests the
+integration round (18.10) needs, delivered on branch `m20` **before** the package merges so that every M2-Ax check is one command.
+All of it lives in M2-0's files (18.2).
+
+**Delivered**
+
+| Area | What | Where |
+|---|---|---|
+| Captures (VDB-T2, DB-3, M2-A5) | several cameras in ONE process (`--camera A,B,C`, output pattern with `{camera}`, else `<stem>_<camera>.png`); every view starts with a camera cut (eye adaptation snaps, no inherited exposure) and warms up on its own; `--show-ui` (screenshot with the viewport's Slate UI: overlay, menus, key hints); `--hide-tags T,...` (e.g. `RbDB_Ceiling` for the V10 plan view); the adapted **EV100 of every view** in the log (`RbCapture: EV100 <camera> <value>`, read back from the eye adaptation through a scene-view extension, the rig's formula) and echoed by `rbue.py`; a named camera that does not exist **fails** the run (no silent player-view fallback); `--exe` renders through a packaged build | `Dev/RbHeadlessCaptureSubsystem.*`, `rbue.py capture` |
+| Frame-time log (M2-A9) | `-RBPerf` recorder: after the warm-up it runs `-RBPerfExec` (e.g. `rb.Match.Break 9`), records N frames of frame / game / render / RHI thread (`stat unit` values) and GPU time, writes a JSON report (mean / median / p95 / p99 / min / max, hitch counts, raw samples); `rbue.py perf` adds the host block (GPU utilisation **before** the run, see below), prints the verdict against the M2-A9 targets (GPU mean 10.3 / p95 11.1 ms, game thread 6 ms, frame p95 16.7 ms floor) and fails with `--gate` only | `rbue.py perf`, `Docs/perf/m2/` |
+| Packaging (M2-A10) | `rbue.py package [--label M2]`: game target through UBT first (`-WaitMutex`; BuildCookRun's own build step fails at once with `ConflictingInstance` while another agent's UBT runs), then `BuildCookRun -cook -stage -pak -archive` into `<RB_BUILDS_DIR or ../RawBreak_Builds>/<label>/Windows/RawBreak.exe` next to the **main** checkout (never inside an agent worktree); fails on cook errors | `rbue.py package` |
+| Licence ledger (VDB-T7, M2-A3) | `rbue.py ledger [--check] [--merge] [--allow-ai]`: validates `Docs/licenses/asset-ledger.csv` and every fragment `Docs/licenses/ledger/M2-<x>.csv` (shared columns first and never renamed; sources and licences of venue-dive-bar 13.9; a source's only licence, e.g. polyhaven / ambientcg = CC0-1.0; NC / ND licences never; `ai_generated` y/n and none in M2; Meshy / Higgsfield rows need ai = y + the Steam disclosure; ISO date; sha256; trademark_check n/a / pending / cleared; no duplicate asset_id + source; fragments that disagree); `--merge` appends the unmerged fragment rows (architect only), `--check` fails while any is unmerged | `rbue.py ledger` |
+| Core tests | `rbue.py core [--slow] [--config Debug] [-- filters]`: CMake configure (VS 2022, Release by default) + build, then the test binary itself (the `TestMain.cpp` filters; every `[FAIL]` and failed check echoed, full output in `Saved/RbLogs/core-*.log`, its own "N test(s) run" count). The default run excludes the opt-in `_Slow_` tests (Docs/architecture.md 18: PERF / CPU-time gates / statistical sets, nightly in Release on an idle machine); `--slow` includes them | `rbue.py core` |
+| **Ownership check** | `rbue.py owners --package M2-<x> --branch <branch>`: every file the branch changed since its merge base with `main` must belong to the package (the 18.2 table encoded in `rbue.py` `OWNERS`; the most specific pattern wins, an exact path beats any glob); the shared-file blocks are checked by content: an edit inside the audio block of `DefaultEngine.ini` belongs to M2-C, inside the `ERbTablePart` enum / `ToString(ERbTablePart)` to M2-L, everything else in those files to M2-0. Without `--branch` it checks the working tree incl. uncommitted and untracked files (a package can run it before its commit); `--who <path>` names a path's owner. Anything reported is a request, never a silent edit | `rbue.py owners` |
+| Self-test | `rbue.py selftest`: the host helpers (capture names, perf verdict + report layout, ledger incl. 13 negative cases, 40 ownership cases, no tie between two packages over every tracked file, the three shared-file blocks) | `rbue.py selftest` |
+| Contract tests | `RawBreak.Unit.Contracts.*` (7): collision channels / profiles (incl. the Pawn ignoring both new channels), physical surfaces, render config (Substrate, virtual textures, auto-exposure range, no static lighting, 1 cm near plane, `RawBreakAudioDsp` loaded), UI DPI rule, venues / maps / capture tags / shared tags, packaging (no listed map that does not exist; the test room listed; a generated playable map that is not listed yet is a test warning, see the runbook). `RawBreak.Unit.Pipeline.*` (3): capture lists, output names, perf statistics | `Tests/RbContractTests.cpp` |
+| Level smoke | `RawBreak.Functional.LevelSmoke.<Map>`: one PIE test per playable level that exists (the title + every `ERbVenue` map): a venue starts `ARbGameMode` from its World Settings, the player possesses an `ARbPlayerCharacter`, the tables validate (unique `TableIndex`), the match runs on `GetPlayerTable()` with ball set and cue, and once sessions exist (M2-E) the player's session plays the player's table with the match director; the title starts `ARbTitleGameMode`. A package's new level is covered at its merge without touching the test | `RawBreakEditor/Private/Tests/RbPieSmokeTest.cpp` |
+| Pipeline proof level | a canopy tagged `RbDB_Ceiling` over the shapes and a top camera `ProofCamTop` (proves `--hide-tags` and multi-view on engine content only) | `rb_pipeline_proof.py` |
+
+**Results on `m20` (2026-09-29)**
+
+| Check | Result |
+|---|---|
+| Build (M2-A1) | editor and game target 0 errors, 0 warnings from project code. Found on the way: `RbContractTests.cpp` and `RbSettingsTests.cpp` both had an anonymous-namespace `CVarInt`, which only collides once both files are committed and land in the same unity file (adaptive unity builds exclude the files being edited, so a package's own build stays green): project test helpers go into a namespace named after their file |
+| UE tests (M2-A3) | **174 / 174** green: M1's 163 + `Contracts.*` 7 + `Pipeline.*` 3 + `LevelSmoke.L_M1_TestRoom` (the other two levels join when M2-A / M2-D generate them) |
+| Core (M2-A3) | `rbue.py core` (Release, default run without the opt-in `_Slow_` tests): **904 / 904** green, 114 s. For information: with `--slow` (937 tests) 13 of the 33 `_Slow_` tests fail on this shared machine: the wall-clock budgets (PERF-02 / 03 / 05, A-PERF-1, A-CUSH-2, A-E2E-18, HF-B02) under ~90 % CPU load from the other agents, and the statistical / validation sets BB-09, BRK-02, POCK-01..03, SYS-01..04, HF-B12 (not load-dependent; the M1 figure "904 green" is this default run; to be looked at by the core's owner); BilliardsCore is untouched by M2 (no diff since the plan commit), so this is the nightly `_Slow_` state of the core, a note for the core's owner, not an M2 regression |
+| Regeneration (M2-A2) | `rb_make_all.py` ran the 13 generators of the M2 order (the package scripts still stubs on this branch) twice: validator OK for `L_M1_TestRoom`, second run "A2: asset metrics identical"; `rbbl.py all` runs `db_build_all.py` (every M2 generator skipped as not present yet) |
+| Captures | `Docs/images/dev/m20/`: `proof_{ProofCam,ProofCamTop}.png` and `proof_hidden_*` (the canopy hidden by `--hide-tags RbDB_Ceiling`: its shadow gone, the top view sees the shapes); `multiview_RbCam_{Overhead,BallCloseUp,RoomOverview,ChinOnCue}.png` (four look-dev views of the test room in one process, 35.5 s; EV100 8.42 / 8.52 / 7.63 / 8.43); `show_ui_overlay.png` (player view with the info overlay through `--show-ui`); `packaged_RbCam_{RoomOverview,ChinOnCue}.png` from the cooked build (`--exe`), identical in look to the editor frames (EV100 7.63 / 8.43 in both). Negative: `--camera NoSuchCam` -> `RbCapture: FAILED no CameraActor ...`, exit 1 |
+| Packaging (M2-A10 tooling) | `rbue.py package --label M2-0` -> cooked Development build, BUILD SUCCESSFUL (544 assets in the registry), starts headless and renders the same frame as the editor |
+| Perf log (M2-A9 tooling) | test room, 2560x1440, High, `r.ScreenPercentage 66.67`, `rb.Match.Break 9`, 600 frames: editor `-game` GPU mean 21.3 / p95 22.4 ms, game thread mean 1.50 / max 3.23 ms; packaged GPU mean 23.8 / p95 24.9 ms, game thread mean 1.09 / max 3.38 ms (`Docs/perf/m2/m20_testroom_1440p_{editor,packaged}.json`). **Not a baseline**: this machine's GPU sits at 46-70 % utilisation even without any Unreal process of this package (measured 2026-09-29 16:1x-16:3x: the owner's desktop apps - animated wallpaper, screen recorder, an Android emulator - and the other agents' editors), so these GPU times are upper bounds. `rbue.py perf` now samples the GPU utilisation before the run into the report (`host.gpu_busy_before_percent`) and warns above 10 %; **the M2-A9 log is taken on an idle GPU** (those apps closed, no other agent rendering). The same editor recording repeated later with the new host block (`m20_testroom_1440p_editor_gpubusy.json`: GPU 46 % busy before the start, other agents rendering) shows what contention does: median GPU 23.8 ms as before, but p95 112 ms and 200-450 ms frames in the first half second |
+| Ledger | merged ledger empty and valid, `rbue.py ledger --check` clean on `m20` |
+| Ownership of the running packages | `rbue.py owners` on the current package branches (`m2a`, `m2b`, `m2c`, `m2d`, `m2e`, `m2f`, `m2l`, work in progress): every branch touches only its own files |
+
+**Integration runbook (the architect, after the reviewers; merge order of 18.2: M2-E, M2-F, M2-D, M2-C, M2-L, M2-A, M2-B)**
+
+Per package, on `integ/m2` (= `main` + `m20` first):
+
+1. `python Tools/unreal/rbue.py owners --package M2-<x> --branch <reviewed branch>` must be OK; a reported file is either moved to
+   its owner as a request or accepted by the architect, never merged silently.
+2. `git merge --no-ff <reviewed branch>`; apply the package's requests to M2-0 / other packages' files (18.2 "a new generator is a
+   request": `rb_make_all.py` / `db_build_all.py` lists, `DefaultGame.ini`, `RbSettingsTypes.h` defaults, ...).
+3. `rbue.py build` and `rbue.py build --target RawBreak` (0 / 0), `rbue.py test --filter RawBreak.` (all green), `rbue.py ledger`
+   (fragments valid; `--merge` once the package is in), `rbue.py selftest`.
+4. Package-specific switches at its merge: **M2-E** - LevelSmoke then requires a player session in every venue (the check is
+   already conditional on registered sessions; M2-E makes them exist); **M2-D** - `GameDefaultMap` -> `L_Title` and `L_Title` into
+   `MapsToCook` (until the generated map is listed, `Contracts.Packaging` raises a test warning - printed by `rbue.py test` - and `rbue.py package` refuses to cook; the package's own branch stays green because only the architect edits `DefaultGame.ini`); **M2-A** - `L_DiveBar` (+ its sublevels)
+   into `MapsToCook`, LevelSmoke gains `L_DiveBar` by itself; **M2-C** - the audio functional tests with `rbue.py test --sound`.
+
+After the last merge (18.10): `python Tools/blender/rbbl.py all -- --strict`; delete `Content/Generated`; `rbue.py py
+Tools/unreal/editor/rb_make_all.py -- --strict` twice (the second with `--compare`); all tests + `rbue.py core`; `rbue.py ledger
+--merge` then `--check`; the captures of M2-A5 (`capture_table.py`, `capture_divebar.py --set m2`, strict, inspected); `rbue.py
+package --label M2`; `rbue.py perf --exe <RawBreak_Builds>/M2/Windows/RawBreak.exe --map "/Game/Generated/Maps/L_DiveBar?Mode=Practice"
+--perf-exec "rb.Match.Break 9" --out Docs/perf/m2/divebar_1440p.json` on an idle GPU; the owner's playtest (M2-A10).
+
+**Requests / notes for the packages (found by M2-0's tools on their work-in-progress branches)**
+
+* M2-A: the ledger fragment row of `SM_DB_AxisTest` has no `date` (ISO date required, venue-dive-bar 13.9; `rbue.py ledger` fails
+  on it at the merge).
+* M2-B exports to `Art/DiveBar/Export/Props/<Asset>/` and `Export/Decals/`, M2-A's importer scans `Export/**/<Asset>/<Asset>.json`
+  (nested folders): compatible; the ownership table gives `Export/{AxisTest,Arch,Neon}` to M2-A and everything else below `Export/`
+  to M2-B.
+* Every package: helpers of test files in a namespace named after the file (never an anonymous-namespace name that another test
+  file may also use; unity builds).
