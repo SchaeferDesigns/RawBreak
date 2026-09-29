@@ -580,10 +580,41 @@ RB_TEST(Integ_ARCH_AI9_NoAllocationInTheHotLoop)
 	rules::MatchState LagState;
 	rules::StartMatch(C, LagState);
 	const ai::PlannerInput L = aitest::MakeInput(T, NineFootParams(), C, LagState, 1, Me, ai::OpponentModelFor(human::AiProfileId::TouringPro), aitest::KeyFor(1, 0, 0, Me));
+	// WP-12 review: the 14.1 opening (safety) break and ball in hand behind the head string (8-ball) take their own paths.
+	const rules::MatchConfig C14 = aitest::MakeMatch(rules::Discipline::StraightPool, T, 49);
+	rules::MatchState Opening = aitest::StartMatchState(C14, 0);
+	rules::RackAssignment Rack;
+	rules::SetupRack(C14, Opening, Rack);
+	const ai::PlannerInput O = aitest::MakeInput(T, NineFootParams(), C14, Opening, 0, Me, ai::OpponentModelFor(human::AiProfileId::TouringPro), aitest::KeyFor(1, 1, 3, Me));
+	const rules::MatchConfig C8 = aitest::MakeMatch(rules::Discipline::EightBall, T, 49);
+	rules::MatchState Kitchen = aitest::ScenarioState(C8, 0, {{1, {C8.Table.HeadStringX - 0.3, 0.3}}, {3, {0.7, 0.4}}, {8, {0.9, -0.2}}, {9, {0.2, 0.1}}}, {}, true,
+		rules::CueBallNext::InHandAboveHeadString);
+	Kitchen.Game.TableOpen = false;
+	Kitchen.Game.Players[0].Group = rules::BallGroup::Solids;
+	Kitchen.Game.Players[1].Group = rules::BallGroup::Stripes;
+	const ai::PlannerInput K = aitest::MakeInput(T, NineFootParams(), C8, Kitchen, 0, Me, ai::OpponentModelFor(human::AiProfileId::TouringPro), aitest::KeyFor(1, 1, 4, Me));
+	// WP-12 review: the spot request (14.1, every ball behind the head string) and an option (the 14.1 breaking-foul options after
+	// a soft opening break played by the referee before the count is armed).
+	const rules::MatchState Spot = aitest::ScenarioState(C14, 0, {{5, {C14.Table.HeadStringX - 0.25, 0.3}}, {11, {C14.Table.HeadStringX - 0.5, -0.35}}}, {}, true,
+		rules::CueBallNext::InHandAboveHeadString);
+	const ai::PlannerInput P = aitest::MakeInput(T, NineFootParams(), C14, Spot, 0, Me, ai::OpponentModelFor(human::AiProfileId::TouringPro), aitest::KeyFor(1, 1, 5, Me));
+	rules::MatchState Foul = Opening;
+	{
+		static aitest::Referee Ref;
+		aitest::Player Breaker = aitest::MakePlayer(human::AiProfileId::Tourist, 2, 49);
+		Breaker.Human.NoiseScale = 0.0;
+		const human::NoiseKey BreakKey = aitest::KeyFor(1, 1, 6, Breaker);
+		ai::PlannedDecision Soft = ai::PlanShot(
+			aitest::MakeInput(T, NineFootParams(), C14, Foul, 0, Breaker, ai::OpponentModelFor(human::AiProfileId::Tourist), BreakKey), ai::PlannerConfig{}, Planner);
+		Soft.Stroke.Speed = 0.9;
+		aitest::ExecuteDecision(Ref, Soft, Breaker, T, NineFootParams(), C14, Foul, BreakKey);
+	}
+	RB_REQUIRE(Foul.Phase == rules::MatchPhase::AwaitDecision && Foul.Decider == 1);
+	const ai::PlannerInput D = aitest::MakeInput(T, NineFootParams(), C14, Foul, 1, Me, ai::OpponentModelFor(human::AiProfileId::TouringPro), aitest::KeyFor(1, 1, 7, Me));
 	ai::PlanShot(A, Config, Planner); // warm-up (nothing should be left to reserve)
 	_CRT_ALLOC_HOOK Previous = _CrtSetAllocHook(CountingHook);
 	GAllocations = 0;
-	for (const ai::PlannerInput* In : {&A, &B, &L})
+	for (const ai::PlannerInput* In : {&A, &B, &L, &O, &K, &P, &D})
 	{
 		GArmed = true;
 		Planner.Begin(*In, Config);
@@ -596,10 +627,12 @@ RB_TEST(Integ_ARCH_AI9_NoAllocationInTheHotLoop)
 			Planner.Advance();
 		}
 		GArmed = false;
-		RB_CHECK(Planner.Decision().Kind == ai::DecisionKind::Stroke);
+		const ai::DecisionKind Want = In == &P ? ai::DecisionKind::RequestSpot : (In == &D ? ai::DecisionKind::Option : ai::DecisionKind::Stroke);
+		RB_CHECK(Planner.Decision().Error == ErrorCode::Ok && Planner.Decision().Kind == Want);
 	}
 	_CrtSetAllocHook(Previous);
-	std::printf("  A-AI-9 heap allocations during three warm decisions (touring pro: a shot, ball in hand, the lag): %ld (0)\n", GAllocations);
+	std::printf("  A-AI-9 heap allocations during seven warm decisions (touring pro: a shot, ball in hand, the lag, the 14.1 opening break, ball in "
+				"hand behind the head string, a spot request, an option): %ld (0)\n", GAllocations);
 	RB_CHECK(GAllocations == 0);
 #else
 	std::printf("  A-AI-9 needs the Debug CRT allocation hook: skipped in this build\n");

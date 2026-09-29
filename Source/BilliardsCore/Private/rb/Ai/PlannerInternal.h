@@ -28,6 +28,11 @@ namespace rb::ai
 	inline constexpr double kAimTolerance = 1.75e-4;   // [rad] (0.01 deg) aim correction stops below this direction error
 	inline constexpr double kMinElevation = 2.5 * kDegToRad; // planned elevation of an ordinary stroke
 	inline constexpr double kMaxElevation = 40.0 * kDegToRad; // candidates that need more (a jump / masse) are dropped
+	// Score penalty per unit foul chance (TUNING): the static evaluator values the opponent's ball in hand like an easy shot in
+	// position (its make chance saturates for good players), so a deliberate foul would tie with a legal leave; a player does
+	// not give away ball in hand for nothing. Larger than the league player's choice tolerance; the same for every candidate
+	// when all of them foul (hooked), so it only breaks ties between fouls and legal shots.
+	inline constexpr double kPlannedFoulPenalty = 0.05;
 
 	enum class StageKind : std::uint8_t
 	{
@@ -79,6 +84,7 @@ namespace rb::ai
 		bool Foul = false;        // noise-free rollout fouled
 		bool Kept = false;        // noise-free rollout: the AI keeps the table
 		bool Noisy = false;       // has noisy samples
+		bool Screened = false;    // its screening job ran (FinishNow may end a stage whose jobs did not all run)
 	};
 
 	struct SampleResult
@@ -87,7 +93,7 @@ namespace rb::ai
 		bool Potted = false;
 		bool Foul = false;
 		bool Kept = false;
-		bool Valid = false;
+		bool Valid = false;       // written by this decision's noisy job (reset when the noisy stage is queued)
 	};
 
 	struct Job
@@ -132,6 +138,7 @@ namespace rb::ai
 		std::vector<CandidateResult> Results;   // reserved kMaxCandidates
 		std::vector<SampleResult> SampleTable;  // kMaxNoisyCandidates x kMaxSamples
 		std::vector<int> NoisyRows;             // candidate of each noisy row
+		int NoisyReduced = 0;                   // noisy rows that got samples (reduced); > 0: only they may be chosen
 		std::vector<Job> Jobs;                  // reserved kMaxCandidates
 		Origin Origins[kMaxOrigins];
 		int OriginCount = 0;

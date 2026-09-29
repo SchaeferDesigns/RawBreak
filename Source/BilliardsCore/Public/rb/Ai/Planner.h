@@ -7,7 +7,8 @@
 // samples of the AI's own hand and human layer, rollout keys) -> second ply for the strongest profiles -> choice.
 // Every rollout's end state is judged by rules::EvaluateShot / ApplyShot and valued with the static evaluator of
 // rb/Ai/PositionEval.h (the AI's probability to win the rack). The match start is covered as well: MatchPhase::Lag -> a lag
-// stroke from the AI's lag position; LagWinnerChooses -> the breaker; AwaitDecision -> an option.
+// stroke from the AI's lag position; LagWinnerChooses -> the breaker; AwaitDecision -> an option; the rules' spot request
+// (4.4: in hand behind the head string with every legal ball behind it) -> RequestSpot, after which the game asks again.
 //
 // The planner decides WHAT to play. The game executes it like the player's stroke (human-factors principle 4):
 //   human::SyntheticHand(Decision.Stroke, Character, Decision.Situation, R, match key, history) -> human::ExecuteStroke ->
@@ -23,8 +24,10 @@
 //   }
 //   const PlannedDecision& D = Scratch.Decision();
 // Concurrent RunJob calls with DISTINCT job indices are safe (each job writes only its own result slot and reads only the
-// stage's frozen data); Begin / Advance / Decision must not overlap with RunJob. The decision is bitwise identical for any
-// thread count and job order (A-AI-1). PlanShot runs the protocol on the calling thread.
+// stage's frozen data); Begin / Advance / FinishNow / Progress / Decision must not overlap with RunJob. The decision is bitwise
+// identical for any thread count and job order (A-AI-1). PlanShot runs the protocol on the calling thread. Begin runs the
+// serial generation (and the whole lag search of MatchPhase::Lag) on the calling thread, Advance the second ply's few end-state
+// rollouts: cheap, but better on a worker thread than on the game thread.
 // Budget: deterministic (a simulation count, PlannerProfile::SimulationBudget), never wall time.
 // Memory: every buffer is reserved in the constructors; nothing is allocated per candidate or per rollout (A-AI-9).
 // Owner: WP-12 (AI opponent). Part of rb::ai.
@@ -80,6 +83,9 @@ namespace rb::ai
 		Stroke,        // play Stroke with Declaration (and the placement; the lag: from CueBallPlacement)
 		Option,        // pick Choice among State.PendingOutcome.Options
 		ChooseBreaker, // the lag winner chooses the first breaker (rules::ChooseBreaker(Config, State, Breaker))
+		RequestSpot,   // the cue ball in hand behind the head string and every legal ball behind it too (rules 4.4,
+		               //   ShotConstraints::MayRequestSpot): call rules::RequestSpot(Config, State) (it spots TargetBall), then
+		               //   plan again on the new state; a direct shot would be a sure foul (3.11), a kick a poor try
 	};
 
 	struct PlannerInput
@@ -109,6 +115,7 @@ namespace rb::ai
 
 	struct PlannerConfig
 	{
+		// Breadth and Samples must lie in [0, 1000] (NaN or out of range: Begin returns InvalidArgument); the buffers cap the effect.
 		double Breadth = 1.0;       // scales the profile's families, placements and safety targets (each stays >= 1)
 		double Samples = 1.0;       // scales NoisySamples and NoisyCandidates (each stays >= 1 when the profile has them)
 		int SimulationBudget = 0;   // > 0 overrides PlannerProfile::SimulationBudget
@@ -122,7 +129,7 @@ namespace rb::ai
 		BallId FirstBall = kNoBall;      // intended first object ball
 		BallId PotBall = kNoBall;        // intended pocketed ball (kNoBall: safety / kick / push-out / break)
 		PocketId Pocket = PocketId::None;
-		double Score = 0.0;              // estimated P(win the rack) [0, 1] (+ the profile's safety bias)
+		double Score = 0.0;              // estimated P(win the rack) [0, 1] (+ the profile's safety bias, - 0.05 x FoulChance)
 		double PotChance = 0.0;          // noisy samples: share of rollouts that pocketed PotBall; else the perceived chance
 		double FoulChance = 0.0;         // noisy samples: share of rollouts that fouled; else the noise-free rollout's foul (0 / 1)
 		double Speed = 0.0;              // planned tip speed [m/s]
@@ -161,7 +168,7 @@ namespace rb::ai
 		rules::Option Choice = rules::Option::AcceptTable; // Kind == Option
 		int Breaker = -1;                            // Kind == ChooseBreaker: the rules player who breaks
 		ShotType Type = ShotType::Pot;
-		BallId TargetBall = kNoBall;                 // first object ball
+		BallId TargetBall = kNoBall;                 // first object ball (RequestSpot: the ball the rules spot)
 		BallId PotBall = kNoBall;                    // intended pocketed ball
 		PocketId Pocket = PocketId::None;
 		double ExpectedValue = 0.0;                  // estimated P(the AI wins the rack) after this decision (the lag: P(win the lag))
@@ -224,8 +231,8 @@ namespace rb::ai
 		PlannerScratch(const PlannerScratch&) = delete;
 		PlannerScratch& operator=(const PlannerScratch&) = delete;
 
-		// Starts a decision (serial generation stage). On an input error or when nothing needs a simulation (an option decision)
-		// the planner is Finished at once. Returns the decision's error code.
+		// Starts a decision (serial generation stage). On an input error or when nothing needs a simulation (an option, the
+		// breaker, a spot request) the planner is Finished at once. Returns the decision's error code.
 		RB_API ErrorCode Begin(const PlannerInput& Input, const PlannerConfig& Config);
 
 		// Jobs of the current stage (0 when Finished).
@@ -238,9 +245,12 @@ namespace rb::ai
 		// while the planner is not Finished.
 		RB_API bool Advance();
 
-		// Instead of Advance: reduces the finished stage and decides with what is known so far (no further stages). For a caller
-		// that runs out of wall time (the Unreal task graph under load). Deterministic for the stage it is called after; a
-		// wall-clock trigger makes the decision depend on the machine, so the default protocol never uses it.
+		// Instead of Advance: reduces the current stage with the jobs that ran and decides with what is known so far (no further
+		// stages). For a caller that runs out of wall time (the Unreal task graph under load): stop handing out jobs, wait for the
+		// running ones (never concurrently with RunJob), then FinishNow. Jobs that did not run are ignored: a candidate without its
+		// screening is never chosen, a noisy row counts only the samples this decision wrote; before any screening job ran it
+		// plays the first generated candidate at its geometric aim. Deterministic for the set of jobs that ran; a wall-clock
+		// trigger makes that set depend on the machine, so the default protocol never uses it.
 		RB_API void FinishNow();
 
 		RB_API bool Finished() const;
@@ -254,8 +264,8 @@ namespace rb::ai
 		PlannerState* Internal() const { return State; }
 
 		// Progress for the UI (between Advance calls, never concurrently with RunJob): the stage that runs next and the best
-		// shot known so far (false before the screening stage is reduced). The avatar can look at it while the AI "studies
-		// the table"; the final decision may differ.
+		// shot known so far (false until screening jobs ran; during the noisy stage the screening's best). The avatar can look
+		// at it while the AI "studies the table"; the final decision may differ.
 		RB_API PlannerProgress Progress() const;
 
 	private:
@@ -267,7 +277,8 @@ namespace rb::ai
 	RB_API PlannedDecision PlanShot(const PlannerInput& Input, const PlannerConfig& Config, PlannerScratch& Scratch);
 
 	// A one-line English summary of the decision for logs and the debug overlay (the UI builds its own localised text from
-	// PlanReasoning). Writes at most Size - 1 characters and a terminating zero; returns the characters written.
+	// PlanReasoning). Writes at most Size - 1 characters and a terminating zero; returns the characters written. Independent of
+	// the C locale (the decimal point is always '.'); no allocation.
 	RB_API int FormatReasoning(const PlannedDecision& Decision, char* Buffer, int Size);
 
 	// Name of a shot type ("pot", "bank", ...).

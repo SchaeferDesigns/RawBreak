@@ -24,6 +24,7 @@ namespace rb::ai
 		constexpr double kBankEndMargin = 0.08;           // [m] the bounce point stays this far from the segment's ends
 		constexpr double kMinPlanSpeed = 0.5;             // [m/s]
 		constexpr double kMaxPlanSpeed = 7.5;             // [m/s]
+		constexpr double kMaxBreakSpeed = 10.0;           // [m/s] the break (PlannerProfile::BreakSpeed up to 9.5; the hand clamps at 12)
 		constexpr double kArrivalSpeed = 0.25;            // [m/s] the object ball should still have this at the pocket
 		constexpr double kArrivalExtra = 0.15;            // [m] ... after this much more travel
 		constexpr double kTipToRollingSpeed = 0.94;       // rolling cue-ball speed / tip speed for a centre hit (5/7 of 1.32)
@@ -31,6 +32,9 @@ namespace rb::ai
 		constexpr double kCueReach = 1.2;                 // [m] balls farther behind the cue ball do not lift the cue
 		constexpr double kRailBridgeDistance = 0.16;      // [m] cushion behind the cue ball closer than this: rail bridge
 		constexpr double kPlacementSpacing = 0.03;        // [m] ball-in-hand placements closer than this are duplicates
+		constexpr double kPlacementDistances[3] = {0.2, 0.35, 0.6}; // [m] ball in hand: behind the ghost ball ...
+		constexpr double kRegionDepths[3] = {0.02, 0.15, 0.35};     // [m] ... or this far inside a kitchen / baulk that starts farther back
+		constexpr double kInHandSafetyChance = 0.5;       // ball in hand: below this best placement score safeties / kicks are tried too
 		constexpr double kMaxFallbackElevation = 70.0 * kDegToRad; // the last-resort stroke may jack the cue up this far
 		constexpr double kCaromWindowScale = 0.6;         // kisses and caroms: the stun tangent line is only the plan
 		constexpr double kCosMinCaromCut = 0.90630778703664994; // cos 25 deg: fuller glancing contacts deflect too little ...
@@ -50,6 +54,8 @@ namespace rb::ai
 
 		// Cue-axis offsets / R by SpinVariants (1..7): centre, follow, draw, stun, right, left, draw-right.
 		constexpr Spin kSpinLadder[7] = {{0.0, 0.0}, {0.0, 0.45}, {0.0, -0.5}, {0.0, -0.2}, {0.3, 0.0}, {-0.3, 0.0}, {0.25, -0.35}};
+
+		constexpr int kEightBallId = 8;
 
 		constexpr std::uint32_t Bit(int Ball) { return 1u << Ball; }
 		bool HasBit(std::uint32_t Mask, int Ball) { return ((Mask >> Ball) & 1u) != 0u; }
@@ -94,7 +100,10 @@ namespace rb::ai
 			bool SecondPly = false;
 			rules::ShotConstraints Constraints;
 			std::uint32_t Legal = 0;
+			std::uint32_t Direct = 0;       // legal balls the cue ball may hit first on a straight line (in hand above the head string:
+			                                //   none above it, rules 3.11; only a kick that crosses the string may reach those)
 			std::uint32_t Useful = 0;       // balls whose pot keeps the table (combinations)
+			PocketId EightPocket = PocketId::None; // 8-ball last-pocket rule: the only pocket the 8 wins in (None: any)
 			bool InHand = false;
 			double Rc = kDefaultBallRadius; // cue-ball radius
 			double RollDecel = 0.1;         // mu_r g [m/s^2]
@@ -206,16 +215,23 @@ namespace rb::ai
 			return Out;
 		}
 
-		// The ball whose pot wins the rack (9 / 10 / 8).
-		bool IsGameBall(const rules::GameState& G, int Ball)
+		// The ball whose pot wins the rack (9 / 10 / 8); in 14.1 every called ball once the shooter needs one point for the match
+		// (rules R 7.4: the score reaches TargetPoints). A noise-free win by such a pot is planned, not luck (ScreenScore), and the
+		// shot carries the game-ball pressure.
+		bool IsGameBall(const Scene& S, int Ball)
 		{
+			const rules::GameState& G = S.From->State.Game;
 			switch (G.Game)
 			{
 			case rules::Discipline::NineBall: return Ball == 9;
 			case rules::Discipline::TenBall: return Ball == 10;
 			case rules::Discipline::EightBall:
 			case rules::Discipline::Blackball: return Ball == 8;
-			case rules::Discipline::StraightPool: break;
+			case rules::Discipline::StraightPool:
+			{
+				const int Shooter = G.Shooter < 0 || G.Shooter > 1 ? 0 : G.Shooter;
+				return S.Ctx->Input.Match.Rules.TargetPoints - G.Players[Shooter].Score <= 1;
+			}
 			}
 			return false;
 		}
@@ -314,7 +330,7 @@ namespace rb::ai
 			C.Plan.Elevation = Elevation;
 			C.Plan.AxisOffsetA = Sp.A;
 			C.Plan.AxisOffsetB = Sp.B;
-			C.Plan.Speed = Clamp(Speed, kMinPlanSpeed, kMaxPlanSpeed);
+			C.Plan.Speed = Clamp(Speed, kMinPlanSpeed, Type == ShotType::Break ? kMaxBreakSpeed : kMaxPlanSpeed);
 			C.Plan.Bridge = C.Situation.Bridge;
 			if (!MakeDeclaration(S, Type, First, Pot, Pocket, Place, Cue, C.Declaration))
 			{
@@ -355,7 +371,6 @@ namespace rb::ai
 			const PlanContext& X = *S.Ctx;
 			const TableGeometry& T = *X.Input.Table;
 			const BallLayout& L = S.From->Layout;
-			const rules::GameState& G = S.From->State.Game;
 			const double Sigma = X.Profile.PerceivedAimSigma;
 			const Vec2 O = L.Position[t];
 			const double Rt = L.Radius[t];
@@ -448,7 +463,7 @@ namespace rb::ai
 					const double KissSpeed = ArriveSpeed(Travel, S.RollDecel) / Max(SinA, 0.3);
 					const double FirstSpeed = RollStartSpeed(KissSpeed, Gap, S.RollDecel);
 					F.MinSpeed = TipSpeedFor(RollStartSpeed(BeforeCollision(FirstSpeed, First.Cut, S.Restitution), First.CueDistance, S.RollDecel));
-					F.GameBall = IsGameBall(G, t);
+					F.GameBall = IsGameBall(S, t);
 					Push(F);
 				}
 			}
@@ -462,7 +477,6 @@ namespace rb::ai
 			const PlanContext& X = *S.Ctx;
 			const TableGeometry& T = *X.Input.Table;
 			const BallLayout& L = S.From->Layout;
-			const rules::GameState& G = S.From->State.Game;
 			const double Sigma = X.Profile.PerceivedAimSigma;
 			const Vec2 O = L.Position[t];
 			const double SumT = S.Rc + L.Radius[t];
@@ -525,7 +539,7 @@ namespace rb::ai
 					const double CueAtU = BeforeCollision(ArriveSpeed(ObjectDistance, S.RollDecel), Acos(Clamp(CosCut2, -1.0, 1.0)), S.Restitution);
 					const double CueBeforeT = RollStartSpeed(CueAtU, D1, S.RollDecel) / Max(SinA, 0.3);
 					F.MinSpeed = TipSpeedFor(RollStartSpeed(CueBeforeT, D0, S.RollDecel));
-					F.GameBall = IsGameBall(G, u);
+					F.GameBall = IsGameBall(S, u);
 					Push(F);
 				}
 			}
@@ -538,15 +552,14 @@ namespace rb::ai
 			const PlannerProfile& P = X.Profile;
 			const TableGeometry& T = *X.Input.Table;
 			const BallLayout& L = S.From->Layout;
-			const rules::GameState& G = S.From->State.Game;
 			const double Sigma = P.PerceivedAimSigma;
 			int Count = 0;
 			// When the buffer is full, a better family replaces the worst one (the last of the lowest chance): the best Capacity
 			// families survive whatever the generation order.
 			const auto Push = [&](const Family& F) {
-				if (!(F.Chance > 0.0))
+				if (!(F.Chance > 0.0) || (F.Pot == kEightBallId && S.EightPocket != PocketId::None && F.Pocket != S.EightPocket))
 				{
-					return;
+					return; // no way in, or the 8 in a pocket the last-pocket rule makes a loss
 				}
 				if (Count < Capacity)
 				{
@@ -565,7 +578,7 @@ namespace rb::ai
 			};
 			for (int t = 1; t < rules::kRulesBallCount; ++t)
 			{
-				if (!HasBit(S.Legal, t) || !HasBit(L.OnTable, t))
+				if (!HasBit(S.Direct, t) || !HasBit(L.OnTable, t))
 				{
 					continue;
 				}
@@ -590,7 +603,7 @@ namespace rb::ai
 							F.Chance = PotChance(Shot, Aim.HalfWindow, S.Rc + Rt, Sigma);
 							const double ObjectSpeed = ArriveSpeed(Shot.ObjectDistance, S.RollDecel);
 							F.MinSpeed = TipSpeedFor(RollStartSpeed(BeforeCollision(ObjectSpeed, Shot.Cut, S.Restitution), Shot.CueDistance, S.RollDecel));
-							F.GameBall = IsGameBall(G, t);
+							F.GameBall = IsGameBall(S, t);
 							Push(F);
 						}
 					}
@@ -651,7 +664,7 @@ namespace rb::ai
 							F.Chance = PotChance(Shot, BankAim.HalfWindow, S.Rc + Rt, Sigma, kBankWindowScale);
 							const double ObjectSpeed = kBankSpeedFactor * ArriveSpeed(Travel, S.RollDecel);
 							F.MinSpeed = TipSpeedFor(RollStartSpeed(BeforeCollision(ObjectSpeed, Shot.Cut, S.Restitution), Shot.CueDistance, S.RollDecel));
-							F.GameBall = IsGameBall(G, t);
+							F.GameBall = IsGameBall(S, t);
 							Push(F);
 						}
 					}
@@ -697,7 +710,7 @@ namespace rb::ai
 							const double SecondSpeed = ArriveSpeed(Second.ObjectDistance, S.RollDecel);
 							const double FirstSpeed = RollStartSpeed(BeforeCollision(SecondSpeed, Second.Cut, S.Restitution), Second.CueDistance, S.RollDecel);
 							F.MinSpeed = TipSpeedFor(RollStartSpeed(BeforeCollision(FirstSpeed, First.Cut, S.Restitution), First.CueDistance, S.RollDecel));
-							F.GameBall = IsGameBall(G, u);
+							F.GameBall = IsGameBall(S, u);
 							Push(F);
 						}
 					}
@@ -746,14 +759,14 @@ namespace rb::ai
 			}
 		}
 
-		// Legal balls by distance from Cue (ties by id), at most Max.
-		int LegalByDistance(const Scene& S, const Vec2& Cue, int* Out, int Capacity)
+		// The balls of Mask on the table by distance from Cue (ties by id), at most Capacity.
+		int BallsByDistance(const Scene& S, std::uint32_t Mask, const Vec2& Cue, int* Out, int Capacity)
 		{
 			const BallLayout& L = S.From->Layout;
 			int Count = 0;
 			for (int b = 1; b < rules::kRulesBallCount; ++b)
 			{
-				if (!HasBit(S.Legal, b) || !HasBit(L.OnTable, b))
+				if (!HasBit(Mask, b) || !HasBit(L.OnTable, b))
 				{
 					continue;
 				}
@@ -774,8 +787,9 @@ namespace rb::ai
 			return Count;
 		}
 
-		// Safeties at the nearest Targets legal balls: full, half and thin on both sides, soft and firm, centre and draw. Basic (profiles
-		// without a safety game, when nothing can be potted): full and half hits, firm, centre ball ("just hit it").
+		// Safeties at the nearest Targets legal balls the cue ball can reach on a straight line (a ball hidden behind others is
+		// skipped, the next one taken): full, half and thin on both sides, soft and firm, centre and draw. Basic (profiles without a
+		// safety game, when nothing can be potted): full and half hits, firm, centre ball ("just hit it").
 		void SafetyCandidates(PlannerState& State, const Scene& S, const Vec2& Cue, bool Place, int Targets, bool Basic)
 		{
 			if (Targets <= 0)
@@ -783,10 +797,12 @@ namespace rb::ai
 				return;
 			}
 			int Balls[rules::kRulesBallCount] = {};
-			const int N = LegalByDistance(S, Cue, Balls, Targets < rules::kRulesBallCount ? Targets : rules::kRulesBallCount);
+			const int N = BallsByDistance(S, S.Direct, Cue, Balls, rules::kRulesBallCount);
 			const BallLayout& L = S.From->Layout;
-			for (int i = 0; i < N; ++i)
+			int Used = 0;
+			for (int i = 0; i < N && Used < Targets; ++i)
 			{
+				const int BeforeTarget = static_cast<int>(State.Candidates.size());
 				const int t = Balls[i];
 				const Vec2 O = L.Position[t];
 				const double Sum = S.Rc + L.Radius[t];
@@ -828,6 +844,7 @@ namespace rb::ai
 						}
 					}
 				}
+				Used += static_cast<int>(State.Candidates.size()) > BeforeTarget ? 1 : 0;
 			}
 		}
 
@@ -835,12 +852,16 @@ namespace rb::ai
 		{
 			const TableGeometry& T = *S.Ctx->Input.Table;
 			const BallLayout& L = S.From->Layout;
+			const rules::MatchConfig& MC = S.Ctx->Input.Match;
 			int Balls[2] = {};
-			const int N = LegalByDistance(S, Cue, Balls, 2);
+			const int N = BallsByDistance(S, S.Legal, Cue, Balls, 2); // a kick may reach a ball above the head string after crossing it
 			for (int i = 0; i < N; ++i)
 			{
 				const int t = Balls[i];
 				const Vec2 O = L.Position[t];
+				// From the kitchen a ball above the head string is legal only once the cue ball has crossed the string (rules 3.11):
+				// the bounce must lie beyond it.
+				const bool MustCross = Place && S.From->State.Game.CueBall == rules::CueBallNext::InHandAboveHeadString && !HasBit(S.Direct, t);
 				for (int k = 0; k < T.Noses.Size(); ++k)
 				{
 					const NoseSegment& Nose = T.Noses[k];
@@ -867,7 +888,8 @@ namespace rb::ai
 					}
 					const Vec2 Bounce = Cue + (Mirror - Cue) * Sg;
 					const double Along = Dot(Bounce - Nose.Start, Nose.Direction);
-					if (Along < kBankEndMargin || Along > Nose.Length - kBankEndMargin)
+					if (Along < kBankEndMargin || Along > Nose.Length - kBankEndMargin ||
+						(MustCross && !(Bounce.x > MC.Table.HeadStringX + MC.Rules.Tolerances.Line)))
 					{
 						continue;
 					}
@@ -897,6 +919,77 @@ namespace rb::ai
 				{
 					const double Speed = TipSpeedFor(RollStartSpeed(0.0, Roll, S.RollDecel));
 					Emit(State, S, ShotType::PushOut, kNoBall, kNoBall, PocketId::None, Cue, false, Azimuth, Speed, Spin{0.0, 0.0}, Cue, 1.0, 0.0, false);
+				}
+			}
+		}
+
+		// The 14.1 opening break (rules 7.3) of a player with a safety game: a safety break instead of a power break (which opens the
+		// rack for the other player). From the kitchen on the side of a back corner ball of the rack, a thin hit on the corner
+		// ball's outer side (0.6-0.8 of a ball off centre) at a soft speed (tip 1.8 / 2.4 m/s; a scan on the 9-ft table: these are
+		// legal and leave the other player a next-shot chance of 0.15-0.3, faster or fuller hits open the rack): the rack stays
+		// closed, the cue ball returns up table, and the rules' break requirement (two object balls and the cue ball to a rail,
+		// R 7.3) is judged by the rollouts.
+		void StraightPoolSafetyBreaks(PlannerState& State, const Scene& S, double X0)
+		{
+			const PlanContext& X = *S.Ctx;
+			const TableGeometry& T = *X.Input.Table;
+			const rules::GameState& G = S.From->State.Game;
+			const BallLayout& L = S.From->Layout;
+			const rules::RulesTable& RT = X.Input.Match.Table;
+			double BackX = -kInfinity;
+			for (int b = 1; b < rules::kRulesBallCount; ++b)
+			{
+				BackX = HasBit(L.OnTable, b) ? Max(BackX, L.Position[b].x) : BackX;
+			}
+			// The back row's two end balls (lowest and highest y within half a ball of the back row).
+			int Corner[2] = {kNoBall, kNoBall};
+			for (int b = 1; b < rules::kRulesBallCount; ++b)
+			{
+				if (!HasBit(L.OnTable, b) || L.Position[b].x < BackX - 0.5 * L.Radius[b])
+				{
+					continue;
+				}
+				Corner[0] = Corner[0] == kNoBall || L.Position[b].y < L.Position[Corner[0]].y ? b : Corner[0];
+				Corner[1] = Corner[1] == kNoBall || L.Position[b].y > L.Position[Corner[1]].y ? b : Corner[1];
+			}
+			for (int Side = 0; Side < 2; ++Side)
+			{
+				const int c = Corner[Side];
+				if (c == kNoBall || (Side == 1 && c == Corner[0]))
+				{
+					continue;
+				}
+				const double Sign = Side == 0 ? -1.0 : 1.0;
+				const Vec2 O = L.Position[c];
+				const double Sum = S.Rc + L.Radius[c];
+				for (const double Yf : {0.45, 0.6, 0.8})
+				{
+					const Vec2 Cue = S.InHand ? Vec2{X0, Sign * Yf * (T.HalfWidth - S.Rc)} : G.Balls[0].Position;
+					if (S.InHand && !rules::CueBallPlacementLegal(G, Cue, G.CueBall, RT, X.Input.Match.Rules.Tolerances))
+					{
+						continue;
+					}
+					const Vec2 Dir = Normalized(O - Cue);
+					Vec2 Outer = PerpCcw(Dir);
+					Outer = Outer.y * Sign < 0.0 ? -Outer : Outer; // the corner ball's side away from the rack
+					for (const double F : {0.8, 0.7, 0.6})
+					{
+						const Vec2 AimPoint = O + Outer * (F * Sum);
+						const Vec2 Contact = AimPoint - Dir * (Sqrt(Max(0.0, 1.0 - F * F)) * Sum);
+						if (!PathClear(L, Cue, Contact, S.Rc, Bit(0) | Bit(c)))
+						{
+							continue;
+						}
+						const Vec2 Aim = AimPoint - Cue;
+						for (const double Speed : {1.8, 2.4})
+						{
+							Emit(State, S, ShotType::Break, c, kNoBall, PocketId::None, Cue, S.InHand, Atan2(Aim.y, Aim.x), Speed, Spin{0.0, 0.0}, O, 1.0, 0.0, false);
+						}
+					}
+					if (!S.InHand)
+					{
+						break;
+					}
 				}
 			}
 		}
@@ -943,6 +1036,10 @@ namespace rb::ai
 					break;
 				}
 			}
+			if (G.Game == rules::Discipline::StraightPool && X.Profile.Safeties)
+			{
+				StraightPoolSafetyBreaks(State, S, X0);
+			}
 		}
 
 		struct Placement
@@ -951,8 +1048,9 @@ namespace rb::ai
 			double Score = 0.0;
 		};
 
-		// Ball-in-hand placements: behind the ghost ball of every clear pot (0, +-15, +-30 deg off the line; 20, 35, 60 cm), legal
-		// for the region, ranked by the static make chance with a small preference for a position angle of about 15 deg.
+		// Ball-in-hand placements: behind the ghost ball of every clear pot (0, +-15, +-30 deg off the line; 20, 35, 60 cm, or, when
+		// the region (kitchen / baulk) starts farther back on that line, 2, 15 and 35 cm inside it), legal for the region, ranked by
+		// the static make chance with a small preference for a position angle of about 15 deg.
 		int MakePlacements(const Scene& S, Placement* Out, int Capacity)
 		{
 			const PlanContext& X = *S.Ctx;
@@ -963,15 +1061,22 @@ namespace rb::ai
 			const RulesTolerances& Tol = X.Input.Match.Rules.Tolerances;
 			const rules::CueBallNext Region = S.Constraints.PlacementRegion == rules::CueBallNext::InPosition ? rules::CueBallNext::InHandAnywhere
 				: S.Constraints.PlacementRegion;
+			// The region's far boundary: the cue ball must be placed at x < RegionX.
+			const double RegionX = Region == rules::CueBallNext::InHandAboveHeadString ? RT.HeadStringX
+				: (Region == rules::CueBallNext::InHandBaulk ? RT.BaulkX : kInfinity);
 			int Count = 0;
 			for (int t = 1; t < rules::kRulesBallCount; ++t)
 			{
-				if (!HasBit(S.Legal, t) || !HasBit(L.OnTable, t))
+				if (!HasBit(S.Direct, t) || !HasBit(L.OnTable, t))
 				{
 					continue;
 				}
 				for (int p = 0; p < T.Pockets.Size(); ++p)
 				{
+					if (t == kEightBallId && S.EightPocket != PocketId::None && p != static_cast<int>(S.EightPocket))
+					{
+						continue;
+					}
 					const PocketAim Aim = PocketAimFor(T, p, L.Position[t], L.Radius[t]);
 					if (!Aim.Valid || !PathClear(L, L.Position[t], Aim.Point, L.Radius[t], Bit(0) | Bit(t)))
 					{
@@ -981,9 +1086,21 @@ namespace rb::ai
 					const Vec2 Ghost = L.Position[t] - U * (S.Rc + L.Radius[t]);
 					for (const double AngleDeg : {15.0, -15.0, 0.0, 30.0, -30.0})
 					{
-						for (const double Distance : {0.2, 0.35, 0.6})
+						const Vec2 Back = -Rotate(U, AngleDeg * kDegToRad);
+						// How far back the line enters the region (0: the ghost ball lies in it already).
+						double Enter = 0.0;
+						if (Ghost.x >= RegionX)
 						{
-							const Vec2 P = Ghost - Rotate(U, AngleDeg * kDegToRad) * Distance;
+							if (!(Back.x < -1e-6))
+							{
+								continue;
+							}
+							Enter = (Ghost.x - RegionX) / -Back.x;
+						}
+						for (int d = 0; d < 3; ++d)
+						{
+							const double Distance = Enter > 0.0 ? Enter + kRegionDepths[d] : kPlacementDistances[d];
+							const Vec2 P = Ghost + Back * Distance;
 							if (!rules::CueBallPlacementLegal(G, P, Region, RT, Tol) || !PathClear(L, P, Ghost, S.Rc, Bit(0) | Bit(t)))
 							{
 								continue;
@@ -1020,17 +1137,31 @@ namespace rb::ai
 			}
 			if (Count == 0)
 			{
-				// Nothing to pot: the first legal point of a coarse grid of the region (for safeties and kicks).
+				// Nothing to pot: a point of a coarse grid of the region (for safeties and kicks), the first legal one from which a
+				// straight line reaches a legal ball full (a safety needs a clear hit), else the first legal one.
 				const double HalfL = T.HalfLength - S.Rc - 0.02;
 				const double HalfW = T.HalfWidth - S.Rc - 0.02;
 				const double XMax = Region == rules::CueBallNext::InHandAboveHeadString ? RT.HeadStringX - 0.02
 					: (Region == rules::CueBallNext::InHandBaulk ? RT.BaulkX - 0.02 : HalfL);
-				for (int i = 0; i < 5 && Count == 0; ++i)
+				bool Sees = false;
+				for (int i = 0; i < 5 && !Sees; ++i)
 				{
-					for (int j = 0; j < 5 && Count == 0; ++j)
+					for (int j = 0; j < 5 && !Sees; ++j)
 					{
 						const Vec2 P{-HalfL + (XMax + HalfL) * (0.1 + 0.2 * i), HalfW * (-0.8 + 0.4 * j)};
-						if (rules::CueBallPlacementLegal(G, P, Region, RT, Tol))
+						if (!rules::CueBallPlacementLegal(G, P, Region, RT, Tol))
+						{
+							continue;
+						}
+						for (int t = 1; t < rules::kRulesBallCount && !Sees; ++t)
+						{
+							if (HasBit(S.Direct, t) && HasBit(L.OnTable, t))
+							{
+								const Vec2 Full = L.Position[t] - Normalized(L.Position[t] - P) * (S.Rc + L.Radius[t]);
+								Sees = PathClear(L, P, Full, S.Rc, Bit(0) | Bit(t));
+							}
+						}
+						if (Sees || Count == 0)
 						{
 							Out[0].Cue = P;
 							Out[0].Score = 0.0;
@@ -1045,16 +1176,14 @@ namespace rb::ai
 		// When nothing else was generated: hit the nearest legal ball full at a medium speed.
 		void FallbackCandidate(PlannerState& State, const Scene& S, const Vec2& Cue, bool Place)
 		{
-			// The legal balls by distance (every ball if none is legal), full to thin on both sides, a jacked-up cue allowed (up to
-			// kMaxFallbackElevation); the first stroke that can be declared is taken. Its value comes from the rollouts like any other.
+			// The legal balls the cue ball may hit directly by distance (else the legal ones, else every ball), full to thin on both
+			// sides, a jacked-up cue allowed (up to kMaxFallbackElevation); the first stroke that can be declared is taken. Its value
+			// comes from the rollouts like any other.
 			const BallLayout& L = S.From->Layout;
-			Scene Any = S;
-			if (Any.Legal == 0u)
-			{
-				Any.Legal = L.OnTable & ~Bit(0);
-			}
+			const std::uint32_t Objects = L.OnTable & ~Bit(0);
+			const std::uint32_t Mask = (S.Direct & Objects) != 0u ? S.Direct : ((S.Legal & Objects) != 0u ? S.Legal : Objects);
 			int Balls[rules::kRulesBallCount] = {};
-			const int N = LegalByDistance(Any, Cue, Balls, rules::kRulesBallCount);
+			const int N = BallsByDistance(S, Mask, Cue, Balls, rules::kRulesBallCount);
 			for (int i = 0; i < N; ++i)
 			{
 				const int t = Balls[i];
@@ -1128,6 +1257,25 @@ namespace rb::ai
 		const rules::GameState& G = M.Game;
 		S.Constraints = rules::GetShotConstraints(X.Input.Match, M);
 		S.Legal = S.Constraints.LegalFirstContactMask;
+		S.Direct = S.Legal;
+		if (G.CueBall == rules::CueBallNext::InHandAboveHeadString)
+		{
+			// From the kitchen the cue ball must cross the head string before it touches a ball above it (rules 3.11, the rules'
+			// own region predicate): a straight shot at such a ball is a sure foul.
+			for (int b = 1; b < rules::kRulesBallCount; ++b)
+			{
+				if (G.Balls[b].Kind == rules::BallStatusKind::OnTable &&
+					rules::AboveHeadString(G.Balls[b].Position, X.Input.Match.Table, X.Input.Match.Rules.Tolerances.Line))
+				{
+					S.Direct &= ~Bit(b);
+				}
+			}
+		}
+		if (G.Game == rules::Discipline::EightBall && X.Input.Match.Rules.LastPocketRule && G.Players[G.Shooter].Group != rules::BallGroup::None)
+		{
+			// The last-pocket variant (rules 12.6): the 8 wins only in the pocket of the group's last ball; anywhere else it loses.
+			S.EightPocket = G.LastGroupBallPocket[static_cast<int>(G.Players[G.Shooter].Group)];
+		}
 		S.Useful = S.Legal;
 		if (RotationGame(G.Game) || G.Game == rules::Discipline::StraightPool)
 		{
@@ -1213,10 +1361,12 @@ namespace rb::ai
 				{
 					ExpandFamily(State, S, Families[f], Cue, true, Miss, Speeds, Spins);
 				}
-				if (i == 0 && !S.SecondPly && Placements[i].Score <= 0.0)
+				if (i == 0 && !S.SecondPly && (Placements[i].Score <= 0.0 || (P.Safeties && Placements[i].Score < kInHandSafetyChance)))
 				{
+					// No pot (or, for a safety game, only poor ones: the kitchen's long shots): safeties, and kicks for a kicking game;
+					// like in position every profile tries a kick when no straight line reaches a legal ball.
 					SafetyCandidates(State, S, Cue, true, P.SafetyTargets > 0 ? Scaled(P.SafetyTargets, X.Config.Breadth) : 2, P.SafetyTargets <= 0);
-					if (P.Kicks)
+					if (P.Kicks || static_cast<int>(State.Candidates.size()) == Before)
 					{
 						KickCandidates(State, S, Cue, true);
 					}

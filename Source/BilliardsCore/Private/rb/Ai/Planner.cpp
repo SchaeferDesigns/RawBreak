@@ -5,8 +5,7 @@
 #include "rb/Human/NoiseHash.h"
 #include "rb/Math/Scalar.h"
 #include "rb/Rules/Evaluate.h"
-
-#include <cstdio>
+#include "rb/Rules/TableRules.h"
 
 namespace rb::ai
 {
@@ -14,6 +13,7 @@ namespace rb::ai
 	{
 		constexpr std::uint64_t kChoiceChannel = 0xA1C0u; // HashKeys channel of the seeded choice among near-equal candidates
 		constexpr int kMaxChoices = 8;
+		constexpr int kMaxBreakNoisyCandidates = 8;       // noisy rows of a break decision (TUNING: a rack simulation is costly)
 		constexpr double kRolloutTiltTolerance = 5e-4;    // [m] tilt chain tolerance of AI rollouts (architecture 5.2)
 
 		ResultCapacity WorkerCapacity()
@@ -39,6 +39,15 @@ namespace rb::ai
 			return S < 1 ? 1 : (S > Cap ? Cap : S);
 		}
 
+		// The estimated P(win the rack) of a screened candidate: its score without the profile's safety bias and the planned-foul
+		// penalty (both only steer the choice).
+		double WinEstimate(const PlannerState& S, int Index)
+		{
+			const Candidate& C = S.Candidates[static_cast<std::size_t>(Index)];
+			const CandidateResult& R = S.Results[static_cast<std::size_t>(Index)];
+			return R.Score - (IsSafetyType(C.Type) ? S.Ctx.Profile.SafetyBias : 0.0) + kPlannedFoulPenalty * R.FoulShare;
+		}
+
 		// Better = higher score; ties: lower index.
 		bool Better(const PlannerState& S, int A, int B)
 		{
@@ -47,15 +56,17 @@ namespace rb::ai
 			return Sa > Sb || (Sa == Sb && A < B);
 		}
 
-		// The candidates the final choice may take: those with noisy samples when the noisy stage ran, else every candidate of the
-		// decision's table.
+		// The candidates the final choice may take: screened candidates of the decision's table; once the noisy stage was reduced
+		// with samples, only those with noisy samples. (FinishNow may end a stage whose jobs did not all run: a candidate whose job
+		// did not run has no result and is never chosen by its default score.)
 		bool Eligible(const PlannerState& S, int Index)
 		{
 			if (Index >= S.DecisionCandidates)
 			{
 				return false;
 			}
-			return S.NoisyRows.empty() || S.Results[static_cast<std::size_t>(Index)].Noisy;
+			const CandidateResult& R = S.Results[static_cast<std::size_t>(Index)];
+			return R.Screened && (S.NoisyReduced == 0 || R.Noisy);
 		}
 
 		// Top Count eligible candidates (best first) into Out; returns how many.
@@ -134,7 +145,7 @@ namespace rb::ai
 			Out.Speed = C.Plan.Speed;
 			Out.SpinA = C.Plan.AxisOffsetA;
 			Out.SpinB = C.Plan.AxisOffsetB;
-			Out.Samples = R.Samples + 1;
+			Out.Samples = R.Samples + (R.Screened ? 1 : 0);
 			return Out;
 		}
 
@@ -143,14 +154,23 @@ namespace rb::ai
 			const PlanContext& X = S.Ctx;
 			PlannedDecision& D = S.Decision;
 			int Top[kMaxChoices] = {};
-			const int N = TopCandidates(S, Top, kMaxChoices, false);
+			int N = TopCandidates(S, Top, kMaxChoices, false);
+			bool Unscreened = false;
 			if (N == 0)
 			{
-				D.Error = ErrorCode::InvalidState;
-				D.Kind = DecisionKind::None;
-				S.Stage = StageKind::Done;
-				S.Finished = true;
-				return;
+				if (S.DecisionCandidates == 0)
+				{
+					D.Error = ErrorCode::InvalidState;
+					D.Kind = DecisionKind::None;
+					S.Stage = StageKind::Done;
+					S.Finished = true;
+					return;
+				}
+				// FinishNow before any screening job ran: the first generated candidate (the best aim family's first variant, or the
+				// first safety / break / fallback stroke) at its planned geometric aim.
+				Top[0] = 0;
+				N = 1;
+				Unscreened = true;
 			}
 			int Chosen = Top[0];
 			if (X.Profile.ChoiceTolerance > 0.0)
@@ -172,7 +192,7 @@ namespace rb::ai
 			D.Error = ErrorCode::Ok;
 			D.Kind = DecisionKind::Stroke;
 			D.Stroke = C.Plan;
-			D.Stroke.Azimuth = R.Azimuth;
+			D.Stroke.Azimuth = Unscreened ? C.Plan.Azimuth : R.Azimuth;
 			D.Situation = C.Situation;
 			D.Declaration = C.Declaration;
 			D.PlaceCueBall = C.PlaceCueBall;
@@ -181,7 +201,7 @@ namespace rb::ai
 			D.TargetBall = C.FirstBall;
 			D.PotBall = C.PotBall;
 			D.Pocket = C.Pocket;
-			D.ExpectedValue = Clamp(R.Score - (IsSafetyType(C.Type) ? X.Profile.SafetyBias : 0.0), 0.0, 1.0);
+			D.ExpectedValue = Unscreened ? S.Origins[0].StaticValue : Clamp(WinEstimate(S, Chosen), 0.0, 1.0);
 			D.PotChance = R.Noisy ? R.PotShare : (IsPotType(C.Type) ? C.PerceivedPot : 0.0);
 			D.FoulChance = R.Noisy ? R.FoulShare : (R.Foul ? 1.0 : 0.0);
 			PlanReasoning& Why = D.Reasoning;
@@ -252,6 +272,28 @@ namespace rb::ai
 			S.Finished = true;
 		}
 
+		// The cue ball in hand behind the head string with every legal ball behind it as well (rules 4.4): a direct shot is a sure
+		// foul (3.11) and a kick from the kitchen a poor try, so every profile asks for the spot (the ball nearest the head string
+		// goes to the foot spot) and plans again on the new state.
+		void DecideSpotRequest(PlannerState& S)
+		{
+			const PlanContext& X = S.Ctx;
+			PlannedDecision& D = S.Decision;
+			const rules::MatchState& M = X.Input.State;
+			const rules::ShotConstraints Constraints = rules::GetShotConstraints(X.Input.Match, M);
+			const int Ball = rules::SpotRequestCandidate(M.Game, Constraints.LegalFirstContactMask, X.Input.Match.Table, X.Input.Match.Rules.Tolerances);
+			rules::MatchState Copy = M;
+			const bool Ok = Ball >= 0 && rules::RequestSpot(X.Input.Match, Copy) == ErrorCode::Ok;
+			D.Error = Ok ? ErrorCode::Ok : ErrorCode::InvalidState;
+			D.Kind = Ok ? DecisionKind::RequestSpot : DecisionKind::None;
+			D.TargetBall = Ok ? static_cast<BallId>(Ball) : kNoBall;
+			D.ExpectedValue = Ok ? StateValue(X.Eval, Copy, X.Self) : 0.0;
+			D.Reasoning.TableValue = D.ExpectedValue;
+			D.Reasoning.Sandbagging = X.Sandbagging;
+			S.Stage = StageKind::Done;
+			S.Finished = true;
+		}
+
 		// Second ply: the noise-free end states of the top candidates in which the AI keeps the table get their own next-shot
 		// search. Returns true if jobs were queued.
 		bool StartSecondPly(PlannerState& S, WorkerState& Serial)
@@ -292,12 +334,13 @@ namespace rb::ai
 			for (int o = 1; o < S.OriginCount; ++o)
 			{
 				const Origin& O = S.Origins[o];
+				// The best next shot's win estimate (a fallback stroke of the position is a safety: without the choice's safety bias).
 				double Next = -1.0;
 				for (int c = S.DecisionCandidates; c < static_cast<int>(S.Candidates.size()); ++c)
 				{
-					if (S.Candidates[static_cast<std::size_t>(c)].Origin == o)
+					if (S.Candidates[static_cast<std::size_t>(c)].Origin == o && S.Results[static_cast<std::size_t>(c)].Screened)
 					{
-						Next = Max(Next, S.Results[static_cast<std::size_t>(c)].Score);
+						Next = Max(Next, WinEstimate(S, c));
 					}
 				}
 				if (Next < 0.0 || O.Parent < 0)
@@ -312,33 +355,47 @@ namespace rb::ai
 			}
 		}
 
-		// Mean value, pot, foul and kept shares of every noisy row, summed in sample order (the same for any thread count).
+		// Mean value, pot, foul and kept shares of every noisy row, summed in sample order (the same for any thread count). Only the
+		// samples this decision's jobs wrote count (FinishNow may end the stage early); a row without samples keeps its screening.
 		void ReduceNoisy(PlannerState& S)
 		{
 			const int K = S.Ctx.Samples;
+			S.NoisyReduced = 0;
 			for (int r = 0; r < static_cast<int>(S.NoisyRows.size()); ++r)
 			{
 				const int c = S.NoisyRows[static_cast<std::size_t>(r)];
 				const SampleResult* Row = &S.SampleTable[static_cast<std::size_t>(r) * kMaxSamples];
 				double Sum = 0.0;
+				int Count = 0;
 				int Potted = 0;
 				int Fouls = 0;
 				int Kept = 0;
 				for (int s = 0; s < K; ++s)
 				{
+					if (!Row[s].Valid)
+					{
+						continue;
+					}
+					++Count;
 					Sum += Row[s].Value;
 					Potted += Row[s].Potted ? 1 : 0;
 					Fouls += Row[s].Foul ? 1 : 0;
 					Kept += Row[s].Kept ? 1 : 0;
 				}
+				if (Count == 0)
+				{
+					continue;
+				}
 				CandidateResult& R = S.Results[static_cast<std::size_t>(c)];
-				const double InvK = 1.0 / K;
+				const double InvK = 1.0 / Count;
 				R.Noisy = true;
-				R.Samples = K;
-				R.Score = Sum * InvK + (IsSafetyType(S.Candidates[static_cast<std::size_t>(c)].Type) ? S.Ctx.Profile.SafetyBias : 0.0);
+				R.Samples = Count;
 				R.PotShare = Potted * InvK;
 				R.FoulShare = Fouls * InvK;
+				R.Score = Sum * InvK + (IsSafetyType(S.Candidates[static_cast<std::size_t>(c)].Type) ? S.Ctx.Profile.SafetyBias : 0.0) -
+					kPlannedFoulPenalty * R.FoulShare;
 				R.KeptShare = Kept * InvK;
+				++S.NoisyReduced;
 			}
 		}
 
@@ -352,8 +409,9 @@ namespace rb::ai
 			return false;
 		}
 
-		// Planned simulations of the decision (upper bound) and the deterministic budget trim: second ply first, then the noisy set,
-		// then the candidates from the end of the list.
+		// Planned simulations of the decision (upper bound) and the deterministic budget trim: second ply first, then the noisy set
+		// (down to one row), then the candidates from the end of the list, and when even one noisy row does not fit, the noisy stage.
+		// At least one candidate is screened whatever the budget.
 		void ApplyBudget(PlannerState& S)
 		{
 			PlanContext& X = S.Ctx;
@@ -384,6 +442,10 @@ namespace rb::ai
 			while (Total() > Budget && Count > 1)
 			{
 				--Count;
+			}
+			if (Total() > Budget)
+			{
+				X.NoisyCandidates = 0;
 			}
 			S.Candidates.resize(static_cast<std::size_t>(Count));
 		}
@@ -453,6 +515,7 @@ namespace rb::ai
 		S.Candidates.clear();
 		S.Results.clear();
 		S.NoisyRows.clear();
+		S.NoisyReduced = 0;
 		S.Jobs.clear();
 		S.OriginCount = 0;
 		S.DecisionCandidates = 0;
@@ -466,7 +529,10 @@ namespace rb::ai
 		X.Input = Input;
 		X.Config = Config;
 		X.Self = Input.Self;
-		if (Input.Table == nullptr || Input.Self < 0 || Input.Self > 1 || Input.State.Game.Game != Input.Match.Game)
+		// The config's scales must be finite and not negative (a NaN would reach an int conversion); large values are capped by the
+		// buffers (kMaxCandidates, kMaxSamples, kMaxNoisyCandidates, kMaxPlacements).
+		const bool ConfigOk = Config.Breadth >= 0.0 && Config.Breadth <= 1e3 && Config.Samples >= 0.0 && Config.Samples <= 1e3;
+		if (Input.Table == nullptr || Input.Self < 0 || Input.Self > 1 || Input.State.Game.Game != Input.Match.Game || !ConfigOk)
 		{
 			S.Decision.Error = ErrorCode::InvalidArgument;
 			return S.Decision.Error;
@@ -531,6 +597,7 @@ namespace rb::ai
 		{
 			// Both players lag at once: the AI plans its own ball (a short serial search on the calling thread).
 			PlanLag(S, *Serial.Internal());
+			S.Stage = StageKind::Done;
 			return S.Decision.Error;
 		}
 		if (M.Phase == rules::MatchPhase::LagWinnerChooses && M.Decider == X.Self)
@@ -543,9 +610,19 @@ namespace rb::ai
 			S.Decision.Error = ErrorCode::InvalidState;
 			return S.Decision.Error;
 		}
+		if (M.Game.CueBall == rules::CueBallNext::InHandAboveHeadString && rules::GetShotConstraints(X.Input.Match, M).MayRequestSpot)
+		{
+			DecideSpotRequest(S);
+			return S.Decision.Error;
+		}
 
 		S.Finished = false;
 		S.OriginCount = 1;
+		if (M.Game.IsBreakShot && X.NoisyCandidates > kMaxBreakNoisyCandidates)
+		{
+			// A rack simulation costs about 50 ordinary ones (the 14.1 safety breaks are many candidates): sample the best few.
+			X.NoisyCandidates = kMaxBreakNoisyCandidates;
+		}
 		SetOrigin(S, 0, M, -1);
 		S.Decision.Reasoning.TableValue = S.Origins[0].StaticValue;
 		S.Decision.Reasoning.BestPotChance = BestNextShot(X.Eval, M.Game, X.Self).PotChance;
@@ -623,6 +700,12 @@ namespace rb::ai
 				S.Jobs.clear();
 				for (int r = 0; r < N; ++r)
 				{
+					// The row's samples of an earlier decision must not count if this stage ends early (FinishNow).
+					SampleResult* Row = &S.SampleTable[static_cast<std::size_t>(r) * kMaxSamples];
+					for (int s = 0; s < S.Ctx.Samples; ++s)
+					{
+						Row[s] = SampleResult{};
+					}
 					S.NoisyRows.push_back(Top[r]);
 					Job J;
 					J.Kind = StageKind::Noisy;
@@ -689,9 +772,8 @@ namespace rb::ai
 		}
 		P.Jobs = S.Finished ? 0 : static_cast<int>(S.Jobs.size());
 		P.Candidates = static_cast<int>(S.Candidates.size());
-		// Screening results exist once the screening stage was reduced (the stage that runs next is a later one, or the end).
-		const bool Screened = S.Stage == StageKind::Noisy || S.Stage == StageKind::SecondPly || (S.Stage == StageKind::Done && S.DecisionCandidates > 0);
-		if (Screened)
+		// The best screened candidate (during the noisy stage the screening's best, after it the best sampled one).
+		if (S.Stage != StageKind::Idle)
 		{
 			int Top[1] = {};
 			if (TopCandidates(S, Top, 1, false) == 1)
@@ -741,38 +823,174 @@ namespace rb::ai
 		return "?";
 	}
 
+	namespace
+	{
+		// A bounded, locale-independent text builder (the decimal point is always '.', whatever the C locale's LC_NUMERIC).
+		struct TextOut
+		{
+			char* Buffer = nullptr;
+			int Size = 0;   // capacity incl. the terminating zero
+			int Length = 0; // characters written (at most Size - 1)
+
+			void Char(char C)
+			{
+				if (Length + 1 < Size)
+				{
+					Buffer[Length++] = C;
+					Buffer[Length] = '\0';
+				}
+			}
+
+			void Text(const char* S)
+			{
+				for (; S != nullptr && *S != '\0'; ++S)
+				{
+					Char(*S);
+				}
+			}
+
+			void Int(long long V)
+			{
+				char Digits[24];
+				int N = 0;
+				const bool Negative = V < 0;
+				unsigned long long U = Negative ? 0ull - static_cast<unsigned long long>(V) : static_cast<unsigned long long>(V);
+				do
+				{
+					Digits[N++] = static_cast<char>('0' + static_cast<int>(U % 10ull));
+					U /= 10ull;
+				} while (U != 0ull && N < 24);
+				if (Negative)
+				{
+					Char('-');
+				}
+				while (N > 0)
+				{
+					Char(Digits[--N]);
+				}
+			}
+
+			// Fixed point with Decimals digits, rounded half away from zero ("%.*f" in the "C" locale for the values printed here).
+			void Fixed(double V, int Decimals)
+			{
+				if (!(V == V))
+				{
+					Text("nan");
+					return;
+				}
+				long long Scale = 1;
+				for (int i = 0; i < Decimals; ++i)
+				{
+					Scale *= 10;
+				}
+				const double A = Abs(V);
+				if (!(A < 1e15 / static_cast<double>(Scale)))
+				{
+					Text(V < 0.0 ? "-inf" : "inf");
+					return;
+				}
+				const long long Units = static_cast<long long>(Floor(A * static_cast<double>(Scale) + 0.5));
+				if (V < 0.0 && Units != 0)
+				{
+					Char('-');
+				}
+				Int(Units / Scale);
+				if (Decimals > 0)
+				{
+					Char('.');
+					long long Fraction = Units % Scale;
+					for (long long Digit = Scale / 10; Digit > 0; Digit /= 10)
+					{
+						Char(static_cast<char>('0' + static_cast<int>(Fraction / Digit)));
+						Fraction %= Digit;
+					}
+				}
+			}
+		};
+	}
+
 	int FormatReasoning(const PlannedDecision& D, char* Buffer, int Size)
 	{
 		if (Buffer == nullptr || Size <= 0)
 		{
 			return 0;
 		}
-		int N = 0;
+		TextOut Out;
+		Out.Buffer = Buffer;
+		Out.Size = Size;
+		Buffer[0] = '\0';
 		if (D.Kind == DecisionKind::Option)
 		{
-			N = std::snprintf(Buffer, static_cast<std::size_t>(Size), "option %d: P(win) %.2f", static_cast<int>(D.Choice), D.ExpectedValue);
+			Out.Text("option ");
+			Out.Int(static_cast<int>(D.Choice));
+			Out.Text(": P(win) ");
+			Out.Fixed(D.ExpectedValue, 2);
 		}
 		else if (D.Kind == DecisionKind::ChooseBreaker)
 		{
-			N = std::snprintf(Buffer, static_cast<std::size_t>(Size), "player %d breaks: P(win) %.2f", D.Breaker, D.ExpectedValue);
+			Out.Text("player ");
+			Out.Int(D.Breaker);
+			Out.Text(" breaks: P(win) ");
+			Out.Fixed(D.ExpectedValue, 2);
+		}
+		else if (D.Kind == DecisionKind::RequestSpot)
+		{
+			Out.Text("requests the spot of ball ");
+			Out.Int(static_cast<int>(D.TargetBall));
+			Out.Text(": P(win) ");
+			Out.Fixed(D.ExpectedValue, 2);
 		}
 		else if (D.Kind == DecisionKind::Stroke && D.Type == ShotType::Lag)
 		{
-			N = std::snprintf(Buffer, static_cast<std::size_t>(Size), "lag from (%.3f, %.3f), V %.2f m/s to %.3f m from the head cushion: P(win) %.2f; %d simulations",
-				D.CueBallPlacement.x, D.CueBallPlacement.y, D.Stroke.Speed, D.LagDistance, D.ExpectedValue, D.Reasoning.Simulations);
+			Out.Text("lag from (");
+			Out.Fixed(D.CueBallPlacement.x, 3);
+			Out.Text(", ");
+			Out.Fixed(D.CueBallPlacement.y, 3);
+			Out.Text("), V ");
+			Out.Fixed(D.Stroke.Speed, 2);
+			Out.Text(" m/s to ");
+			Out.Fixed(D.LagDistance, 3);
+			Out.Text(" m from the head cushion: P(win) ");
+			Out.Fixed(D.ExpectedValue, 2);
+			Out.Text("; ");
+			Out.Int(D.Reasoning.Simulations);
+			Out.Text(" simulations");
 		}
 		else if (D.Kind == DecisionKind::Stroke)
 		{
-			N = std::snprintf(Buffer, static_cast<std::size_t>(Size),
-				"%s ball %d -> %d pocket %d%s, V %.2f m/s, A %.2f B %.2f: P(win) %.2f, pot %.2f, foul %.2f; %d candidates, %d simulations%s",
-				ShotTypeName(D.Type), static_cast<int>(D.TargetBall), static_cast<int>(D.PotBall), static_cast<int>(D.Pocket),
-				D.PlaceCueBall ? " (ball in hand)" : "", D.Stroke.Speed, D.Stroke.AxisOffsetA, D.Stroke.AxisOffsetB, D.ExpectedValue, D.PotChance,
-				D.FoulChance, D.Reasoning.Candidates, D.Reasoning.Simulations, D.Reasoning.Sandbagging ? " (sandbagging)" : "");
+			Out.Text(ShotTypeName(D.Type));
+			Out.Text(" ball ");
+			Out.Int(static_cast<int>(D.TargetBall));
+			Out.Text(" -> ");
+			Out.Int(static_cast<int>(D.PotBall));
+			Out.Text(" pocket ");
+			Out.Int(static_cast<int>(D.Pocket));
+			Out.Text(D.PlaceCueBall ? " (ball in hand)" : "");
+			Out.Text(", V ");
+			Out.Fixed(D.Stroke.Speed, 2);
+			Out.Text(" m/s, A ");
+			Out.Fixed(D.Stroke.AxisOffsetA, 2);
+			Out.Text(" B ");
+			Out.Fixed(D.Stroke.AxisOffsetB, 2);
+			Out.Text(": P(win) ");
+			Out.Fixed(D.ExpectedValue, 2);
+			Out.Text(", pot ");
+			Out.Fixed(D.PotChance, 2);
+			Out.Text(", foul ");
+			Out.Fixed(D.FoulChance, 2);
+			Out.Text("; ");
+			Out.Int(D.Reasoning.Candidates);
+			Out.Text(" candidates, ");
+			Out.Int(D.Reasoning.Simulations);
+			Out.Text(" simulations");
+			Out.Text(D.Reasoning.Sandbagging ? " (sandbagging)" : "");
 		}
 		else
 		{
-			N = std::snprintf(Buffer, static_cast<std::size_t>(Size), "no decision (error %d)", static_cast<int>(D.Error));
+			Out.Text("no decision (error ");
+			Out.Int(static_cast<int>(D.Error));
+			Out.Char(')');
 		}
-		return N < 0 ? 0 : (N >= Size ? Size - 1 : N);
+		return Out.Length;
 	}
 }

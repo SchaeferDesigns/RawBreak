@@ -34,8 +34,9 @@ namespace rb::ai
 
 		// Search breadth and depth.
 		int PotFamilies = 4;               // aim families (ball x pocket, banks, combinations) kept by static make chance
-		int SpeedVariants = 2;             // 1..4 of the speed ladder (x1.0, x1.5, x2.2, x3.2 of the object ball's minimum)
-		int SpinVariants = 1;              // 1..7 of the spin ladder (centre, follow, draw, stun, right, left, follow-right)
+		int SpeedVariants = 2;             // 1..4 speeds of the ladder row of that length (multiples of the tip speed that just brings
+		                                   //   the potted ball to the pocket: 1.6; 1.3, 2.2; 1.2, 1.8, 2.8; 1.1, 1.6, 2.3, 3.3)
+		int SpinVariants = 1;              // 1..7 of the spin ladder (centre, follow, draw, stun, right, left, draw-right)
 		int SafetyTargets = 0;             // legal balls examined for safeties
 		int Placements = 3;                // ball-in-hand placements examined
 		int AimIterations = 0;             // simulator aim-correction iterations (0 = ghost-ball aim)
@@ -52,7 +53,8 @@ namespace rb::ai
 		double KickSkill = 0.3;            // [0, 1] probability of a legal contact when hooked (static model)
 		double SafetyBias = 0.0;           // added to the score of safety / kick candidates (> 0 likes safeties)
 		double SpeedBias = 1.0;            // multiplies planned speeds (bar regular: hits hard)
-		double BreakSpeed = 6.0;           // [m/s] planned tip speed of the break
+		double BreakSpeed = 6.0;           // [m/s] planned tip speed of the break (and 0.85 of it; capped at 10 m/s, other strokes at
+		                                   //   7.5 m/s); the 14.1 opening safety break of a safety game is soft (1.8 / 2.4 m/s)
 		double ChoiceTolerance = 0.0;      // chooses among candidates within this score of the best (seeded; human variety)
 		double LagTarget = 0.1;            // [m] rest distance from the head cushion's nose the lag aims for (noisy profiles also try
 		                                   //   0.5 / 1.6 / 2.4 times it and keep the best by P(win the lag))

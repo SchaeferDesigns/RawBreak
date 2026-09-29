@@ -1,6 +1,7 @@
 // Owner: WP-12 (AI opponent). A-AI-6: decision time per profile (Release; prior-art 7.3: an AI decision within about 1.5 s of wall
 // time on 6 worker threads). Real positions: seeded 9-ball racks played by two road players (breaks, mid-rack, ball in hand,
-// push-out windows) and 8-ball racks on the 7-ft bar table; every profile decides each position on 1 thread (PlanShot) and on 6
+// push-out windows), 8-ball racks on the 7-ft bar table and 14.1 racks (the opening safety break and full-rack positions, added by
+// the WP-12 review); every profile decides each position on 1 thread (PlanShot) and on 6
 // threads (the staged protocol on std::threads). Median / p90 / max wall time, simulations and candidates per decision are printed;
 // the touring pro's worst decision on 6 threads must stay within the 1.5 s budget (Release). The simulation count is the
 // deterministic budget (never wall time), so these times vary with the machine only.
@@ -87,10 +88,13 @@ RB_TEST(Integ_ARCH_AI6_Slow_DecisionTimePerProfile)
 	std::vector<Position> Set;
 	Collect(Set, rules::Discipline::NineBall, kTableNineFootPro, 0xA16u, kPositions);
 	Collect(Set, rules::Discipline::EightBall, kTableSevenFootBar, 0xA18u, kPositions / 2);
+	// WP-12 review: 14.1 with up to 15 balls on the table (the opening safety break and the first shots of a rack) are the most
+	// expensive decisions (more families, safeties and costlier rollouts).
+	Collect(Set, rules::Discipline::StraightPool, kTableNineFootPro, 0xA14u, kPositions / 4);
 	RB_REQUIRE(!Set.empty());
 	auto Scratch = std::make_unique<ai::PlannerScratch>();
 	std::vector<ai::PlannerWorker> Workers(6);
-	std::printf("  A-AI-6 %zu positions (9-ball on the 9-ft pro table, 8-ball on the 7-ft bar table), %u hardware threads\n", Set.size(),
+	std::printf("  A-AI-6 %zu positions (9-ball and 14.1 on the 9-ft pro table, 8-ball on the 7-ft bar table), %u hardware threads\n", Set.size(),
 		std::thread::hardware_concurrency());
 	std::printf("  %-18s | 1 thread: median   p90     max [ms] | 6 threads: median   p90     max [ms] | sims/decision  candidates\n", "profile");
 	// The six profiles as specified, and the touring pro widened toward the prior-art search shape (PlannerConfig: twice the

@@ -78,6 +78,7 @@ namespace
 		To.PotsMade += From.PotsMade;
 		To.Safeties += From.Safeties;
 		To.PushOuts += From.PushOuts;
+		To.SpotRequests += From.SpotRequests;
 		To.Fouls += From.Fouls;
 		To.Breaks += From.Breaks;
 		To.BreakPots += From.BreakPots;
@@ -89,8 +90,8 @@ namespace
 		To.Simulations += From.Simulations;
 	}
 
-	// Plays Racks racks of every pair (A = player 0, B = player 1) on Threads threads.
-	void PlayPairs(std::vector<PairResult>& Pairs, int Racks, rules::Discipline Game, const TableSpec& Spec, std::uint64_t Seed)
+	// Plays Racks racks of every pair (A = player 0, B = player 1) on Threads threads, under Preset's rules.
+	void PlayPairs(std::vector<PairResult>& Pairs, int Racks, rules::RulesPreset Preset, const TableSpec& Spec, std::uint64_t Seed)
 	{
 		const TableGeometry& T = simtest::Table(Spec);
 		const PhysicsParams Physics = MakePhysicsParams(Spec);
@@ -105,7 +106,7 @@ namespace
 				PairResult& P = Pairs[static_cast<std::size_t>(k / Racks)];
 				const int r = k % Racks;
 				const std::uint64_t RackSeed = human::HashKeys(Seed, static_cast<std::uint64_t>(k / Racks), static_cast<std::uint64_t>(r));
-				const rules::MatchConfig C = aitest::MakeMatch(Game, T, RackSeed);
+				const rules::MatchConfig C = aitest::MakeMatchWith(Preset, T, RackSeed);
 				aitest::Player Players[2] = {aitest::MakePlayer(P.A, 1, RackSeed), aitest::MakePlayer(P.B, 2, RackSeed + 1)};
 				const ai::OpponentModel Models[2] = {ai::OpponentModelFor(P.A), ai::OpponentModelFor(P.B)};
 				aitest::Stats St[2];
@@ -145,10 +146,10 @@ namespace
 		{
 			const aitest::Stats& S = P.Stats[s];
 			std::printf("      %-18s run-outs %5.1f %% of racks, break-and-runs %5.1f %%, pots %5.1f %% of %d, fouls/rack %.2f, safeties/rack %.2f, push-outs %d, "
-						"break pots %.0f %%, %.1f ms and %.0f sims per decision%s\n",
+						"spot requests %d, break pots %.0f %%, %.1f ms and %.0f sims per decision%s\n",
 				aitest::ProfileName(s == 0 ? P.A : P.B), 100.0 * S.RunOuts / (S.Racks > 0 ? S.Racks : 1), 100.0 * S.BreakAndRuns / (S.Racks > 0 ? S.Racks : 1),
 				100.0 * S.PotsMade / (S.PotAttempts > 0 ? S.PotAttempts : 1), S.PotAttempts, static_cast<double>(S.Fouls) / (S.Racks > 0 ? S.Racks : 1),
-				static_cast<double>(S.Safeties) / (S.Racks > 0 ? S.Racks : 1), S.PushOuts, 100.0 * S.BreakPots / (S.Breaks > 0 ? S.Breaks : 1),
+				static_cast<double>(S.Safeties) / (S.Racks > 0 ? S.Racks : 1), S.PushOuts, S.SpotRequests, 100.0 * S.BreakPots / (S.Breaks > 0 ? S.Breaks : 1),
 				1e3 * S.DecisionSeconds / (S.Decisions > 0 ? S.Decisions : 1), static_cast<double>(S.Simulations) / (S.Decisions > 0 ? S.Decisions : 1),
 				S.InvalidDeclarations + S.PlannerErrors + S.SimulationErrors > 0 ? " ERRORS" : "");
 			if (S.InvalidDeclarations + S.PlannerErrors + S.SimulationErrors > 0)
@@ -194,7 +195,7 @@ RB_TEST(Integ_ARCH_AI7_Slow_StrengthLadder)
 		Pairs.assign(1, Keep);
 	}
 	const auto T0 = std::chrono::steady_clock::now();
-	PlayPairs(Pairs, Racks, rules::Discipline::NineBall, kTableNineFootPro, 0x1ADDE7u);
+	PlayPairs(Pairs, Racks, rules::RulesPreset::Wpa9Ball, kTableNineFootPro, 0x1ADDE7u);
 	std::printf("  A-AI-7 strength ladder, 9-ball, %d racks per pair, %d threads, %.1f s\n", Racks, Threads(),
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 	for (const PairResult& P : Pairs)
@@ -225,7 +226,7 @@ RB_TEST(Integ_ARCH_AI10_Slow_EightBallRacks)
 		Pairs.push_back(P);
 	}
 	const auto T0 = std::chrono::steady_clock::now();
-	PlayPairs(Pairs, Racks, rules::Discipline::EightBall, kTableSevenFootBar, 0x8BA11u);
+	PlayPairs(Pairs, Racks, rules::RulesPreset::Wpa8Ball, kTableSevenFootBar, 0x8BA11u);
 	std::printf("  A-AI-10 8-ball on the 7-ft bar table, %d racks per pair, %.1f s\n", Racks, std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 	for (const PairResult& P : Pairs)
 	{
@@ -255,7 +256,7 @@ RB_TEST(Integ_HF_B09_Slow_RoundRobinRatings)
 		}
 	}
 	const auto T0 = std::chrono::steady_clock::now();
-	PlayPairs(Pairs, Racks, rules::Discipline::NineBall, kTableNineFootPro, 0xB09B09u);
+	PlayPairs(Pairs, Racks, rules::RulesPreset::Wpa9Ball, kTableNineFootPro, 0xB09B09u);
 	std::printf("  HF-B09 round robin, 9-ball, %d racks per pair (%zu pairs), %.1f s\n", Racks, Pairs.size(),
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 
@@ -355,7 +356,8 @@ RB_TEST(Integ_HF_B09_Slow_RoundRobinRatings)
 
 // A-AI-10 (other disciplines): 10-ball (every pot called), Blackball (ball in hand in baulk, free shots) and 14.1 continuous
 // (called shots, continuation racks) are played by the road player against the league player without an invalid declaration,
-// a planner error or a simulation error. 14.1 is played for a capped number of shots per "rack" (the driver's shot cap).
+// a planner error or a simulation error. 14.1 is played for a capped number of shots per "rack" (the driver's shot cap). The
+// 8-ball house rules (BarHouse8Ball, Apa8Ball) on the 7-ft bar table as well (WP-12 review).
 RB_TEST(Integ_ARCH_AI10_Slow_OtherDisciplines)
 {
 	const int Racks = RacksPerPair(kRelease ? 20 : 1);
@@ -364,9 +366,27 @@ RB_TEST(Integ_ARCH_AI10_Slow_OtherDisciplines)
 		std::vector<PairResult> Pairs(1);
 		Pairs[0].A = human::AiProfileId::RoadPlayer;
 		Pairs[0].B = human::AiProfileId::LeaguePlayer;
-		PlayPairs(Pairs, Racks, Game, kTableNineFootPro, 0x07E4u + static_cast<std::uint64_t>(Game));
+		PlayPairs(Pairs, Racks, aitest::WpaPreset(Game), kTableNineFootPro, 0x07E4u + static_cast<std::uint64_t>(Game));
 		std::printf("  A-AI-10 discipline %d:\n", static_cast<int>(Game));
 		PrintPair(Pairs[0]);
 		RB_CHECK(Clean(Pairs[0]));
+	}
+	// WP-12 review: the 8-ball house rules of the bar venue on the 7-ft bar table: BarHouse8Ball (every foul gives ball in hand
+	// behind the head string, the last-pocket rule, calls on the 8 only) and APA (cue-ball fouls only).
+	for (const rules::RulesPreset Preset : {rules::RulesPreset::BarHouse8Ball, rules::RulesPreset::Apa8Ball})
+	{
+		std::vector<PairResult> Pairs(2);
+		Pairs[0].A = human::AiProfileId::RoadPlayer;
+		Pairs[0].B = human::AiProfileId::LeaguePlayer;
+		Pairs[1].A = human::AiProfileId::BarRegular;
+		Pairs[1].B = human::AiProfileId::Tourist;
+		PlayPairs(Pairs, Racks, Preset, kTableSevenFootBar, 0x8A5Eu + static_cast<std::uint64_t>(Preset));
+		std::printf("  A-AI-10 8-ball preset %d on the 7-ft bar table:\n", static_cast<int>(Preset));
+		for (const PairResult& P : Pairs)
+		{
+			PrintPair(P);
+			RB_CHECK(Clean(P));
+			RB_CHECK(P.Stalled * 10 <= P.Racks);
+		}
 	}
 }

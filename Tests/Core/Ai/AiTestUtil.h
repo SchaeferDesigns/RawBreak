@@ -74,23 +74,36 @@ namespace aitest
 		return BuildRulesTable(T, kR, Radii, kMaxBalls);
 	}
 
-	inline rules::MatchConfig MakeMatch(rules::Discipline Game, const TableGeometry& T, std::uint64_t Seed)
+	// The WPA preset of a discipline (the tests' default rules).
+	inline rules::RulesPreset WpaPreset(rules::Discipline Game)
 	{
-		rules::MatchConfig C;
-		C.Game = Game;
 		switch (Game)
 		{
-		case rules::Discipline::EightBall: C.Rules = rules::MakeRulesConfig(rules::RulesPreset::Wpa8Ball); break;
-		case rules::Discipline::TenBall: C.Rules = rules::MakeRulesConfig(rules::RulesPreset::Wpa10Ball); break;
-		case rules::Discipline::StraightPool: C.Rules = rules::MakeRulesConfig(rules::RulesPreset::Wpa14_1); break;
-		case rules::Discipline::Blackball: C.Rules = rules::MakeRulesConfig(rules::RulesPreset::WpaBlackball); break;
-		case rules::Discipline::NineBall: C.Rules = rules::MakeRulesConfig(rules::RulesPreset::Wpa9Ball); break;
+		case rules::Discipline::EightBall: return rules::RulesPreset::Wpa8Ball;
+		case rules::Discipline::TenBall: return rules::RulesPreset::Wpa10Ball;
+		case rules::Discipline::StraightPool: return rules::RulesPreset::Wpa14_1;
+		case rules::Discipline::Blackball: return rules::RulesPreset::WpaBlackball;
+		case rules::Discipline::NineBall: break;
 		}
+		return rules::RulesPreset::Wpa9Ball;
+	}
+
+	// A match of Preset's discipline and rules (house rules: BarHouse8Ball, Apa8Ball, ...).
+	inline rules::MatchConfig MakeMatchWith(rules::RulesPreset Preset, const TableGeometry& T, std::uint64_t Seed)
+	{
+		rules::MatchConfig C;
+		C.Game = rules::DisciplineOf(Preset);
+		C.Rules = rules::MakeRulesConfig(Preset);
 		C.RaceTo = 100000; // racks are counted by the driver
 		C.Table = RulesTableOf(T);
 		C.Seed = Seed;
 		C.RackGaps = kRackGapWoodenRack;
 		return C;
+	}
+
+	inline rules::MatchConfig MakeMatch(rules::Discipline Game, const TableGeometry& T, std::uint64_t Seed)
+	{
+		return MakeMatchWith(WpaPreset(Game), T, Seed);
 	}
 
 	// A mid-rack AwaitShot state: the listed object balls on the table, the others pocketed; cue ball at Cue (or in hand in
@@ -353,6 +366,7 @@ namespace aitest
 		int PotsMade = 0;          // intended ball pocketed
 		int Safeties = 0;
 		int PushOuts = 0;
+		int SpotRequests = 0;      // rules 4.4 spot requests (RequestSpot decisions)
 		int Fouls = 0;
 		int Breaks = 0;
 		int BreakPots = 0;         // breaks that pocketed a ball
@@ -445,6 +459,23 @@ namespace aitest
 			St[Me].DecisionSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count();
 			St[Me].Decisions++;
 			St[Me].Simulations += D.Reasoning.Simulations;
+			if (D.Kind == ai::DecisionKind::RequestSpot)
+			{
+				// Rules 4.4: the game spots the ball and asks the planner again.
+				if (Trace)
+				{
+					char Text[400];
+					ai::FormatReasoning(D, Text, static_cast<int>(sizeof(Text)));
+					std::printf("    [rack %u] P%d %s\n", RackIndex, Me, Text);
+				}
+				St[Me].SpotRequests++;
+				if (rules::RequestSpot(C, S) != ErrorCode::Ok)
+				{
+					St[Me].PlannerErrors++;
+					break;
+				}
+				continue;
+			}
 			if (D.Kind != ai::DecisionKind::Stroke)
 			{
 				if (Trace)

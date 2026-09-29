@@ -131,7 +131,22 @@ namespace rb::ai
 			Vec2 Ghost;
 		};
 
-		BestPot BestDirectPot(const EvalContext& Context, const BallLayout& Layout, const Vec2& Cue, double CueRadius, std::uint32_t Legal, double Sigma)
+		constexpr int kEightBallId = 8;
+
+		// 8-ball last-pocket variant (RulesConfig::LastPocketRule, rules 12.6): the 8 wins only in the pocket of the last ball of
+		// Player's group (PocketId::None: any pocket; other disciplines and the WPA rules: None).
+		PocketId EightPocketOf(const EvalContext& Context, const rules::GameState& State, int Player)
+		{
+			if (State.Game != rules::Discipline::EightBall || !Context.Match->Rules.LastPocketRule || Player < 0 || Player > 1)
+			{
+				return PocketId::None;
+			}
+			const rules::BallGroup Group = State.Players[Player].Group;
+			return Group == rules::BallGroup::None ? PocketId::None : State.LastGroupBallPocket[static_cast<int>(Group)];
+		}
+
+		BestPot BestDirectPot(const EvalContext& Context, const BallLayout& Layout, const Vec2& Cue, double CueRadius, std::uint32_t Legal, double Sigma,
+			PocketId EightPocket)
 		{
 			const TableGeometry& T = *Context.Table;
 			BestPot Best;
@@ -145,6 +160,10 @@ namespace rb::ai
 				const double Ro = Layout.Radius[b];
 				for (int p = 0; p < T.Pockets.Size(); ++p)
 				{
+					if (b == kEightBallId && EightPocket != PocketId::None && p != static_cast<int>(EightPocket))
+					{
+						continue; // the last-pocket rule: the 8 anywhere else loses the rack
+					}
 					const PocketAim Aim = PocketAimFor(T, p, Object, Ro);
 					if (!Aim.Valid)
 					{
@@ -346,15 +365,27 @@ namespace rb::ai
 		const rules::RulesTable& RT = Context.Match->Table;
 		const EvalPlayer& Me = Context.Players[Player];
 		const BallLayout Layout = MakeBallLayout(G, RT);
-		const std::uint32_t Legal = LegalMaskOf(Context, G);
+		std::uint32_t Legal = LegalMaskOf(Context, G);
 		const double Rc = RT.BallRadius[0];
 		Info.InHand = G.CueBall != rules::CueBallNext::InPosition || G.Balls[0].Kind != rules::BallStatusKind::OnTable;
+		if (G.CueBall == rules::CueBallNext::InHandAboveHeadString)
+		{
+			// From the kitchen no ball above the head string can be played directly (rules 3.11).
+			for (int b = 1; b < rules::kRulesBallCount; ++b)
+			{
+				if (HasBit(Layout.OnTable, b) && rules::AboveHeadString(Layout.Position[b], RT, Context.Match->Rules.Tolerances.Line))
+				{
+					Legal &= ~Bit(b);
+				}
+			}
+		}
+		const PocketId EightPocket = EightPocketOf(Context, G, Player);
 
 		BestPot Best;
 		if (!Info.InHand)
 		{
 			Info.CuePosition = G.Balls[0].Position;
-			Best = BestDirectPot(Context, Layout, Info.CuePosition, Rc, Legal, Me.AimSigma);
+			Best = BestDirectPot(Context, Layout, Info.CuePosition, Rc, Legal, Me.AimSigma, EightPocket);
 			Info.Visibility = Visibility(Layout, Info.CuePosition, Rc, Legal);
 		}
 		else
@@ -369,7 +400,7 @@ namespace rb::ai
 				{
 					return;
 				}
-				const BestPot From = BestDirectPot(Context, Layout, P, Rc, Legal, Me.AimSigma);
+				const BestPot From = BestDirectPot(Context, Layout, P, Rc, Legal, Me.AimSigma, EightPocket);
 				if (From.Chance > Best.Chance || Best.Ball == kNoBall)
 				{
 					Best = From;
@@ -384,6 +415,10 @@ namespace rb::ai
 				}
 				for (int p = 0; p < T.Pockets.Size(); ++p)
 				{
+					if (b == kEightBallId && EightPocket != PocketId::None && p != static_cast<int>(EightPocket))
+					{
+						continue;
+					}
 					const PocketAim Aim = PocketAimFor(T, p, Layout.Position[b], Layout.Radius[b]);
 					if (!Aim.Valid || !PathClear(Layout, Layout.Position[b], Aim.Point, Layout.Radius[b], Bit(0) | Bit(b)))
 					{
@@ -427,11 +462,16 @@ namespace rb::ai
 			After.Balls[0].Position = Best.Ghost;
 			After.CueBall = rules::CueBallNext::InPosition;
 			After.IsBreakShot = false;
-			if (G.Game == rules::Discipline::EightBall && After.Players[Player].Group == rules::BallGroup::None && Best.Ball != 8)
+			if (G.Game == rules::Discipline::EightBall && After.Players[Player].Group == rules::BallGroup::None && Best.Ball != kEightBallId)
 			{
 				After.Players[Player].Group = rules::GroupOf(Best.Ball);
 				After.Players[1 - Player].Group = After.Players[Player].Group == rules::BallGroup::Solids ? rules::BallGroup::Stripes : rules::BallGroup::Solids;
 				After.TableOpen = false;
+			}
+			if (G.Game == rules::Discipline::EightBall && Best.Ball != kEightBallId && rules::GroupOf(Best.Ball) != rules::BallGroup::None)
+			{
+				// The pocket of the group's latest ball (the last-pocket rule's pocket for the 8 once the group is cleared).
+				After.LastGroupBallPocket[static_cast<int>(rules::GroupOf(Best.Ball))] = Best.Pocket;
 			}
 			const std::uint32_t NextLegal = LegalMaskOf(Context, After);
 			if ((NextLegal & ~Bit(0)) == 0u || rules::CountObjectBallsOnTable(After) == 0)
@@ -441,7 +481,7 @@ namespace rb::ai
 			else
 			{
 				const BallLayout LayoutAfter = MakeBallLayout(After, RT);
-				Info.Pattern = BestDirectPot(Context, LayoutAfter, Best.Ghost, Rc, NextLegal, Me.AimSigma).Chance;
+				Info.Pattern = BestDirectPot(Context, LayoutAfter, Best.Ghost, Rc, NextLegal, Me.AimSigma, EightPocketOf(Context, After, Player)).Chance;
 			}
 		}
 		return Info;
@@ -657,6 +697,17 @@ namespace rb::ai
 			{
 			case rules::MatchPhase::AwaitShot:
 			{
+				if (State.Game.CueBall == rules::CueBallNext::InHandAboveHeadString && Depth < kMaxOptionDepth &&
+					rules::SpotRequestCandidate(State.Game, LegalMaskOf(Context, State.Game), Context.Match->Table, Context.Match->Rules.Tolerances) >= 0)
+				{
+					// In hand behind the head string with every legal ball behind it: the mover asks for the spot (rules 4.4, the
+					// planner's RequestSpot decision), so the position is worth the spotted one.
+					rules::MatchState Spotted = State;
+					if (rules::RequestSpot(*Context.Match, Spotted) == ErrorCode::Ok)
+					{
+						return StateValueAt(Context, Spotted, Player, Depth + 1);
+					}
+				}
 				const double P = MoverWinProbability(Context, State.Game);
 				return State.Game.Shooter == Player ? P : 1.0 - P;
 			}
@@ -686,6 +737,17 @@ namespace rb::ai
 			case rules::MatchPhase::RackSetup:
 			{
 				const int Breaker = State.Game.RackBreaker < 0 || State.Game.RackBreaker > 1 ? 0 : State.Game.RackBreaker;
+				if (Context.Match->Game == rules::Discipline::StraightPool)
+				{
+					// 14.1 (the three-foul penalty's re-rack): the points race goes on with the scores after the penalty; the breaker
+					// opens a full rack, so the other player comes to a typical table first (INTERPRETATION). A rack model here would
+					// hide the 16 points of a third foul.
+					rules::GameState G = State.Game;
+					G.Shooter = 1 - Breaker;
+					G.IsBreakShot = false;
+					const double P = TypicalWinProbability(Context, G);
+					return G.Shooter == Player ? P : 1.0 - P;
+				}
 				const int N = FullRackBalls(Context.Match->Game) > kValueHorizon ? kValueHorizon : FullRackBalls(Context.Match->Game);
 				const TurnModel Turns(Clamp(Context.Players[Breaker].RunoutRate, 0.0, 1.0), Clamp(Context.Players[1 - Breaker].RunoutRate, 0.0, 1.0),
 					RotationGame(Context.Match->Game));

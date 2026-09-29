@@ -108,18 +108,22 @@ namespace rb::ai
 	// group + 1 (open table: the smaller group + 1); 14.1 min(14, points to go).
 	RB_API int BallsToWin(const rules::GameState& State, int Player, const rules::RulesConfig& Config);
 
-	// P(the player to move, State.Shooter, wins the rack): runout rates r = q^n, the alternating steady state
-	// P = r_A / (r_A + r_B - r_A r_B), the attempt value p1 W_cont + (1 - p1)(1 - P_opp) (depth >= 2: a two-shot chain), and for
-	// players who play safeties the max with a safety value that falls when the mover is hooked and carries the kick foul
-	// risk (the third foul loses the rack). The cue ball in hand counts as a free placement.
+	// P(the player to move, State.Shooter, wins the rack): a turn model (each player makes his next ball with his runout rate q
+	// and keeps the table, a miss hands the other player a typical table; the ball counts capped at a 3-ball horizon, 14.1 a
+	// points race on a relative horizon; Docs/architecture.md 7.6) in which the mover's actual next shot p1 = BestNextShot
+	// replaces his first q: the attempt value p1 W_cont + (1 - p1)(1 - P_opp) (depth >= 2: a two-shot chain); a hooked mover
+	// fouls with (1 - visibility)(1 - KickSkill) (the third foul loses the rack where the three-foul rule applies; 14.1: its
+	// points); players who play safeties take the max with a safety value. The cue ball in hand counts as a free placement.
 	RB_API double MoverWinProbability(const EvalContext& Context, const rules::GameState& State);
 
 	// The same value for a TYPICAL first shot (make chance q, full visibility): what the player to move can expect when the table
 	// is not known, e.g. after a missed pot (the planner's miss value).
 	RB_API double TypicalWinProbability(const EvalContext& Context, const rules::GameState& State);
 
-	// P(Player wins the rack) for any match phase: AwaitShot -> MoverWinProbability (or its complement); AwaitDecision -> the
-	// decider takes the option that is best for him (ApplyOption on a copy); RackSetup -> the breaker's typical value;
-	// RackOver / MatchOver -> 0.5 (the caller knows the winner from the outcome).
+	// P(Player wins the rack) for any match phase: AwaitShot -> MoverWinProbability (or its complement; in hand behind the head
+	// string with every legal ball behind it: the value after the rules' spot request, 4.4); AwaitDecision -> the
+	// decider takes the option that is best for him (ApplyOption on a copy); RackSetup -> the breaker's typical value (14.1, the
+	// three-foul re-rack: the points race with the scores after the penalty and the other player to move); RackOver / MatchOver
+	// -> 0.5 (the caller knows the winner from the outcome).
 	RB_API double StateValue(const EvalContext& Context, const rules::MatchState& State, int Player);
 }

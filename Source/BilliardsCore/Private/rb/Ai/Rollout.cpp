@@ -344,6 +344,7 @@ namespace rb::ai
 		// exact stroke: it counts like keeping the table.
 		const bool Planned = C.GameBall && R.Potted;
 		const double Value = R.Won && !Planned ? Min(R.Value, C.KeepValue) : R.Value;
+		const double Foul = R.Foul ? kPlannedFoulPenalty : 0.0;
 		switch (C.Type)
 		{
 		case ShotType::Pot:
@@ -353,15 +354,16 @@ namespace rb::ai
 		case ShotType::Carom:
 			// It works in the AI's mind's eye: weigh it by the make chance it believes in ("percentage intuition"); a stroke that
 			// does not even work noise-free is at best a miss.
-			return R.Potted && !R.Foul ? C.PerceivedPot * Value + (1.0 - C.PerceivedPot) * C.MissValue : Min(Value, C.MissValue);
+			return (R.Potted && !R.Foul ? C.PerceivedPot * Value + (1.0 - C.PerceivedPot) * C.MissValue : Min(Value, C.MissValue)) - Foul;
 		case ShotType::Safety:
 		case ShotType::Kick:
 		case ShotType::PushOut:
-			return Value + Context.Profile.SafetyBias;
+			return Value + Context.Profile.SafetyBias - Foul;
 		case ShotType::Break:
+		case ShotType::Lag:
 			break;
 		}
-		return Value;
+		return Value - Foul;
 	}
 
 	void ScreenCandidate(const PlannerState& State, int Index, WorkerState& W, CandidateResult& Out)
@@ -420,6 +422,7 @@ namespace rb::ai
 		Out.PotShare = Best.Potted ? 1.0 : 0.0;
 		Out.FoulShare = Best.Foul ? 1.0 : 0.0;
 		Out.Score = ScreenScore(X, C, Out);
+		Out.Screened = true;
 	}
 
 	// ------------------------------------------------------------------------------------------------------------------------
