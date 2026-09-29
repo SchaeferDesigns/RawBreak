@@ -36,6 +36,12 @@ public class RawBreak : ModuleRules
 			"SlateCore",
 			// Settings (quality presets later hook into UGameUserSettings + scalability groups).
 			"DeveloperSettings",
+			// M2 (Docs/ue-architecture.md 18.5): table audio voices are USynthComponents with ISoundGenerators (AudioMixer); the DSP
+			// (contact pulses, kernels, modal banks, the per-table shot clock) is the RawBreakAudioDsp module (no UObjects).
+			"AudioMixer",
+			"RawBreakAudioDsp",
+			// M2 (18.6): EPhysicalSurface / physical materials of the balls that leave the table.
+			"PhysicsCore",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

@@ -1,5 +1,6 @@
 """Runs every RAW BREAK content generator in dependency order and records the asset metrics of acceptance check A2
-(Docs/ue-architecture.md 11, 12). Owner: UE-8.
+(Docs/ue-architecture.md 11, 12; M2 list 18.9). Owner: UE-8; since M2 the architect (packages never edit this list: a new
+generator is added by the architect step, its script may be a stub until the package implements it).
 
   python Tools/unreal/rbue.py py Tools/unreal/editor/rb_make_all.py                    # regenerate /Game/Generated
   python Tools/unreal/rbue.py py Tools/unreal/editor/rb_make_all.py -- --strict        # every generator must exist (M1 / A2)
@@ -29,13 +30,27 @@ sys.path.insert(0, EDITOR_DIR)
 import rb_common as rb  # noqa: E402
 import rb_m1_layout as layout  # noqa: E402
 
-# (script, owner) in dependency order.
+# (script, owner) in dependency order. M2 owners (Docs/ue-architecture.md 18.2); the M1 owner in brackets.
 GENERATORS = [
-	("rb_make_materials.py", "UE-3"),
-	("rb_bake_table.py", "UE-1"),
-	("rb_bake_ball.py", "UE-2"),
-	("rb_bake_cue.py", "UE-4"),
-	("rb_make_test_room.py", "UE-8"),
+	("rb_make_materials.py", "M2-L (UE-3)"),         # table-family materials incl. the dive-bar instances and the cabinet
+	("rb_make_physics.py", "M2-E"),                  # physical materials (floors, ball) before any level
+	("rb_bake_table.py", "M2-L (UE-1)"),             # 9-ft + 7-ft playfield meshes from rb::TableGeometry
+	("rb_import_table.py", "M2-L"),                  # table bodies / coin-op cabinet exported by Tools/blender/table
+	("rb_bake_ball.py", "M2-E (UE-2)"),
+	("rb_bake_cue.py", "M2-F (UE-4)"),
+	("rb_make_player.py", "M2-F"),                   # carrying hand of the diegetic ball in hand
+	("rb_make_audio.py", "M2-C"),                    # submixes, attenuation, concurrency, reverb IRs
+	("rb_make_test_room.py", "M2-L (UE-8)"),
+	("rb_make_divebar_materials.py", "M2-B"),        # venue masters, MI_DB_*, MPC_DB_Venue, decals
+	("rb_import_divebar.py", "M2-A"),                # Blender exports of M2-A / M2-B (Tools/blender/rbbl.py runs them first)
+	("rb_make_divebar.py", "M2-A"),                  # L_DiveBar + sublevels + cameras + validator
+	("rb_make_title.py", "M2-D"),                    # L_Title
+]
+
+# Level validators run after the generators: (map, validator name). A map that does not exist is skipped.
+LEVEL_VALIDATORS = [
+	(layout.MAP, "m1"),                                  # ARbTestRoom::ValidateM1Level
+	("/Game/Generated/Maps/L_DiveBar", "venue"),         # ARbVenueInfo::ValidateVenueLevel (M2-A)
 ]
 
 METRICS = os.path.normpath(os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_saved_dir()), "RbLogs", "rb_make_all_metrics.json"))
@@ -111,10 +126,15 @@ def collect_metrics() -> dict:
 			metrics["meshes"][package] = mesh_metrics(asset)
 		elif isinstance(asset, (unreal.Material, unreal.MaterialInstanceConstant, unreal.MaterialParameterCollection)):
 			metrics["materials"][package] = material_metrics(asset)
-	if unreal.EditorAssetLibrary.does_asset_exist(layout.MAP):
-		world = unreal.EditorLoadingAndSavingUtils.load_map(layout.MAP)
-		report, ok = unreal.RbTestRoom.validate_m1_level(world)
-		metrics["levels"][layout.MAP] = {"validator_ok": bool(ok), "report": str(report).splitlines()}
+	for level, kind in LEVEL_VALIDATORS:
+		if not unreal.EditorAssetLibrary.does_asset_exist(level):
+			continue
+		world = unreal.EditorLoadingAndSavingUtils.load_map(level)
+		if kind == "m1":
+			report, ok = unreal.RbTestRoom.validate_m1_level(world)
+		else:
+			report, ok = unreal.RbVenueInfo.validate_venue_level(world)
+		metrics["levels"][level] = {"validator_ok": bool(ok), "report": str(report).splitlines()}
 	return metrics
 
 

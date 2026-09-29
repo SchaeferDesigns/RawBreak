@@ -54,6 +54,21 @@ class ARbCue;
 DECLARE_MULTICAST_DELEGATE_OneParam(FRbOnPlaybackFinished, const TSharedRef<const FRbShot>& /*Shot*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FRbOnShotEvent, const TSharedRef<const FRbShot>& /*Shot*/, int32 /*EventIndex*/);
 
+// M2 audio contract (Docs/ue-architecture.md 18.5, audio.md 5.1-5.2): the mapping from the playback clock to shot time, so
+// the audio renderer can schedule every event sample-accurately (and follow slow motion, pause and seeks) without polling.
+// While not held: ShotTime(c) = OriginShotTime + (c - OriginClock) * Rate, for clock values c in the component's clock domain
+// (ClockNow(): FApp::GetCurrentTime() in normal play = FPlatformTime::Seconds() sampled at the frame start - the same time base
+// as FRbShotRequest::ContactTime). Held (paused, world paused): ShotTime = OriginShotTime.
+struct FRbPlaybackClock
+{
+	double OriginClock = 0.0;
+	double OriginShotTime = 0.0;
+	float Rate = 1.0f;
+	bool bHeld = false;
+	bool bLive = false; // anchored at the tip contact (a live shot), else a replay
+};
+DECLARE_MULTICAST_DELEGATE_TwoParams(FRbOnPlaybackClock, const TSharedRef<const FRbShot>& /*Shot*/, const FRbPlaybackClock& /*Clock*/);
+
 UCLASS(ClassGroup = (RawBreak), meta = (BlueprintSpawnableComponent))
 class RAWBREAK_API URbShotPlaybackComponent : public UActorComponent
 {
@@ -86,6 +101,13 @@ public:
 
 	FRbOnPlaybackFinished OnFinished;
 	FRbOnShotEvent OnShotEvent;
+
+	// M2 (architect; audio, 18.5): Play broadcasts OnPlaybackStarted after the first evaluation (before the first events fire);
+	// SetRate, SetPaused, a world pause / resume and SeekTo broadcast OnPlaybackClockChanged with the new mapping.
+	FRbOnPlaybackClock OnPlaybackStarted;
+	FRbOnPlaybackClock OnPlaybackClockChanged;
+	// The current mapping (valid while IsPlaying()).
+	FRbPlaybackClock GetClockMapping() const;
 
 	// UActorComponent
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -152,6 +174,8 @@ private:
 	float Rate = 1.0f;
 	bool bPaused = false;
 	bool bWorldPaused = false;              // the owning world was paused at the last tick
+	bool bLiveShot = false;                 // Play anchored at the contact
+	void BroadcastClockChanged();
 	int32 NextEventIndex = 0;
 	TWeakObjectPtr<ARbCue> Cue;
 

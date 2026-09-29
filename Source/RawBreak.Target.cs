@@ -7,6 +7,6 @@ public class RawBreakTarget : TargetRules
 		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
-		ExtraModuleNames.AddRange(new string[] { "RawBreak", "BilliardsCore", "RawBreakShaders" });
+		ExtraModuleNames.AddRange(new string[] { "RawBreak", "BilliardsCore", "RawBreakShaders", "RawBreakAudioDsp" });
 	}
 }

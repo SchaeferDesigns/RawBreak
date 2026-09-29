@@ -9,8 +9,9 @@
 //   Glance (Tab held)     overlay glance while held (Triggered = held, Completed = released)
 //   ToggleOverlay (F1)    pin / unpin the overlay;  ToggleDebug (F2): physics debug block
 //   Replay (R)            replay the last shot from the shooter's view (only when URbMatchDirector::IsReplayAllowed); while a
-//                         replay runs: next view. Esc (a legacy key binding of this controller, not in the mapping context, so
-//                         no key is bound twice there) stops the replay.
+//                         replay runs: next view.
+//   Pause (Esc)           M2: stops a running replay, else URbUiSubsystem::TogglePauseMenu (M2-D). Replaces M1's legacy Esc key
+//                         binding (the Pause action of URbInputSetup triggers while the game is paused).
 //   CycleOption (Q / E)   the director's highlighted decision option -1 / +1
 // Mouse: captured, hidden, game-only input (the raw-input thread of the stroke needs the high-precision mouse mode).
 
@@ -45,6 +46,8 @@ public:
 	void HandleReplayBack();
 	// Returns true if the director moved its highlighted option.
 	bool HandleCycleOption(float Direction);
+	// Esc: replay back, else the pause menu (M2).
+	void HandlePause();
 
 	// APlayerController
 	virtual void BeginPlay() override;
@@ -56,6 +59,7 @@ protected:
 	void OnToggleDebug(const FInputActionValue& Value);
 	void OnReplay(const FInputActionValue& Value);
 	void OnCycleOption(const FInputActionValue& Value);
+	void OnPause(const FInputActionValue& Value);
 
 	// Adds the input setup's mapping context to the local player's Enhanced Input subsystem (once). Called from BeginPlay AND
 	// SetupInputComponent: a controller spawned into a world that already began play runs BeginPlay before SetPlayer ->

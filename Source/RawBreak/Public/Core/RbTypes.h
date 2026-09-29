@@ -97,6 +97,27 @@ enum class ERbTablePart : uint8
 	Count UMETA(Hidden)
 };
 
+// --- M2 additions (Docs/ue-architecture.md 18; architect) ------------------------------------------------------
+
+namespace rb::human { enum class VenueKind : std::uint8_t; }
+
+// Playable venues (title screen venue select, M2). Each venue is one generated level (RbTypes::MapFor).
+UENUM(BlueprintType)
+enum class ERbVenue : uint8
+{
+	TestRoom, // /Game/Generated/Maps/L_M1_TestRoom (9-ft pro table, WPA lamp)
+	DiveBar,  // /Game/Generated/Maps/L_DiveBar (The Low Bridge Tavern, 7-ft coin-op bar table, Docs/specs/venue-dive-bar.md)
+};
+
+// rb::human::VenueKind (human-factors 4.5.5): the kind of venue a table stands in (slope range, ball cling).
+UENUM(BlueprintType)
+enum class ERbVenueKind : uint8
+{
+	DiveBar,
+	PoolHall,
+	Arena,
+};
+
 namespace RbTypes
 {
 	RAWBREAK_API rb::TablePreset ToCore(ERbTablePreset Preset);
@@ -106,4 +127,9 @@ namespace RbTypes
 	// WPA rules preset of a discipline (rules.md 12.1).
 	RAWBREAK_API rb::rules::RulesPreset RulesPresetFor(ERbDiscipline Discipline);
 	RAWBREAK_API const TCHAR* ToString(ERbTablePart Part);
+
+	// --- M2 additions ---
+	RAWBREAK_API rb::human::VenueKind ToCore(ERbVenueKind Kind);
+	// Level of a venue (RbAssetPaths).
+	RAWBREAK_API const TCHAR* MapFor(ERbVenue Venue);
 }

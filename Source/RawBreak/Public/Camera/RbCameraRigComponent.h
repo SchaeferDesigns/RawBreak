@@ -57,6 +57,15 @@ enum class ERbCameraRigMode : uint8
 	External,     // another actor owns the view (replay camera) - the rig idles
 };
 
+// M2 (architect, Docs/ue-architecture.md 18.5): one foot contact of the walking player (the human-motion layer's step phase).
+struct FRbFootstep
+{
+	FVector WorldLocation = FVector::ZeroVector; // under the foot, on the floor
+	bool bLeftFoot = false;
+	float SpeedMps = 0.0f;                       // walking speed at the step
+};
+DECLARE_MULTICAST_DELEGATE_OneParam(FRbOnFootstep, const FRbFootstep& /*Step*/);
+
 UCLASS(ClassGroup = (RawBreak), meta = (BlueprintSpawnableComponent))
 class RAWBREAK_API URbCameraRigComponent : public UActorComponent
 {
@@ -123,6 +132,10 @@ public:
 
 	// Advances the rig by DeltaSeconds (TickComponent calls it; tests drive it directly).
 	void TickRig(double DeltaSeconds);
+
+	// M2 contract (architect, 18.5): fired at every foot contact while walking (M2-F fires it from the human-motion layer; M2-C's
+	// footstep foley listens). TODO(M2-F): not fired yet.
+	FRbOnFootstep OnFootstep;
 
 	// --- state (tests, dev dump) ---------------------------------------------------------------------------
 

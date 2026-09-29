@@ -48,3 +48,6 @@ build-*/
 
 # Scratch UE content made by pipeline checks / per-WP dev maps (generated content lives in Content/Generated)
 Content/Dev/
+
+# Raw CC0 downloads (Tools/art/fetch_cc0.py; re-fetchable by ID + pinned SHA-256, venue-dive-bar 13.1)
+Art/Third/

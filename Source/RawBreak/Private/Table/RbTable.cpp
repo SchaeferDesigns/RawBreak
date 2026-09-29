@@ -1,5 +1,7 @@
 #include "Table/RbTable.h"
 
+#include "rb/Human/Venue.h"
+
 #include "RawBreak.h"
 #include "Core/RbAssetPaths.h"
 #include "Core/RbCoords.h"
@@ -80,6 +82,9 @@ FString ARbTable::MakeBuildKey() const
 {
 	FString Key = FString::Printf(TEXT("%d|%d|%lld|%.12g|%d"), static_cast<int32>(Preset), static_cast<int32>(BallSet), BallSetSeed, LampUndersideHeight,
 		bUseBakedMeshes ? 1 : 0);
+	// M2: venue condition and lamp footprint (they change the context, not the meshes).
+	Key += FString::Printf(TEXT("|%d|%d|%d|%lld|%d|%d|%.12g|%.12g|%.12g|%.12g"), TableIndex, bUseVenueCondition ? 1 : 0, static_cast<int32>(VenueKind),
+		VenueSeed, bFirstCareerTable ? 1 : 0, bUseLampFootprint ? 1 : 0, LampFootprintMin.X, LampFootprintMin.Y, LampFootprintMax.X, LampFootprintMax.Y);
 	for (const TSoftObjectPtr<UMaterialInterface>& Material : PartMaterials)
 	{
 		Key += TEXT("|") + Material.ToSoftObjectPath().ToString();
@@ -87,13 +92,31 @@ FString ARbTable::MakeBuildKey() const
 	return Key;
 }
 
-void ARbTable::RebuildTable()
+FRbTableSetup ARbTable::MakeTableSetup() const
 {
 	FRbTableSetup Setup;
 	Setup.Table = Preset;
 	Setup.BallSet = BallSet;
 	Setup.BallSetSeed = static_cast<uint64>(BallSetSeed);
 	Setup.LampUndersideZ = LampUndersideHeight > 0.0 ? LampUndersideHeight : rb::kInfinity;
+	if (bUseVenueCondition)
+	{
+		// Venue table (M2, H-2): seeded slope + ball cling, venue ball set seed (human-factors 4.5.5, HF-41, HF-43).
+		const uint64 Seed = static_cast<uint64>(VenueSeed);
+		Setup.Condition = rb::human::MakeVenueTableCondition(Seed, TableIndex, RbTypes::ToCore(VenueKind), bFirstCareerTable, false);
+		Setup.BallSetSeed = rb::human::VenueBallSetSeed(Seed, TableIndex);
+	}
+	if (bUseLampFootprint)
+	{
+		Setup.LampFootprint.Lo = rb::Vec2(LampFootprintMin.X, LampFootprintMin.Y);
+		Setup.LampFootprint.Hi = rb::Vec2(LampFootprintMax.X, LampFootprintMax.Y);
+	}
+	return Setup;
+}
+
+void ARbTable::RebuildTable()
+{
+	const FRbTableSetup Setup = MakeTableSetup();
 
 	FString Error;
 	Context = FRbTableContext::Create(Setup, Error);

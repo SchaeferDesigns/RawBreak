@@ -24,6 +24,7 @@
 #include "GameFramework/GameUserSettings.h"
 
 #include "Core/RbTypes.h"
+#include "Settings/RbSettingsTypes.h"
 
 #include "RbGameUserSettings.generated.h"
 
@@ -106,6 +107,20 @@ public:
 	UPROPERTY(config) float MotionBlurScale = 1.0f;
 	UPROPERTY(config) float GrainScale = 1.0f;
 	UPROPERTY(config) bool bDepthOfField = true;
+
+	// --- M2 additions (Docs/ue-architecture.md 18.4; the settings API: owner M2-D, readers M2-F / M2-C) ------------------
+	// Engine rows used by the M2 settings menu: window mode / resolution (UGameUserSettings::FullscreenMode, ResolutionSizeX/Y,
+	// SetScreenResolution + ApplyResolutionSettings), frame cap (FrameRateLimit), v-sync.
+	UPROPERTY(config) FRbControlSettings Controls;
+	UPROPERTY(config) FRbCameraSettings Camera;
+	UPROPERTY(config) FRbAudioVolumes Volumes;
+	// Contextual key hints (get down, stroke, place the cue ball ...; the M2 stand-in for ui-ux 3.5 prompts).
+	UPROPERTY(config) bool bShowKeyHints = true;
+
+	// Broadcast after ApplyNonResolutionSettings (ApplySettings, startup) and by the settings menu after every live change.
+	// Readers re-read the fields above; never cache them across a broadcast.
+	static FSimpleMulticastDelegate& OnSettingsChanged();
+	void NotifySettingsChanged();
 
 protected:
 	// Fills ScalabilityQuality and the RAW BREAK option levels from a preset level.

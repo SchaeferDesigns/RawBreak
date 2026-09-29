@@ -7,6 +7,7 @@
 #include "Input/RbInputSetup.h"
 #include "Replay/RbReplaySubsystem.h"
 #include "UI/RbOverlayComponent.h"
+#include "UI/Core/RbUiSubsystem.h"
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -59,10 +60,8 @@ void ARbPlayerController::SetupInputComponent()
 	Input->BindAction(InputSetup->ToggleDebug, ETriggerEvent::Triggered, this, &ARbPlayerController::OnToggleDebug);
 	Input->BindAction(InputSetup->Replay, ETriggerEvent::Triggered, this, &ARbPlayerController::OnReplay);
 	Input->BindAction(InputSetup->CycleOption, ETriggerEvent::Triggered, this, &ARbPlayerController::OnCycleOption);
-	// Esc leaves a replay: a legacy key binding outside the mapping context (UEnhancedPlayerInput still evaluates the legacy key
-	// bindings after the actions). UEnhancedInputComponent hides the legacy helpers, so bind through the base class. A "Back" action
-	// in URbInputSetup (UE-5a) would replace this.
-	static_cast<UInputComponent*>(Input)->BindKey(EKeys::Escape, IE_Pressed, this, &ARbPlayerController::HandleReplayBack);
+	// Esc (M2): the Pause action - leaves a replay, else opens / closes the pause menu (IA_Pause triggers while paused).
+	Input->BindAction(InputSetup->Pause, ETriggerEvent::Triggered, this, &ARbPlayerController::OnPause);
 	RegisterMappingContext(); // SetPlayer (the local player is set) may run after BeginPlay
 }
 
@@ -158,8 +157,25 @@ bool ARbPlayerController::HandleCycleOption(float Direction)
 	return Director->CycleOption(Direction > 0.0f ? 1 : -1);
 }
 
+void ARbPlayerController::HandlePause()
+{
+	if (URbReplaySubsystem* Replay = FindReplay())
+	{
+		if (Replay->IsReplaying())
+		{
+			Replay->StopReplay();
+			return;
+		}
+	}
+	if (URbUiSubsystem* Ui = URbUiSubsystem::Get(this))
+	{
+		Ui->TogglePauseMenu();
+	}
+}
+
 void ARbPlayerController::OnGlance(const FInputActionValue& Value) { HandleGlance(Value.Get<bool>()); }
 void ARbPlayerController::OnToggleOverlay(const FInputActionValue& /*Value*/) { HandleToggleOverlay(); }
 void ARbPlayerController::OnToggleDebug(const FInputActionValue& /*Value*/) { HandleToggleDebug(); }
 void ARbPlayerController::OnReplay(const FInputActionValue& /*Value*/) { HandleReplay(); }
 void ARbPlayerController::OnCycleOption(const FInputActionValue& Value) { HandleCycleOption(Value.Get<float>()); }
+void ARbPlayerController::OnPause(const FInputActionValue& /*Value*/) { HandlePause(); }

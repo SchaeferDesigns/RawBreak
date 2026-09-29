@@ -638,7 +638,7 @@ Done by the architect before any package starts (compiles, all M1 tests green; 1
 | Shared contracts (`Core/`) | `ERbVenue` (TestRoom, DiveBar) + `RbTypes::MapFor`, `ERbVenueKind` + `ToCore`; `RbAssetPaths`: `DiveBarMap`, `TitleMap`, venue / audio / player / physics directories, dive-bar table material instances, physical materials, tags (`RbPlayerTable`, `RbAudio_<Anchor>`, `RbDB_Ceiling`, `RbLooseBall`, `RbBallReturn`, `RbVenueInfo`), capture tags `RbCam_DB_V01..V12`, `RbCam_DB_TH1..TH7`, `RbCam_Menu_S0..S7`, `Collision::*`, `Surface::*` |
 | `ARbTable` (hand-off H-2) | `TableIndex`, venue condition (`bUseVenueCondition`, `VenueKind`, `VenueSeed`, `bFirstCareerTable` -> `rb::human::MakeVenueTableCondition` / `VenueBallSetSeed`), lamp footprint (`EnvironmentSpec::LampFootprint`), `MakeTableSetup()`; all in the build key |
 | Playback -> audio contract | `URbShotPlaybackComponent::OnPlaybackStarted` / `OnPlaybackClockChanged` with `FRbPlaybackClock` (origin clock, origin shot time, rate, held, live) and `GetClockMapping()`: the audio schedules every event from the mapping, never by polling (18.5) |
-| Input | `Pause` action (Esc, triggers while paused) replaces M1's legacy Esc key binding: `ARbPlayerController::HandlePause` = replay back, else `URbUiSubsystem::TogglePauseMenu`; 16 actions (mapping test updated) |
+| Input | `Pause` action (Esc, triggers while paused) replaces M1's legacy Esc key binding: `ARbPlayerController::HandlePause` = replay back, else `URbUiSubsystem::TogglePauseMenu`; 16 actions (tests updated: mapping test, and `Player.ControllerActions` checks the Pause binding and that no legacy Esc key binding remains) |
 | Camera -> audio | `URbCameraRigComponent::OnFootstep(FRbFootstep)` (fired by M2-F, heard by M2-C) |
 | Interaction | `URbInteractionSubsystem` (providers with Offer / Interact; dispatch implemented); `ARbPlayerCharacter::HandleConfirm` asks it first after the ball-in-hand placement |
 | Settings API | `FRbControlSettings`, `FRbCameraSettings`, `FRbAudioVolumes`, `bShowKeyHints` in `URbGameUserSettings` (validated ranges), static `OnSettingsChanged()` broadcast after every apply (18.4) |
@@ -970,9 +970,11 @@ only.
 * `DefaultEngine.ini`: see 18.1. `DefaultGame.ini` (at integration): `MapsToCook` + `L_DiveBar`, `L_Title`; `GameDefaultMap` ->
   `L_Title` once it exists. `DefaultInput.ini` is M2-F's (mouse smoothing / axis config), `DefaultScalability.ini` M2-D's.
 * `rbue.py`: `test --sound` (keeps the audio device for `RawBreak.Functional.Audio.*`), `capture` / `test --extra <UE args>`.
-* `rb_make_all.py` order: materials (M2-L) -> physics (M2-E) -> table (M2-L) -> ball (M2-E) -> cue (M2-F) -> player (M2-F) -> audio
+* `rb_make_all.py` order: materials (M2-L) -> physics (M2-E) -> table playfield bake + table-body import (M2-L) -> ball (M2-E) -> cue (M2-F) -> player (M2-F) -> audio
   (M2-C) -> test room (M2-L) -> venue materials (M2-B) -> dive-bar import + level (M2-A) -> title (M2-D); validators: M1 level,
-  venue level. Blender first: `python Tools/blender/rbbl.py all`. Packages never edit these lists; a new generator is a request.
+  venue level. Blender first: `python Tools/blender/rbbl.py all` (`db_build_all.py`: M2-A shell / neon, M2-L
+  `table/tb_build_all.py`, M2-B props and decals; missing generators are skipped, `--strict` fails on them). Packages never edit
+  these lists; a new generator is a request.
 * Content roots per package: 18.2. Scratch maps `/Game/Dev/M2<x>/` (git-ignored). `Art/Third/` (raw CC0 downloads) is git-ignored;
   the lock files with the SHA-256 pins are committed.
 * Licence ledger: per-package fragments `Docs/licenses/ledger/M2-<x>.csv` (the columns of `asset-ledger.csv`), merged by the

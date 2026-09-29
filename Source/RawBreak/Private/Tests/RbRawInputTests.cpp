@@ -305,7 +305,7 @@ bool FRbInputMapping::RunTest(const FString& Parameters)
 		const bool bMapped = Mappings.ContainsByPredicate([Action](const FEnhancedActionKeyMapping& M) { return M.Action == Action; });
 		TestTrue(*FString::Printf(TEXT("%s mapped"), *GetNameSafe(Action)), Action && bMapped);
 	}
-	TestEqual(TEXT("15 actions"), Setup->GetAllActions().Num(), 15);
+	TestEqual(TEXT("16 actions (M2: + Pause)"), Setup->GetAllActions().Num(), 16);
 
 	auto KeysOf = [&Mappings](const UInputAction* Action)
 	{
@@ -354,6 +354,7 @@ bool FRbInputMapping::RunTest(const FString& Parameters)
 		TipKeys.Contains(EKeys::Left) && TipKeys.Contains(EKeys::Right));
 	const TArray<FKey> CycleKeys = KeysOf(Setup->CycleOption);
 	TestTrue(TEXT("CycleOption = Q / E"), CycleKeys.Num() == 2 && CycleKeys.Contains(EKeys::Q) && CycleKeys.Contains(EKeys::E));
+	TestTrue(TEXT("Pause = Esc, triggers while paused (M2)"), KeysOf(Setup->Pause) == TArray<FKey>{EKeys::Escape} && Setup->Pause->bTriggerWhenPaused);
 
 	// Value types and triggers.
 	TestTrue(TEXT("Move 2D"), Setup->Move->ValueType == EInputActionValueType::Axis2D);

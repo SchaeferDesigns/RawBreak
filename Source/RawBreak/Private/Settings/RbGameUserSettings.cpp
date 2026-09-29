@@ -322,6 +322,10 @@ void URbGameUserSettings::SetToDefaults()
 	MotionBlurScale = 1.0f;
 	GrainScale = 1.0f;
 	bDepthOfField = true;
+	Controls = FRbControlSettings();
+	Camera = FRbCameraSettings();
+	Volumes = FRbAudioVolumes();
+	bShowKeyHints = true;
 }
 
 void URbGameUserSettings::LoadSettings(bool bForceReload)
@@ -342,6 +346,18 @@ void URbGameUserSettings::ApplyNonResolutionSettings()
 	RemoveQualityRows();                 // the engine's group update below must not collide with the previous rows
 	Super::ApplyNonResolutionSettings(); // vsync, frame limit, groups once the engine is initialised, HDR
 	ApplyQualityRows();                  // groups also at engine start (UGameEngine::Init) + the RAW BREAK rows
+	NotifySettingsChanged();             // M2: readers (aim / look, camera, audio volumes) re-read
+}
+
+FSimpleMulticastDelegate& URbGameUserSettings::OnSettingsChanged()
+{
+	static FSimpleMulticastDelegate Delegate;
+	return Delegate;
+}
+
+void URbGameUserSettings::NotifySettingsChanged()
+{
+	OnSettingsChanged().Broadcast();
 }
 
 void URbGameUserSettings::ValidateSettings()
@@ -353,4 +369,18 @@ void URbGameUserSettings::ValidateSettings()
 	HeadBobScale = FMath::Clamp(HeadBobScale, 0.0f, 1.0f);
 	MotionBlurScale = FMath::Clamp(MotionBlurScale, 0.0f, 1.0f);
 	GrainScale = FMath::Clamp(GrainScale, 0.0f, 1.0f);
+	// M2 rows (ui-ux 13.6 / 13.8 ranges).
+	Controls.AimDegreesPerCm = FMath::Clamp(Controls.AimDegreesPerCm, 0.5f, 60.0f);
+	Controls.AimSensitivity = FMath::Clamp(Controls.AimSensitivity, 0.1f, 5.0f);
+	Controls.FineAimFactor = FMath::Clamp(Controls.FineAimFactor, 0.03f, 0.5f);
+	Controls.AimAcceleration = FMath::Clamp(Controls.AimAcceleration, 0.0f, 1.0f);
+	Controls.LookDegreesPerCm = FMath::Clamp(Controls.LookDegreesPerCm, 1.0f, 120.0f);
+	Controls.LookSensitivity = FMath::Clamp(Controls.LookSensitivity, 0.1f, 5.0f);
+	Controls.StrokeSensitivity = FMath::Clamp(Controls.StrokeSensitivity, 0.5f, 2.0f);
+	Camera.BodySwayScale = FMath::Clamp(Camera.BodySwayScale, 0.0f, 1.0f);
+	Camera.MountShakeScale = FMath::Clamp(Camera.MountShakeScale, 0.0f, 1.0f);
+	for (float* Volume : {&Volumes.Master, &Volumes.Music, &Volumes.Table, &Volumes.Ambience, &Volumes.Voices, &Volumes.Interface})
+	{
+		*Volume = FMath::Clamp(*Volume, 0.0f, 1.0f);
+	}
 }

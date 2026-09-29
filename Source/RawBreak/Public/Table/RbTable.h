@@ -65,6 +65,42 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table")
 	TArray<TSoftObjectPtr<UMaterialInterface>> PartMaterials;
 
+	// --- M2 additions (Docs/ue-architecture.md 18.6 multi-table, venue-dive-bar hand-off H-2; architect) ---------------
+
+	// Index of this table in its level (0..N-1, unique per level). Multi-table rooms key directors, loose balls, audio and
+	// replays by it, and the venue seed hashes it (MakeVenueTableCondition / VenueBallSetSeed).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table")
+	int32 TableIndex = 0;
+
+	// Venue table (human-factors 4.5.5, HF-41, HF-43): the table condition (seeded slope, ball cling) comes from
+	// rb::human::MakeVenueTableCondition(VenueSeed, TableIndex, VenueKind, bFirstCareerTable, false) and the ball set seed from
+	// rb::human::VenueBallSetSeed(VenueSeed, TableIndex) (BallSetSeed is then ignored). Off: level table, clean balls (M1).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table|Venue")
+	bool bUseVenueCondition = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table|Venue")
+	ERbVenueKind VenueKind = ERbVenueKind::DiveBar;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table|Venue")
+	int64 VenueSeed = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table|Venue")
+	bool bFirstCareerTable = false;
+
+	// Plan area the lamp covers in the CORE table frame [m] (rb::EnvironmentSpec::LampFootprint, off-table apex check). Off =
+	// the whole table is under the lamp (the M1 room). The Low Bridge lamp: x [-0.650, 0.650], y [-0.210, 0.170] (VDB E14).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table")
+	bool bUseLampFootprint = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table")
+	FVector2D LampFootprintMin = FVector2D(-0.650, -0.210);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table")
+	FVector2D LampFootprintMax = FVector2D(0.650, 0.170);
+
+	// The FRbTableSetup these properties give (what RebuildTable builds the context from; tests).
+	FRbTableSetup MakeTableSetup() const;
+
 	// --- the core table -------------------------------------------------------------------------------
 
 	// Valid after construction (OnConstruction / BeginPlay); rebuilt when the preset changes.

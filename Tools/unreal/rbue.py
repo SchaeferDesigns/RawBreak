@@ -7,7 +7,7 @@ Every Unreal step of the project runs through this script so that no human ever 
   build     UnrealBuildTool build of a target            rbue.py build [--target RawBreakEditor] [--config Development]
   py        run an editor Python script headless         rbue.py py Tools/unreal/editor/rb_make_test_room.py [-- script args]
   capture   render one frame of a map to a PNG           rbue.py capture --map /Game/Dev/PipelineProof/L_PipelineProof --out Docs/images/x.png
-  test      run UE Automation tests headless             rbue.py test --filter RawBreak. [--render]
+  test      run UE Automation tests headless             rbue.py test --filter RawBreak. [--render] [--sound]
   game      launch the game (windowed, for a human)      rbue.py game [--map ...]
 
 Logs go to Saved/RbLogs/<command>-<timestamp>.log (UE's -abslog). Exit code 0 = success.
@@ -132,6 +132,13 @@ def cmd_py(a: argparse.Namespace) -> int:
 	return code
 
 
+def _common(a: argparse.Namespace) -> list[str]:
+	"""COMMON without -NoSound when --sound is given (audio tests need a device or the mixer's null device, audio.md 8.8), plus
+	the raw extra UE arguments of --extra (e.g. --extra -RbUiScreen=Pause; M2, Docs/ue-architecture.md 18.9)."""
+	flags = [f for f in COMMON if not (getattr(a, "sound", False) and f == "-NoSound")]
+	return flags + list(getattr(a, "extra", None) or [])
+
+
 def cmd_capture(a: argparse.Namespace) -> int:
 	out = Path(a.out).resolve()
 	out.parent.mkdir(parents=True, exist_ok=True)
@@ -140,7 +147,7 @@ def cmd_capture(a: argparse.Namespace) -> int:
 	log = _log_path("capture")
 	resx, resy = a.res.lower().split("x")
 	cmd = [str(EDITOR_CMD), str(UPROJECT), _unmsys(a.map), "-game", "-RenderOffscreen", "-Windowed", f"-ResX={resx}", f"-ResY={resy}", "-ForceRes",
-		f'-RBCapture="{out}"', f"-RBCaptureWarmup={a.warmup}", f"-RBCaptureWarmupSeconds={a.warmup_seconds}", f'-abslog="{log}"'] + COMMON
+		f'-RBCapture="{out}"', f"-RBCaptureWarmup={a.warmup}", f"-RBCaptureWarmupSeconds={a.warmup_seconds}", f'-abslog="{log}"'] + _common(a)
 	if a.camera:
 		cmd.append(f'-RBCaptureCamera="{a.camera}"')
 	if a.exec_cmds:
@@ -160,7 +167,7 @@ def cmd_test(a: argparse.Namespace) -> int:
 	log = _log_path("test")
 	report = REPO / "Saved/RbLogs/AutomationReport"
 	cmd = [str(EDITOR_CMD), str(UPROJECT), f'-ExecCmds="Automation RunTests {a.filter}; Quit"', '-TestExit="Automation Test Queue Empty"',
-		f'-ReportExportPath="{report}"', f'-abslog="{log}"'] + COMMON
+		f'-ReportExportPath="{report}"', f'-abslog="{log}"'] + _common(a)
 	cmd += ["-RenderOffscreen"] if a.render else ["-NullRHI"]
 	code, lines = _run(cmd, a.timeout, ECHO)
 	failed = [l for l in lines if re.search(r"Test Completed\. Result=\{(Fail|Failed)\}", l)]
@@ -211,12 +218,15 @@ def main() -> int:
 	c.add_argument("--warmup-seconds", type=float, default=4.0, help="minimum game time of the warm-up (auto exposure converges per second)")
 	c.add_argument("--allow-shader-errors", action="store_true", help="do not fail on material / shader compile errors")
 	c.add_argument("--exec-cmds", default="")
+	c.add_argument("--extra", nargs="*", default=[], help="raw extra UE arguments, e.g. --extra=-RbUiScreen=Pause (M2)")
 	c.add_argument("--timeout", type=float, default=7200)
 	c.set_defaults(func=cmd_capture)
 
 	t = sub.add_parser("test")
 	t.add_argument("--filter", default="RawBreak.")
 	t.add_argument("--render", action="store_true", help="real RHI offscreen (functional / screenshot tests)")
+	t.add_argument("--sound", action="store_true", help="keep the audio device (drops -NoSound): RawBreak.Functional.Audio.* (M2-C)")
+	t.add_argument("--extra", nargs="*", default=[], help="raw extra UE arguments, e.g. --extra=-RbSomething=1")
 	t.add_argument("--timeout", type=float, default=3600)
 	t.set_defaults(func=cmd_test)
 

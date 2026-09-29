@@ -5,7 +5,7 @@
 // equal PupilToCineLens at the viewport aspect; exposure / shutter / sensor post-process of the presets; accommodation ease and the
 // EV100 read-back of UE 5.8's eye adaptation; head motion amplitudes (plan 4.8); the rig's get-down / stand-up transition and gaze
 // clamps in a game world; the focus following the gaze away from the line; the FOV slider range; the pawn's input routing through
-// the stroke component; the controller's actions and input wiring (incl. the legacy Esc binding); and the functional check that the
+// the stroke component; the controller's actions and input wiring (incl. the M2 Pause action on Esc); and the functional check that the
 // pawn cannot walk into the table (a ticked physics world with the UE-1 table, runtime and baked meshes).
 // Owner: UE-5b.
 
@@ -869,9 +869,8 @@ bool FRbPlayerControllerActions::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("cheat manager class"), PC->CheatClass.Get());
 
 	// The input wiring a local player gets (InitInputSystem = what ULocalPlayer / SetPlayer runs): the runtime input setup exists
-	// before the pawn binds, the controller's non-pawn actions are bound on the Enhanced Input component, and Esc (a legacy key
-	// binding outside the mapping context, evaluated by UEnhancedPlayerInput through UPlayerInput::EvaluateInputComponentDelegates)
-	// reaches HandleReplayBack.
+	// before the pawn binds, the controller's non-pawn actions are bound on the Enhanced Input component, and Esc is the Pause action
+	// (M2, Docs/ue-architecture.md 18.1: replay back, else the pause menu), no longer a legacy key binding.
 	PC->InitInputSystem();
 	const URbInputSetup* Setup = PC->GetInputSetup();
 	UEnhancedInputComponent* Input = Cast<UEnhancedInputComponent>(PC->InputComponent);
@@ -896,16 +895,14 @@ bool FRbPlayerControllerActions::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Replay"), Bound(Setup->Replay, ETriggerEvent::Triggered));
 	TestTrue(TEXT("CycleOption"), Bound(Setup->CycleOption, ETriggerEvent::Triggered));
 	TestFalse(TEXT("pawn actions are not bound on the controller"), Bound(Setup->Move, ETriggerEvent::Triggered) || Bound(Setup->Look, ETriggerEvent::Triggered));
-	int32 EscBindings = 0;
+	TestTrue(TEXT("Pause (Esc)"), Bound(Setup->Pause, ETriggerEvent::Triggered));
+	int32 LegacyEscBindings = 0;
 	for (const FInputKeyBinding& Key : Input->KeyBindings)
 	{
-		if (Key.Chord.Key == EKeys::Escape && Key.KeyEvent == IE_Pressed && Key.KeyDelegate.IsBoundToObject(PC))
-		{
-			++EscBindings;
-			Key.KeyDelegate.Execute(EKeys::Escape); // HandleReplayBack without a replay: nothing to stop, never a crash
-		}
+		LegacyEscBindings += Key.Chord.Key == EKeys::Escape ? 1 : 0;
 	}
-	TestEqual(TEXT("Esc pressed -> HandleReplayBack, bound once"), EscBindings, 1);
+	TestEqual(TEXT("no legacy Esc key binding (Esc = the Pause action only)"), LegacyEscBindings, 0);
+	PC->HandlePause(); // no replay, no menu stack yet: never a crash
 	return true;
 }
 

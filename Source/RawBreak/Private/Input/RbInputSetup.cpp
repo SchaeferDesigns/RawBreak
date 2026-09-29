@@ -85,6 +85,8 @@ URbInputSetup* URbInputSetup::CreateDefault(UObject* Outer)
 	Setup->Replay = MakeAction(Setup, TEXT("IA_Replay"), EInputActionValueType::Boolean);
 	Setup->Confirm = MakeAction(Setup, TEXT("IA_Confirm"), EInputActionValueType::Boolean);
 	Setup->CycleOption = MakeAction(Setup, TEXT("IA_CycleOption"), EInputActionValueType::Axis1D);
+	Setup->Pause = MakeAction(Setup, TEXT("IA_Pause"), EInputActionValueType::Boolean);
+	Setup->Pause->bTriggerWhenPaused = true; // M2: the pause menu closes with the same key
 
 	UInputMappingContext* C = Setup->Context;
 
@@ -132,10 +134,11 @@ URbInputSetup* URbInputSetup::CreateDefault(UObject* Outer)
 	MapPressed(C, Setup->Confirm, EKeys::F, Setup);
 	MapPressed(C, Setup->CycleOption, EKeys::Q, Setup, true); // -1
 	MapPressed(C, Setup->CycleOption, EKeys::E, Setup);       // +1
+	MapPressed(C, Setup->Pause, EKeys::Escape, Setup);         // M2: replay back / pause menu
 	return Setup;
 }
 
 TArray<UInputAction*> URbInputSetup::GetAllActions() const
 {
-	return {Move, Look, GetDown, Stroke, Commit, Elevation, TipOffset, FineAim, Settle, Glance, ToggleOverlay, ToggleDebug, Replay, Confirm, CycleOption};
+	return {Move, Look, GetDown, Stroke, Commit, Elevation, TipOffset, FineAim, Settle, Glance, ToggleOverlay, ToggleDebug, Replay, Confirm, CycleOption, Pause};
 }

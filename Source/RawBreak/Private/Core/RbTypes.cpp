@@ -1,5 +1,9 @@
 #include "Core/RbTypes.h"
 
+#include "Core/RbAssetPaths.h"
+
+#include "rb/Human/Venue.h"
+
 namespace RbTypes
 {
 	rb::TablePreset ToCore(ERbTablePreset Preset)
@@ -78,5 +82,26 @@ namespace RbTypes
 		case ERbTablePart::Count: break;
 		}
 		return TEXT("Unknown");
+	}
+
+	rb::human::VenueKind ToCore(ERbVenueKind Kind)
+	{
+		switch (Kind)
+		{
+		case ERbVenueKind::DiveBar: return rb::human::VenueKind::DiveBar;
+		case ERbVenueKind::PoolHall: return rb::human::VenueKind::PoolHall;
+		case ERbVenueKind::Arena: return rb::human::VenueKind::Arena;
+		}
+		return rb::human::VenueKind::DiveBar;
+	}
+
+	const TCHAR* MapFor(ERbVenue Venue)
+	{
+		switch (Venue)
+		{
+		case ERbVenue::TestRoom: return RbAssetPaths::M1TestRoomMap;
+		case ERbVenue::DiveBar: return RbAssetPaths::DiveBarMap;
+		}
+		return RbAssetPaths::M1TestRoomMap;
 	}
 }

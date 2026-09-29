@@ -23,6 +23,8 @@
 //                                                Stroke press in PlacingCueBall is routed to Confirm by the stroke
 //                                                component (review R-17)
 //   CycleOption     Q / E                        cycle decision options / called pocket
+//   Pause           Esc (press, also while paused) M2 (architect, 18.4): leaves a running replay, else opens / closes the pause
+//                                                menu (URbUiSubsystem, M2-D). Esc is never bound to anything else.
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
@@ -63,4 +65,5 @@ public:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> Replay;        // Boolean (pressed)
 	UPROPERTY(Transient) TObjectPtr<UInputAction> Confirm;       // Boolean (pressed)
 	UPROPERTY(Transient) TObjectPtr<UInputAction> CycleOption;   // Axis1D (-1 / +1)
+	UPROPERTY(Transient) TObjectPtr<UInputAction> Pause;         // Boolean (pressed; triggers while the game is paused) - M2
 };

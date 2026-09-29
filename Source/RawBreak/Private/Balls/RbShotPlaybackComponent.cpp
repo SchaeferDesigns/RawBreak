@@ -116,6 +116,7 @@ void URbShotPlaybackComponent::Play(const TSharedRef<const FRbShot>& InShot, boo
 	FinishTime = ComputeFinishTime(*InShot, DropHideDelay);
 
 	const double Now = ClockNow();
+	bLiveShot = bAnchorToContact;
 	ClockOrigin = bAnchorToContact ? InShot->Request.ContactTime : Now;
 	ClockOriginShotTime = bAnchorToContact ? 0.0 : ClampShotTime(StartShotTime);
 	// Live: the shot started at the tip contact, possibly a frame ago - show the state of NOW, not t = 0 (review R-16).
@@ -164,7 +165,32 @@ void URbShotPlaybackComponent::Play(const TSharedRef<const FRbShot>& InShot, boo
 	}
 	ApplyAt(ShotTime);
 	ResetMovedBalls(Jumping, Locations, Rotations);
+	// M2 (audio): the clock mapping before the first events fire (a listener may stop / replace this playback).
+	OnPlaybackStarted.Broadcast(InShot, GetClockMapping());
+	if (Shot.Get() != &InShot.Get())
+	{
+		return;
+	}
 	FireEventsUpTo(ShotTime);
+}
+
+FRbPlaybackClock URbShotPlaybackComponent::GetClockMapping() const
+{
+	FRbPlaybackClock Mapping;
+	Mapping.OriginClock = ClockOrigin;
+	Mapping.OriginShotTime = ClockOriginShotTime;
+	Mapping.Rate = Rate;
+	Mapping.bHeld = IsHeld();
+	Mapping.bLive = bLiveShot;
+	return Mapping;
+}
+
+void URbShotPlaybackComponent::BroadcastClockChanged()
+{
+	if (Shot.IsValid() && OnPlaybackClockChanged.IsBound())
+	{
+		OnPlaybackClockChanged.Broadcast(Shot.ToSharedRef(), GetClockMapping());
+	}
 }
 
 void URbShotPlaybackComponent::Stop(bool bSnapToEnd)
@@ -198,7 +224,12 @@ void URbShotPlaybackComponent::SetRate(float NewRate)
 		ClockOriginShotTime = ClampShotTime(ClockShotTime(Now));
 		ClockOrigin = Now;
 	}
+	const bool bChanged = NewRate != Rate;
 	Rate = NewRate;
+	if (bChanged)
+	{
+		BroadcastClockChanged();
+	}
 }
 
 void URbShotPlaybackComponent::SetPaused(bool bPause)
@@ -238,6 +269,7 @@ void URbShotPlaybackComponent::OnHoldChanged(bool bWasHeld)
 	// Holding or resuming: the clock continues from the shown time.
 	ClockOrigin = Now;
 	ClockOriginShotTime = ShotTime;
+	BroadcastClockChanged();
 }
 
 void URbShotPlaybackComponent::SeekTo(double Time)
@@ -255,6 +287,7 @@ void URbShotPlaybackComponent::SeekTo(double Time)
 	const uint32 Visible = CaptureShownPoses(Locations, Rotations);
 	ApplyAt(ShotTime); // backward jumps re-seek the cursor automatically (rb::StateAtCursor)
 	ResetMovedBalls(Visible, Locations, Rotations); // a seek is a jump: no streak across it
+	BroadcastClockChanged();
 }
 
 void URbShotPlaybackComponent::SetCue(ARbCue* InCue)

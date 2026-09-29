@@ -5,6 +5,7 @@
 #include "Game/RbGameMode.h"
 #include "Game/RbMatchDirector.h"
 #include "Input/RbInputSetup.h"
+#include "Interaction/RbInteractionSubsystem.h"
 #include "Player/RbPlayerController.h"
 #include "Player/RbStrokeComponent.h"
 #include "Table/RbTable.h"
@@ -164,6 +165,18 @@ void ARbPlayerCharacter::HandleConfirm()
 	{
 		Stroke->ConfirmPressed();
 		return;
+	}
+	// M2 (architect, 18.6): world interactions first (pick up a ball that left the table, later the chores) - a gazed
+	// interactable within reach consumes the press.
+	if (URbInteractionSubsystem* Interaction = URbInteractionSubsystem::Get(this))
+	{
+		if (const UCineCameraComponent* Eye = GetCamera())
+		{
+			if (Interaction->TryInteract(*this, Eye->GetComponentLocation(), Eye->GetForwardVector()))
+			{
+				return;
+			}
+		}
 	}
 	// Decision option / next rack / new match (R-20).
 	if (const ARbGameMode* GameMode = ARbGameMode::Get(this))

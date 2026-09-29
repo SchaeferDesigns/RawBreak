@@ -39,6 +39,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "RawBreak|Bake")
 	static bool BakeCueMesh(ERbCuePreset Preset);
 
+	// M2-F (Docs/ue-architecture.md 18.3): the procedural stand-in hand that carries the cue ball (diegetic ball in hand) ->
+	// RbAssetPaths::HandCarryMesh. Implemented in RbAssetBake_Player.cpp (owner M2-F; stub until then).
+	UFUNCTION(BlueprintCallable, Category = "RawBreak|Bake")
+	static bool BakeHandCarryMesh();
+
 	// Pipeline self-test: a 1 m box through the whole bake path to PackagePath (e.g. /Game/Dev/PipelineProof/SM_BakeTest),
 	// and a Nanite copy to PackagePath + "_Nanite" whose fallback must keep 100 % of the triangles (ray tracing / collision).
 	UFUNCTION(BlueprintCallable, Category = "RawBreak|Bake")
