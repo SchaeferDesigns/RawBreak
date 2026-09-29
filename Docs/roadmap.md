@@ -17,7 +17,7 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 ## Fenster 3 (ab ca. 18:00) – Agents arbeiten durch, unabhängig vom Playtest
 - [ ] Vertical Slice Dive Bar: Raum-Layout, Modellierung (Blender-Pipeline), eigene Materialien, Licht inkl. Neon; ggf. Meshy/Higgsfield-Tests
 - [ ] Sound: Kugel-Klicks, Banden, Taschen, Bar-Atmo – gesteuert von den Physik-Events. Vergleichstest: echte Aufnahmen (lizenzfreie Libraries) vs. physikbasierte Klick-Synthese vs. KI-SFX (Higgsfield Mirelo); Higgsfield-SFX/Musik sind nur in deren Game-Pipeline nutzbar (nicht für uns) → Klicks per Synthese, Rest aus lizenzfreien Libraries (Sonniss GDC, Freesound CC0, Pixabay) bzw. ElevenLabs SFX; Sprachzeilen per Higgsfield-TTS (~2 Credits Test); Jukebox-/Menü-Musik: Claude schreibt Prompts, Nutzer generiert mit Gemini (kostenlos) – vorher Googles Nutzungsbedingungen für kommerzielle Nutzung prüfen
-- [ ] (läuft seit Fenster 2) KI-Gegner: Stoßplanung über den Simulator + Skill-Profile aus dem Human-Factors-Modell
+- [x] KI-Gegner (WP-12, gemergt 29.09.): Monte-Carlo-Stoßplanung über den Simulator, 6 Skill-Profile (Tourist … Touring Pro, Hustler mit Sandbagging), Review mit Regel-Fixes; 938/938 Core-Tests. Einbau ins Spiel folgt in M3
 - [ ] UI/UX: Hauptmenü-Szene, Settings-Menü mit Grafik-Presets, Mockups
 - [ ] Sobald der Nutzer M1 gespielt hat: Feedback (Stoß-Gefühl, Kamera, Steuerung) parallel einarbeiten
 
@@ -27,7 +27,9 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 - Körper & Hände (MetaHuman – braucht einen Schritt vom Nutzer), Karriere, KI-Gegner, weitere Spielarten/Venues, Steam-Store-Page, Trailer (erst nach Freigabe durch den Nutzer)
 
 
-## M2 (läuft seit 28.09. abends)
+## M2 (läuft seit 28.09. abends; Plan + Stubs gemergt 29.09., 7 Pakete M2-F/L/A/B/C/D/E parallel in Arbeit)
+- [ ] Feel-Fixes aus dem Playtest (M2-F): P1 ruhige Kamera nach dem Stoß, P2 Hand trägt den Ball, P3 schnelles Zielen + Shift-Feinzielen, P5 menschliche Kopf-/Körperbewegung
+- [ ] Tisch- & Tuch-Look-Dev (M2-L, P4)
 - [ ] Dive Bar v1 (The Low Bridge Tavern, DB-0..DB-3 ohne Meshy-Props), Sound v1 (alle Physik-Sounds, Raumklang), Pause-/Settings-Menü v1, Kugeln fallen vom Tisch auf den Boden, Vorbereitung Mehr-Tisch-Räume → Integration + gepackter M2-Build
 
 ## M3 (nach M2)
