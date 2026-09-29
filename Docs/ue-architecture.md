@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Document | `Docs/ue-architecture.md` |
-| Status | v1.1 (2026-09-27), UE-0 delivered and adversarially reviewed (section 16): module layout, compiling skeleton of every class (TODO(UE-x) markers), config, headless pipeline proven on the dev PC (build, Python level + bake, PIE tests, headless screenshot). Frozen for the parallel work packages UE-1..UE-8. |
-| Scope | The Unreal Engine 5.8.3 side of RAW BREAK up to milestone **M1 "first playable"**. The engine-agnostic core `BilliardsCore` (Docs/architecture.md) is complete and stays untouched. |
+| Status | v1.1 (2026-09-27), UE-0 delivered and adversarially reviewed (section 16): module layout, compiling skeleton of every class (TODO(UE-x) markers), config, headless pipeline proven on the dev PC (build, Python level + bake, PIE tests, headless screenshot). Frozen for the parallel work packages UE-1..UE-8. v1.2 (2026-09-28): M1 integrated (section 17). **v1.3 (2026-09-29): M2 plan (section 18): 7 packages M2-F / M2-L / M2-A / M2-B / M2-C / M2-D / M2-E with disjoint owned files, the new contracts and compiling stubs (TODO(M2-x) markers), config and pipeline additions.** |
+| Scope | The Unreal Engine 5.8.3 side of RAW BREAK up to milestone **M1 "first playable"** (sections 0-17) and the **M2 plan** (section 18: feel fixes from the M1 playtest, table / cloth look-dev, dive-bar slice v1, audio v1, menus / settings, balls off the table, multi-table groundwork). The engine-agnostic core `BilliardsCore` (Docs/architecture.md) is complete and stays untouched. |
 | Sources of truth | `Docs/specs/ue5-realism-plan.md` (**UE** below: camera 4.x, body/input/cue 5.x, adapter 5.6, playback 5.7, rendering 6.x, settings 9.4, tests 13), `Docs/specs/human-factors.md` (**HF**, layers UG/UA/US), `Docs/specs/rules.md` (**RUL**, what the match UI must show), `Docs/decisions.md`, `Docs/architecture.md` sections 7 and 13 (the core API and the integration contract). |
 | Code | `Source/RawBreak/**` (game module), `Source/RawBreakEditor/**` (editor tools), `Source/RawBreakShaders/**` + `Shaders/**` (shader directory), `Tools/unreal/**` (headless pipeline), `Config/*.ini`, `RawBreak.uproject` |
 
@@ -603,3 +603,406 @@ conflicts, no file touched by two packages; wave A was already on main).
 
 Packaged build: `RunUAT BuildCookRun ... -build -cook -stage -pak -archive` -> `RawBreak_Builds/M1/Windows/RawBreak.exe` (not in git);
 it starts headless (`-RenderOffscreen`, `-RBCapture`, `-ExecCmds` break) and renders the same frame as the editor.
+
+---
+
+## 18. M2 — feel fixes, table look-dev, dive-bar slice v1, audio v1, menus, balls off the table (plan, 2026-09-29)
+
+### 18.0 Scope and priorities
+
+M2 turns the M1 first playable into a vertical slice in the first real venue and fixes what the product owner's M1 playtest
+(`Docs/playtests/2026-09-28-m1.md`) found. **Priority order** (the playtest decides it, not the feature list):
+
+| Prio | Item | Package |
+|---|---|---|
+| 1 | **Feel**: P1 the view stays calm on the shot after the contact; P3 aiming at normal mouse speed (coarse + Shift fine, sensitivity setting); P2 diegetic ball in hand (a hand carries the ball, exact preview, set down, illegal spots readable); **P5 the camera IS the eyes** (procedural human head / body motion, realism plan 4.8) | M2-F |
+| 1 | **Table and cloth look real** (P4): worsted / napped cloth, cushions with visible rubber and rounded real-geometry profiles, lacquered wood with depth, pocket hardware, apron / legs, the dive bar's 7-ft coin-op cabinet | M2-L |
+| 2 | Dive-bar vertical slice v1 (venue-dive-bar DB-0..DB-3 **without** Meshy / Higgsfield assets): shell, architecture, lighting, bar furniture and props from procedural generators, master materials with Age 0.80, CC0 scans, first decal set; `L_DiveBar` playable with the M1 gameplay (9-ball practice / hot-seat on the 7-ft bar table, oversized cue ball) | M2-A, M2-B |
+| 2 | Audio v1 (audio.md): all physics sounds synthesised sample-accurately from the shot events, footsteps, room tone, reverb | M2-C |
+| 2 | Menus / settings v1 (ui-ux.md): pause, settings with presets + individual rows persisted in `URbGameUserSettings`, minimal title / venue select | M2-D |
+| 3 | Balls off the table under engine physics + pick-up / return; multi-table groundwork (nothing may assume one table per level) | M2-E |
+
+**Not in M2**: Meshy / Higgsfield assets (stools by Meshy, taxidermy, brand art, posters), NPCs, MetaHuman body and arms (M3;
+M2's carrying hand is a stand-in), AI opponents at other tables, the 3D main-menu scene "Closing Time", phone / notebook,
+localisation (EN only; every string still goes through `FText`), controller support, library samples / voice / music, the DLSS
+plugin, Steam packaging. VDB-T5 (performance gate), VDB-T6 (blind test) and VDB-T9 (story) belong to DB-5 / DB-6.
+
+### 18.1 The architect step and the rules for M2
+
+Done by the architect before any package starts (compiles, all M1 tests green; 18.10 M2-A1 / M2-A3):
+
+| Area | What the architect step put in place |
+|---|---|
+| Modules | new runtime module **`RawBreakAudioDsp`** (Core only, no UObjects; `RawBreak.uproject`, both targets); `RawBreak.Build.cs` + `AudioMixer`, `RawBreakAudioDsp`, `PhysicsCore` |
+| Config (`DefaultEngine.ini`) | `r.VirtualTextures=True` (venue H-3; a project-wide shader recompile, so it goes in once, now); collision channels `RbCueSweep` (trace, GameTraceChannel1) and `RbLooseBall` (object, GameTraceChannel2), profiles `RbVenueBlock`, `RbVenueProp`, `RbLooseBall`, `RbBallReturn`, `Pawn` ignores both new channels; physical surfaces `RbBall`, `RbVct`, `RbRubber`, `RbWood`, `RbConcrete`, `RbCloth` (SurfaceType1..6); UI scale rule `URbDpiScalingRule` (height / 1080, ui-ux C2); the **audio block** (48 kHz, 512 x 2 buffers, 96 channels, 4 source workers) between markers, owned by M2-C |
+| Shared contracts (`Core/`) | `ERbVenue` (TestRoom, DiveBar) + `RbTypes::MapFor`, `ERbVenueKind` + `ToCore`; `RbAssetPaths`: `DiveBarMap`, `TitleMap`, venue / audio / player / physics directories, dive-bar table material instances, physical materials, tags (`RbPlayerTable`, `RbAudio_<Anchor>`, `RbDB_Ceiling`, `RbLooseBall`, `RbBallReturn`, `RbVenueInfo`), capture tags `RbCam_DB_V01..V12`, `RbCam_DB_TH1..TH7`, `RbCam_Menu_S0..S7`, `Collision::*`, `Surface::*` |
+| `ARbTable` (hand-off H-2) | `TableIndex`, venue condition (`bUseVenueCondition`, `VenueKind`, `VenueSeed`, `bFirstCareerTable` -> `rb::human::MakeVenueTableCondition` / `VenueBallSetSeed`), lamp footprint (`EnvironmentSpec::LampFootprint`), `MakeTableSetup()`; all in the build key |
+| Playback -> audio contract | `URbShotPlaybackComponent::OnPlaybackStarted` / `OnPlaybackClockChanged` with `FRbPlaybackClock` (origin clock, origin shot time, rate, held, live) and `GetClockMapping()`: the audio schedules every event from the mapping, never by polling (18.5) |
+| Input | `Pause` action (Esc, triggers while paused) replaces M1's legacy Esc key binding: `ARbPlayerController::HandlePause` = replay back, else `URbUiSubsystem::TogglePauseMenu`; 16 actions (mapping test updated) |
+| Camera -> audio | `URbCameraRigComponent::OnFootstep(FRbFootstep)` (fired by M2-F, heard by M2-C) |
+| Interaction | `URbInteractionSubsystem` (providers with Offer / Interact; dispatch implemented); `ARbPlayerCharacter::HandleConfirm` asks it first after the ball-in-hand placement |
+| Settings API | `FRbControlSettings`, `FRbCameraSettings`, `FRbAudioVolumes`, `bShowKeyHints` in `URbGameUserSettings` (validated ranges), static `OnSettingsChanged()` broadcast after every apply (18.4) |
+| Stubs (`TODO(M2-x)`) | every class of 18.3-18.8 as a compiling skeleton; generator scripts that log "not implemented yet"; `rb_make_all.py` knows the M2 generator order and the venue validator; `Tools/blender/rbbl.py` + `common/rb_bl.py` + `divebar/db_build_all.py` (Blender runner, working); `Tools/art/fetch_cc0.py` (working: per-package input lists, SHA-256 locks, ledger fragments); `rbue.py test --sound`, `--extra` |
+
+**Rules** (same process as M1, memory "Dev process"): one agent per package in its own worktree `.claude/worktrees/m2-<x>` on
+branch `ue/m2-<x>`, an adversarial reviewer-fixer, merge by the architect. Each package edits **only** the files it owns (18.2);
+everything else is a request in its report (the architect applies it at the merge). Build 0 errors / 0 warnings from project code;
+all existing UE (163) and core (904) tests stay green; new tests for the package's acceptance. Generated assets only under the
+package's `/Game/Generated/...` roots (LFS) and `/Game/Dev/M2<x>/` (git-ignored); dev screenshots under `Docs/images/dev/m2<x>/`,
+**looked at**; external assets only CC0 from Poly Haven / ambientCG through `Tools/art/fetch_cc0.py`, each with a row in the
+package's ledger fragment `Docs/licenses/ledger/M2-<x>.csv` (merged into `Docs/licenses/asset-ledger.csv` by the architect; nobody
+else edits the merged file). The public headers of 18.1 are frozen contracts (additions allowed; renames / signature changes only
+with the consumer's sign-off, as in section 3). Fresh worktrees: `git lfs install --local`, `git lfs pull`. Shared machine: at most
+three packages compile shaders / capture at the same time; never leave an Unreal or Blender process running.
+
+### 18.2 Work packages (disjoint owned files)
+
+`Area/*` means `Source/RawBreak/Public/Area/*` + `Source/RawBreak/Private/Area/*`. Tests are files in `Source/RawBreak/Private/Tests/`
+(unit, `RawBreak.Unit.*`) or `Source/RawBreakEditor/Private/Tests/` (PIE, `RawBreak.Functional.*`), named without `.cpp` below.
+
+| Package | Title | Owned files / globs | Depends on | Acceptance (details in 18.3-18.8) |
+|---|---|---|---|---|
+| **M2-F** | Feel: stroke, look, aim, ball in hand, human motion (P1, P2, P3, P5) | `Input/*` (RbInputSetup, RbRawMouseInput, RbAimResponse), `Player/*` (RbStrokeComponent, RbPlayerCharacter, RbPlayerController, RbBallInHandComponent, RbLookIntentGate), `Camera/*` (RbCameraRigComponent, RbCameraModel, RbHeadMotion, RbHumanMotion), `Cue/*`, `Math/RbStrokeMath.*`, `Private/Math/RbCameraMath_Camera.cpp`, `RawBreakEditor/Private/RbAssetBake_Player.cpp`, `RbAssetBake_Cue.cpp`, `Tools/unreal/editor/rb_make_player.py`, `rb_bake_cue.py`, `rb_dev_m2f.py`, `Tools/feel/**` (trace plots), `Config/DefaultInput.ini`; tests RbStrokeTests, RbStrokeMathTests, RbRawInputTests, RbCameraRigTests, RbCameraMathTests, RbCueTests, new RbFeelTests (input traces P1 / P3), RbHumanMotionTests, RbBallInHandTests, RbFeelFlowTest (PIE); content `/Game/Generated/Player/**`, `/Game/Generated/Cues/**`; `Docs/images/dev/m2f/**` | architect step; reads M2-D's settings structs (frozen), M2-E's director API (existing) | 18.3: F1-F9 (P1 / P3 / P2 / P5 input traces, frame-rate and DPI independence, seeded determinism, captures and trace plots); M1 stroke tests unchanged |
+| **M2-L** | Table & cloth look-dev (P4) + coin-op cabinet | `Table/*` (RbTableMeshBuilder, RbTable), the `ERbTablePart` enum block in `Core/RbTypes.h` and `RbTypes::ToString(ERbTablePart)` in `RbTypes.cpp` (**append-only exception**; nobody else edits them), `RawBreakEditor/Private/RbAssetBake_Table.cpp`, `Shaders/Private/*.ush` (top level only), `Private/Math/RbCameraMath_Render.cpp`, `Game/RbTestRoom.*`, `Dev/RbLookDevCamera.*`, `Tools/unreal/editor/rb_make_materials.py`, `rb_bake_table.py`, `rb_import_table.py` (new), `rb_make_test_room.py`, `rb_m1_layout.py`, `rb_dev_m2l.py`, `Tools/unreal/capture_m1.py`, `capture_table.py` (new), `Tools/blender/table/**` (body / cabinet generators), `Art/Tables/**` (rbsim geometry JSONs, body exports, `cc0_inputs.json`); tests RbTableTests, RbRenderMathTests, RbRoomTests, new RbTableLookTests; content `/Game/Generated/Tables/**`, `/Game/Generated/Materials/**` (incl. `MI_RbBall_DiveBar`, `MI_RbCloth_BarGreen`, `MI_RbRail_BlackLaminate`), `/Game/Generated/Maps/L_M1_TestRoom`; `Docs/images/m1/**`, `Docs/images/dev/m2l/**`, `Docs/references/table-lookdev.md` | architect step | 18.7: physics surfaces exactly on the rb geometry (M1 table tests + new profile tests), 9-ft and 7-ft captures (chin-on-cue, standing, pocket, cushion grazing, rail close-up, overhead) compared with reference photos per round, strict captures, M1 A7 re-captured |
+| **M2-A** | Venue shell, architecture, lighting, level, cameras | `Venue/*` (ARbVenueInfo), `Tools/blender/rbbl.py`, `Tools/blender/common/**`, `Tools/blender/divebar/db_axis_test.py`, `db_arch.py`, `db_neon.py`, `cue_sweep_check.py`, `Art/DiveBar/layout.json`, `lights.json`, `calibration.json`, `neon/**`, `Art/DiveBar/Export/{AxisTest,Arch,Neon}/**`, `Tools/unreal/editor/rb_import_divebar.py`, `rb_make_divebar.py`, `rb_make_divebar_fx.py` (new), `Tools/unreal/capture_divebar.py`; tests new RbVenueTests, RbDiveBarTest (PIE: walkability, a complete 9-ball rack like M1Rack); content `/Game/Generated/Maps/L_DiveBar*`, `/Game/Generated/Venues/DiveBar/{Arch,Lighting,FX}/**`; `Docs/images/divebar/**`, `Docs/images/dev/m2a/**` | architect step; places M2-L's `ARbTable` and M2-B's props by asset id (greybox fallback: never blocked) | 18.8: DB-0 axis test, DB-1 greybox + walkability + cue sweeps (VDB-T3), DB-2 light (VDB-T1, T2, T8, T11), VDB-T10, VDB-T12 (M2 part), level validator, DiveBarRack, captures V01..V12 / TH1..TH7 |
+| **M2-B** | Bar props, venue materials, CC0, decals | `Tools/blender/divebar/db_bar.py`, `db_backbar.py`, `db_booth.py`, `db_stool.py`, `db_ledges.py`, `db_lamp.py`, `db_cue_rack.py`, `db_jukebox.py`, `db_dart.py`, `db_lathe_props.py`, `db_props_common.py`, `db_decals.py`, `Art/DiveBar/Export/{Props,Decals}/**`, `Art/DiveBar/Textures/**`, `Art/DiveBar/cc0_inputs.json` (+ lock), `Tools/art/**` (fetch_cc0, text_textures, decal_prep), `Art/Fonts/**`, `Tools/unreal/editor/rb_make_divebar_materials.py`, `rb_dev_m2b.py`, `Shaders/Private/Venue/*.ush`; content `/Game/Generated/Venues/DiveBar/{Props,Materials,Textures,Decals}/**`; `Docs/images/dev/m2b/**` | architect step (Blender runner); M2-A's importer puts the props into the level (they stand alone in B's dev map) | 18.8: DB-0 stool end to end, every generator asserts its spec dimensions (VDB-T4), masters `M_DB_*` with Age 0.80 + `MPC_DB_Venue`, CC0 inputs pinned + ledger (VDB-T7 without the OCR pass), first decal set, look-dev captures per hero prop, DB-3 views with M2-A |
+| **M2-C** | Audio v1 | `Source/RawBreakAudioDsp/**`, `Audio/*`, the audio block of `Config/DefaultEngine.ini` (between its markers), `Tools/audio/**`, `Tools/unreal/editor/rb_make_audio.py`; tests new RbAudioDspTests, RbAudioTests, RbAudioFunctionalTest (PIE, `--sound`); content `/Game/Generated/Audio/**`; `Docs/audio/m2/**`, `Docs/images/dev/m2c/**` | architect step (playback clock contract, footstep delegate, loose-ball impact delegate, volumes) | 18.5: AU-T01..T13 offline subset, engine AU-T08 / AU-T21 (sample-accurate), T16, T19; every sound class audible in a recorded break; venue room tone + reverb; volumes + pause mix |
+| **M2-D** | Menus & settings | `UI/**` (incl. M1's SRbInfoOverlay / RbOverlayComponent), `Settings/**` (RbGameUserSettings, RbSettingsRegistry, RbSettingsTypes), `Config/DefaultScalability.ini`, `Tools/unreal/editor/rb_make_title.py`, `rb_dev_m2d.py`; tests RbSettingsTests, RbOverlayTests, new RbUiTests, RbMenuFlowTest (PIE); content `/Game/Generated/Maps/L_Title`, `/Game/Generated/UI/**`; `Docs/images/dev/m2d/**` | architect step; reads M2-F's stroke / ball-in-hand state and M2-E's interaction verbs (public getters) for the key hints | 18.4: UX-T01 (EN), T02, T05, T07, T09 (keyboard + mouse), T10, T20, T25 (with M2-E), T26; settings persist across a restart; the title opens both venues in Practice / Hot-seat |
+| **M2-E** | Balls off the table, multi-table groundwork, match, interaction | `Balls/*` (RbBallSet, RbShotPlaybackComponent, RbBallMeshBuilder, RbLooseBall, RbLooseBallSubsystem, demo actors), `Game/*` except `RbTestRoom` (RbGameMode, RbMatchDirector, RbShooterState, RbTableSubsystem), `Interaction/*`, `Replay/*`, `Simulation/*`, `Dev/RbCheatManager.*`, `RawBreakEditor/Private/RbAssetBake_Ball.cpp`, `Tools/unreal/editor/rb_bake_ball.py`, `rb_make_physics.py`, `rb_dev_m2e.py`; tests RbBallTests, RbPlaybackTests, RbMatchTests, RbSimulationTests, new RbLooseBallTests, RbMultiTableTests, and (PIE) RbMatchFlowTest, RbReplayTest, RbM1FlowTest, RbM1RackTest, new RbLooseBallFunctionalTest, RbMultiTableFunctionalTest; content `/Game/Generated/Physics/**`, `/Game/Generated/Balls/**`; `Docs/images/dev/m2e/**` | architect step | 18.6: hand-off at the exact core state, rules untouched (hashes), floor bounce and rest, pick-up and automatic returns, replays hide, a two-table dev level with independent sessions, grep test "no single-table lookups", M1 flows green |
+| **M2-0** | Architect: contracts, config, integration | `RawBreak.uproject`, `Source/*.Target.cs`, every `*.Build.cs`, `Config/DefaultEngine.ini` (except the audio block), `Config/DefaultGame.ini`, `Core/*` (except the `ERbTablePart` block), `RawBreak.h`, `RawBreakModule.cpp`, `Dev/RbHeadlessCaptureSubsystem.*`, `RbTestFlags.h`, `RbCoordsTests`, `RbPieSmokeTest`, the `RawBreakEditor` module, `RbAssetBake_Common.cpp`, `RbAssetBakeLibrary.h`, `Tools/unreal/rbue.py`, `editor/rb_common.py`, `rb_make_all.py`, `rb_pipeline_proof.py`, `rb_bake_selftest.py`, `Tools/blender/divebar/db_build_all.py`, `Docs/licenses/asset-ledger.csv`, `.gitignore`, this document | — | 18.10 |
+
+**Ownership boundaries that are easy to get wrong**
+
+* **M2-F / M2-D (settings).** M2-D owns the storage (`URbGameUserSettings`, `RbSettingsTypes.h`, `RbSettingsRegistry`), the menu
+  rows, presets, validation and persistence. M2-F owns what the values *mean*: `RbAimResponse` (counts -> cm -> degrees, the
+  acceleration curve), the look gate, the camera / motion scales. M2-F only **reads** `Controls`, `Camera`, `MouseDpi`,
+  `CameraPreset`, `VerticalFovDeg`, `HeadBobScale`, `bReducedMotion` and re-reads them on `OnSettingsChanged()`; its tests write
+  the structs directly. Field names, ranges and defaults of 18.4 are frozen for M2; a different default (e.g. after tuning P3) is
+  a request to the architect, who changes `RbSettingsTypes.h` at the merge. The key hints (M2-D) read M2-F's public getters
+  (`URbStrokeComponent::GetPhase`, `URbBallInHandComponent::GetState`) and add no code to M2-F's files. The pause menu changes the
+  input mode through the controller's public API (`SetInputMode`, `SetShowMouseCursor`, `SetPause`) from M2-D's own code; the
+  controller file stays M2-F's. M2-F guarantees that pausing while the Stroke button is held drops the stroke (no contact on
+  resume).
+* **M2-L / M2-B (table vs bar).** Everything that is the table is M2-L's: the playfield parts from `rb::TableGeometry` (C++, the
+  only path allowed for physics surfaces), the body / cabinet (apron, legs, coin-op box, castings, coin mechanism, trap window,
+  ball tray, cue-ball return), every table-family material (`M_Rb*`, `MI_Rb*`, incl. the dive-bar instances and the dirty balls)
+  and the table's own wear (chalk dust, ball tracks, burns and rings that are part of the rail-cap material). M2-B makes every
+  venue material (`M_DB_*`, `MI_DB_*`, `MPC_DB_Venue`), the decal materials and every prop that is not the table, **including the
+  3-shade lamp body** (its lights are M2-A's) and the wall cue rack with its prop cues (the playable cue is M2-F's). Table
+  materials never reference `MPC_DB_Venue` (M2-L carries its own Age scalar with the venue's 0.80), so neither waits for the other.
+* **M2-A / M2-B (architecture vs props).** M2-A: shell and architecture (walls, floor, ceiling, soffit, columns, doors, openings,
+  windows / glass block), neon tubes (a lighting element) and every light, fog and haze, the level, the importer, cameras,
+  captures, the validator. M2-B: furniture and props. Contract: **asset ids and target dimensions come from venue-dive-bar 2.3 / 5 /
+  13.3** (`SM_DB_<Family>_<Variant>`); each generator writes `Art/DiveBar/Export/<Asset>/<Asset>.json` (dimensions, pivot, material
+  slots, collision hulls; no shared manifest file); the importer scans those files and places a mesh when it exists, else the
+  greybox box of the element; **material slot names are the `MI_DB_*` names**, so the importer assigns M2-B's instances without a
+  mapping table. Emissive calibration: M2-A measures and writes `Art/DiveBar/calibration.json` (`EmissiveScale`), M2-B's material
+  generator reads it (1.0 when missing).
+* **M2-A / M2-L (table in the level).** M2-A's generator places `ARbTable` with the layout values (preset, ball set, venue seed,
+  `TableIndex`, lamp height / footprint, tag `RbPlayerTable`); M2-L's class loads its meshes. M2-A never builds table geometry.
+* **M2-C / M2-E / M2-F (audio sources).** M2-C only listens to frozen delegates: playback (`OnPlaybackStarted`,
+  `OnPlaybackClockChanged`, `OnShotEvent`, `OnFinished`; M2-E's file), footsteps (`OnFootstep`; M2-F fires it), loose balls
+  (`OnImpact`, `OnRolling`; M2-E fires them), settings (`OnSettingsChanged`), the venue (`ARbVenueInfo`). No sound code in other
+  packages' files; a missing hook is a request.
+* **M2-E / M2-F (ball in hand after a pick-up).** A picked-up cue ball that is in hand goes into M2-F's carrying hand through
+  `URbBallInHandComponent::BeginCarry` (public API); M2-E owns the loose actor, its removal and the ball set's visibility.
+* **M2-D / M2-E (multi-table UI).** M2-D binds the overlay, key hints and pause info to `URbTableSubsystem::GetPlayerSession()`
+  only; M2-E makes sure that session exists in every playable level.
+
+**Waves and merge order.** File-wise all seven packages run in parallel. On the shared machine (one GPU, 32 GB): **wave 1** M2-F
+(top priority), M2-L (P4), M2-E, M2-C; **wave 2** as soon as a slot frees: M2-A, M2-B, M2-D. Merge order (each after its
+reviewer): M2-E, M2-F, M2-D, M2-C, M2-L, M2-A, M2-B; then the integration round (18.10): `rbbl.py all`, `rb_make_all.py --strict`,
+captures, the M2 acceptance and the product owner's playtest. M2-F may be merged and handed to the owner for a feel-only playtest
+in the test room before the rest lands.
+
+### 18.3 M2-F — feel (P1, P2, P3, P5)
+
+**P1 — calm view after the contact.** Cause (M1): once the stroke component left Down, `ARbPlayerCharacter::HandleLook` routed
+every look delta to the head, so the follow-through of the mouse stroke (often with the Stroke button still held) turned the view
+away from the balls. Design: `FRbLookIntentGate` between the Look action and the head. Mouse motion while Stroke is held is the
+stroke, never look (also after the contact); after the release the gate stays closed for `QuietSeconds` 0.25 s, then opens only
+when the mouse travels more than `DeadZoneCm` 1.5 cm within 0.40 s (a deliberate new move), fading in over 0.20 s; smaller motion
+is dropped, not accumulated. The player stays down in Watching; the head follows the balls only through the human-motion
+reactions (below), never through stroke input; right click stands up (a human StandUp). The gate works in centimetres of mouse
+travel and input timestamps, never in per-frame deltas.
+
+**P3 — aim at normal mouse speed.** Cause (M1): the Look action delivered counts x the engine's legacy `Mouse2D` axis scale 0.07
+(with mouse smoothing) and the stroke turned that into azimuth with 0.0005 rad per unit -> 0.002 deg per count: 90 deg = 1.43 m of
+travel at 800 DPI (the owner measured ~1.9 m). Design (`RbAimResponse`, pure): counts -> cm with `MouseDpi` -> degrees with
+`FRbControlSettings`: coarse `AimDegreesPerCm` 7.2 x `AimSensitivity` (90 deg per 12.5 cm), fine x `FineAimFactor` 0.075 while Shift
+is held (13x slower), optional acceleration (0 = linear; the curve is monotone, continuous, frame-rate independent, gain 1 at the
+reference hand speed). The Look / aim path reads raw counts (no engine axis scale: `bEnableMouseSmoothing=False` and a neutral
+`Mouse2D` axis config in `DefaultInput.ini`). Standing look: `LookDegreesPerCm` 22 x `LookSensitivity`, invert Y.
+
+**P2 — diegetic ball in hand.** `URbBallInHandComponent` (on the pawn): Carrying = a hand (`SM_RbHand_Carry`, a procedural
+stand-in from `rb_make_player.py` / `URbAssetBakeLibrary::BakeHandCarryMesh`) holds the ball `HoverHeightCm` 4 above the cloth
+exactly over the target; the lamp shadow plus a contact-shadow preview under the ball show where it will touch; the target follows
+the look point on the bed (analytic bed plane of the table frame), Shift = fine adjustment (the aim's fine factor); the hand
+follows with human lag and tremor (never teleports). Confirm (LMB / F / Enter): Lowering (~0.25 s) onto exactly the previewed spot,
+`PlaceCueBall` when the ball touches the cloth. Illegal spot (ball overlap, off the bed, outside the kitchen): the hand hesitates
+and does not lower (state Refused), a soft knock (M2-C) and the mandatory line; a red outline only as a later assist option.
+
+**P5 — the camera is the eyes.** `FRbHumanMotion` (pure maths, owned by the rig; realism plan 4.8) replaces the smoothstep dolly.
+Posture changes (GetDown, StandUp, LeanOver, StraightenUp) as human movements: hip hinge (the head travels on an arc), weight shift
+toward the bridge side, head rotation leading the translation by 80-150 ms, asymmetric timing (down slower with a long settle, up
+faster at the start), a 3-15 mm overshoot below the final eye height and a damped settle (2-3 Hz, zeta ~0.6); every parameter varies
+per movement from a **seed** (hash of match seed, shooter shot index, address index, change counter): never two identical
+get-downs, bitwise reproducible. Continuous layer: breathing 0.2-0.33 Hz (faster / deeper with `StrokeSituation::Pressure`),
+postural sway (standing ~4.5 mm, down ~1 mm), walking bob / sway with gaze stabilisation and `OnFootstep` at each foot contact, a
+pressure-driven tremor share; Settle calms breathing and sway by ~70 % over 1-2 s. Reactions: after the contact a slow lean / turn
+following the cue ball and the first object ball with ~150-200 ms latency (smooth pursuit, no jump); a 50-80 ms flinch of a few mm
+on a loud impact (the break; loudness from the shot events). Presets: Eyes = vestibulo-ocular stabilisation (rotation from bob /
+breathing removed, gaze kept on the target, continuous translation x 0.3; posture changes keep their full human path); Headcam =
+nothing stabilised + mount jitter (`MountShakeScale`). Comfort: everything x `HeadBobScale` / `BodySwayScale`; Reduced motion or
+`PostureTransition` Quick / Cut -> a short plain ease / a cut, no sway. The motion layer moves only the eye: the cue pose stays
+`SampleHand` (what you see is what hits).
+
+**Acceptance (input traces; `RawBreak.Unit.Feel.*`, `RawBreak.Unit.HumanMotion.*`, `RawBreak.Functional.Feel.*`):**
+
+| # | Test | Pass |
+|---|---|---|
+| F1 | P1 trace: address, stroke 12 cm forward in 0.15 s with 3 cm lateral drift, Stroke held 0.3 s past the contact, release with 0.8 cm residual motion, 1 s watching | view yaw / pitch change caused by input after the contact = 0 (motion layer off) and < 0.3 deg in total with the human layer on (reactions only); the player stays down |
+| F2 | P1 trace: after F1 a deliberate 4 cm move within 0.3 s | look resumes after the dead zone; no step > 0.5 deg between two frames (fade-in) |
+| F3 | P3 trace: 12.5 cm of travel at 800 DPI (`MouseDpi` 800), and at 400 / 1600 DPI with `MouseDpi` set to match | 90 deg +- 0.5 deg in every case (DPI independent); the same counts in 30 / 60 / 144 fps frame splits give bitwise equal azimuths (linear) |
+| F4 | P3 fine: the F3 trace with Shift | 90 x 0.075 deg (13.3x slower, inside the owner's 10-20x); acceleration curve monotone and continuous, gain 1 at the reference speed |
+| F5 | P2 trace: carry across the bed, fine adjust, confirm | placed position == preview target within 0.1 mm; the ball never below HoverHeight while carrying; illegal target -> Refused, no `PlaceCueBall`; the hand never jumps (per-frame step bound) |
+| F6 | P5 posture: 20 get-downs with different seeds, 2 with the same seed | durations 0.8-1.5 s; overshoot 3-15 mm, settled < 0.4 s later; head rotation reaches 50 % >= 80 ms before the translation; different seeds differ (max eye-path difference > 5 mm), equal seeds bitwise equal; stand-up reaches 50 % sooner than get-down; 30 / 60 / 144 fps paths within 0.1 mm |
+| F7 | P5 continuous | breathing peak in 0.2-0.33 Hz, rate and depth rise with Pressure 0 -> 1; Settle -> amplitude x 0.3 +- 0.1 within 2 s; Headcam standing sway RMS 3-6 mm; walking 1.4 m/s: bob 3-5 cm p-p (Headcam), footsteps at ~2 Hz with `OnFootstep`; Eyes: view rotation from bob < 0.05 deg; Reduced motion: all zero |
+| F8 | Functional (PIE, test room): get down, aim with the F3 trace, stroke, watch, stand up, ball in hand after a scratch; pause while the Stroke button is held | the whole loop with the new rig; no contact after resume; M1 stroke tests (bitwise frame-split test, SampleHand == ExecuteStroke) unchanged |
+| F9 | Captures and plots | `Docs/images/dev/m2f/{ball_in_hand_legal,ball_in_hand_refused,down_after_contact}.png` (strict) and trace plots `getdown_seeds.png`, `aim_trace.png`, `look_gate.png` (from `Tools/feel/`), inspected |
+
+The cue's environment sweep switches from `ECC_WorldDynamic` overlaps to the `RbCueSweep` channel (`Cue/RbCueClearance`, M2-F), so
+venue clutter with `RbVenueProp` no longer blocks the cue (VDB-T3 needs it in-engine).
+
+### 18.4 M2-D — menus and settings
+
+Slate only (ui-ux 3.1), no UMG / widget assets; screens are `SCompoundWidget`s on the game viewport, laid out at 1080p and scaled
+only by `URbDpiScalingRule` (height / 1080). `URbUiSubsystem` (local player) keeps the screen stack: **Title** (`L_Title`: RAW BREAK,
+Play -> Test room / Dive bar x Practice / Hot-seat, Settings, Quit), **Pause** (Resume, Settings, Quit to title, Quit to desktop with
+a confirm; pauses the world, the playback holds without a time jump), **Settings** (pages below). Input: menus UIOnly with a cursor;
+closing the last screen restores GameOnly with the captured hidden mouse (the raw-input thread needs it). Esc =
+`ARbPlayerController::HandlePause` -> `TogglePauseMenu` (open / back / resume). `ARbTitleGameMode` travels to `RbTypes::MapFor(venue)`
+with `?Mode=`. Key hints: `SRbKeyHints` + `FRbKeyHintsModel` ("[RMB] Get down", "[F] Pick up the ball" ...), lower left, fading after
+3 s without a context change, setting `bShowKeyHints`.
+
+**Settings rows of M2** (registry ids; everything persists in `GameUserSettings.ini`; engine rows through the `UGameUserSettings`
+setters, quality rows through `SetQualityOption`, never direct cvar writes):
+
+| Page | Rows (default) |
+|---|---|
+| Graphics | `gfx.preset` Low / Medium / **High** / Epic / Cinematic / Custom ("Custom (based on ...)" after a row changes); the eleven `ERbQualityOption` rows (view distance, anti-aliasing, shadows, global illumination, reflections, post-process, textures, effects, foliage, shading, volumetric fog) 0..4; resolution scale 25-200 %; depth of field (on); motion blur 0-1 (1); film grain 0-1 (1) |
+| Display | window mode (fullscreen / windowed fullscreen / windowed), resolution (15 s confirm-or-revert), frame cap (30, 60, 90, 120, 144, 165, 240, unlimited), v-sync |
+| Camera | look **Eyes** / Headcam; vertical FOV 40-75 deg (50); body sway & breathing 0-1 (1); head bob 0-1 (1); mount shake 0-1 (1, Headcam only); posture transition **Natural** / Quick / Cut; reduced motion (off) |
+| Controls | mouse DPI 200-6400 (800); aim speed `AimSensitivity` 0.1-5 (1; the row shows "90 deg per x cm"); fine-aim factor 0.03-0.5 (0.075); aim acceleration 0-1 (0); look sensitivity 0.1-5 (1); invert look Y (off); stroke sensitivity 0.5-2 (1); key hints (on) |
+| Audio | master 1.0, music 0.7, table & balls 1.0, ambience 0.8, voices 1.0, interface 0.6 (0-1 each; M2-C maps them to dB) |
+
+**Acceptance**: UX-T01 (every row: default / preset values, Set -> Get round trip, save -> reload of the ini; EN labels only in
+M2), UX-T02 (presets incl. the High read-back of hit-lit reflections), UX-T05 (text >= 18 px at 1080p), UX-T07 (no clipping at
+1280x800, 1920x1080, 3840x2160, EN), UX-T09 (every screen by keyboard only and by mouse only; one focused widget after every push /
+pop; Back always returns; quitting needs a confirm), UX-T10 (pause mid-shot: no time jump, the director commits after the resumed
+playback, `ResultHash` unchanged), UX-T20 (reduced motion sets and restores exactly its rows), UX-T25 (on M2-E's two-table dev
+level: overlay, hints and pause show only the player's match), UX-T26 (DPI rule only, no double scale); functional MenuFlow
+(`L_Title` -> Dive bar Hot-seat -> pause -> settings -> change the FOV -> resume -> quit to title); settings survive a process
+restart; captures `Docs/images/dev/m2d/{title,pause,settings_graphics,settings_camera,settings_controls,settings_audio,key_hints}.png`
+through `rbue.py capture --extra -RbUiScreen=<Screen>` (a dev switch of M2-D's subsystem), inspected. `GameDefaultMap` switches to
+`L_Title` at the integration (architect) once `rb_make_title.py` exists.
+
+### 18.5 M2-C — audio v1
+
+Everything is synthesised in M2 (no library samples): the physics sounds come from the shot's events and tracks through the modal /
+contact synthesis of `Tools/audio/click_synth.py` (`runtime_render`), ported to `RawBreakAudioDsp` (plain C++, unit-testable
+offline: `FContactPulse` / Hertz + Tsuji, per-order ball radiation kernels, `FModalBank` for rails / bed / pockets / cue,
+`FImpactRenderer`, noise sources). Sounds of M2: ball-ball (AU-20/21), cushion (AU-30), jaw (AU-31), rail cap (AU-32), slate landing
+/ bounce (AU-24), liner and pocket drop (AU-34/35; coin-op gully run AU-36 and trap click AU-37 on the 7-ft), rolling / sliding on
+cloth (AU-22/23), tip hit incl. miscue and recontact (AU-01..03), loose-ball floor hits and rolling (AU-25), footsteps (AU-65,
+synthesised heel / toe per surface), room tone per venue (test room: HVAC bed; dive bar: HVAC, cooler compressors, neon hum as
+synthesised layers), convolution reverb per venue (IR from `Tools/audio/ir_synth.py`; dive bar RT60 0.8 / 0.6 / 0.5 s low / mid /
+high), spatialisation (point voices at the emitters, attenuation, panning / HRTF per audio.md 6.3).
+
+**Scheduling contract** (the reason for the architect's playback hooks). One `FShotAudioClock` per table, shared by all its voices.
+`URbTableAudioComponent` (one per `ARbTable`, created by `URbAudioSubsystem` for every table of `URbTableSubsystem`) binds to the
+table's playback: `OnPlaybackStarted` -> plans built on a worker (events + tracks, listener geometry, variation seeded from the shot
+hash so replays render identically) -> `PushPlan` + `StartShot(mapping)`; `OnPlaybackClockChanged` -> `SetMapping` (slow motion,
+pause, seek, world pause). The first voice callback after `StartShot` anchors shot time in device frames; every voice renders its
+events at fractional device frames (overlap-add). Voices are `USynthComponent`s with one `ISoundGenerator` callback per device block,
+never virtualised or stolen; LOD tiers T0 (player's table or < 3 m: 30 voices, or the 8-channel fallback of audio.md 5.1 if AU-0
+decides so), T1 (3-10 m: 4), T2 (> 10 m: 1). Settings volumes -> submixes on `OnSettingsChanged`; pause mix (world low-pass 800 Hz,
+-12 dB), replay mix (ambience -10 dB). Assets (submixes, attenuation, concurrency, IRs) by `rb_make_audio.py` under
+`/Game/Generated/Audio`. M2-C may change the audio block of `DefaultEngine.ini` (e.g. back to 1024 x 1 after AU-0) and asks the
+architect for plugin switches in `RawBreak.uproject` if it needs any.
+
+**Acceptance**: AU-0 spike documented in `Docs/audio/m2/au0.md`; offline `RawBreak.Unit.Audio.*`: AU-T01..T07, T09, T10, T11 (golden
+vectors, residual <= -100 dB), T12 (event coverage on `divebar_break8.json`), T13 (replay determinism, bit-identical); engine
+`RawBreak.Functional.Audio.*` (`rbue.py test --sound`): AU-T08 (0.5104 ms in two voices -> 24.50 +- 0.05 samples), AU-T21 (0 samples
+inter-voice skew), T16 (no clipping, dive-bar break at the breaker's ears), T19 (audio thread <= 60 % of a block at the break's
+peak); a recorded dive-bar break and a test-room break contain every class above (event log vs detected onsets), a slow-motion
+replay follows the rate, pause holds and resumes without a click; spectrograms `Docs/images/dev/m2c/*.png` and the WAVs of the
+recorded checks in `Docs/audio/m2/` (LFS), analysed with `click_synth.py --analyze` and inspected.
+
+### 18.6 M2-E — balls off the table, multi-table groundwork
+
+#### 18.6.1 Balls off the table
+
+The core already decides everything (event `BallOffTable` with its `OffTableReason`, fouls, respot / ball in hand). The Unreal side
+only continues the picture. On a **live** shot's `BallOffTable` event `URbLooseBallSubsystem::HandOff` hides the ball in its
+`ARbBallSet` and spawns an `ARbLooseBall` at the exact core state of the event (position, velocity, spin -> `FRbCoords` -> world;
+the ball's own mesh and material instance, radius, mass; profile `RbLooseBall`, physical material `PM_RbBall`, CCD). It bounces on
+the floor (`PM_RbSurface_Vct` in the dive bar: friction 0.5, restitution 0.35, ESTIMATE; concrete in the test room), rolls under
+stools (the venue hulls model the legs, venue-dive-bar 13.5) and knocks against furniture. `RestsOnRailOrFrame`: no physics, the
+ball stays where the core froze it. The rules never wait: while a loose ball exists for a ball that the committed table state has
+back in play, the table instance stays hidden ("awaiting return"). **Return (simple for M2):** a pick-up interaction ("Pick up the
+ball", gazed within 1.2 m, a `URbInteractionSubsystem` provider), or automatically when the next address starts, when the ball
+rests in an `RbBallReturn` volume, falls below kill Z or lies unreachable for 20 s; a picked-up cue ball that is in hand goes into
+M2-F's carrying hand. Replays show the ball leaving and hide it at the hand-off time (no second loose actor). Events `OnImpact` /
+`OnRolling` (audio AU-25) and `OnReturned`. Physical materials by `rb_make_physics.py`.
+
+#### 18.6.2 Several tables per level (how multi-table works)
+
+Decision 2026-09-28: venues hold several tables, each with its own match (a pool hall ~8). Rules for every package from M2 on:
+
+1. **Registry, no singletons.** `URbTableSubsystem` lists every `ARbTable` of the world sorted by `TableIndex` (unique per level,
+   0..N-1; `ValidateTables` fails on duplicates, every level validator calls it). Code that needs a table asks for a specific one
+   (`FindTable(index)`, `FindNearestTable(point)`, `FindBallSet(table)`) or for the **player's** table (tagged `RbPlayerTable`, else
+   the lowest index). `TActorIterator<ARbTable>` / "the first table found" appears only inside `RbTableSubsystem.cpp` (M2-E's grep
+   test enforces it; the M1 game mode's lookup moves there).
+2. **Sessions.** One `FRbTableSession` (table, ball set, cue, director) per table that runs a match, registered by `ARbGameMode`. In
+   M2 only the player's table plays; the others stay idle and rendered. `ARbGameMode::GetDirector()` / `GetTable()` /
+   `GetBallSet()` / `GetCue()` remain as the player session's accessors (M1 code and tests keep working). V2: AI regulars get
+   sessions with AI shooters (`SyntheticHand`) and independent directors; the simulation subsystem gets a FIFO of requests (one
+   simulator per worker later) instead of refusing while busy; online later syncs only stroke inputs (the core re-simulates
+   bitwise on every PC).
+3. **Per-table state is keyed by `TableIndex`**: ball sets, playback, loose balls, table audio with its shot clock and LOD tier,
+   replay history (the player's table only in M2), score slates later. The venue seed hashes the index
+   (`MakeVenueTableCondition(seed, TableIndex, ...)`), so every table of a hall has its own slope and balls.
+4. **The player's context** (overlay, key hints, pause info, replays, camera rig, stroke) binds to `GetPlayerSession()`; switching
+   tables later is a rebind of that session (UX-T25).
+5. **Test level**: `rb_dev_m2e.py` builds `/Game/Dev/M2E/L_TwoTables` (a 9-ft and a 7-ft table, different yaw, the 7-ft tagged
+   `RbPlayerTable`), used by M2-E's functional test and by M2-C / M2-D for their multi-table checks.
+
+**Acceptance (M2-E)**: `RawBreak.Unit.LooseBall.*` / `RawBreak.Functional.LooseBall`: a scripted jump shot that leaves the table
+(reason Floor) -> the loose ball starts at the event state (position 0.1 mm, velocity 1e-6 relative), bounces and comes to rest on
+the floor; the match's `ResultHash` and GameState equal a run with the loose-ball subsystem disabled; the table instance is hidden
+while awaiting return; pick-up by interaction and each automatic return path; a replay hides at the hand-off time and spawns
+nothing; RestsOnRailOrFrame spawns nothing. `RawBreak.Unit.MultiTable.*` / `Functional.MultiTable`: two tables -> two registered
+sessions, player table by tag, `ValidateTables` catches a duplicate index, a shot on the player's table moves only its balls, the
+grep test above; all M1 flows (MatchFlow, Replay, M1Flow, M1Rack) green; capture `Docs/images/dev/m2e/loose_ball_floor.png`.
+
+### 18.7 M2-L — table and cloth look-dev (P4)
+
+**Hard rule**: every physics-relevant surface (bed top, cushion nose line and profile, facings / jaws, pocket cut and drop, rail-cap
+top height, sights) stays **exactly** on `rb::TableGeometry` (C++ `RbTableMeshBuilder`, the M1 tolerances: nose line 0.01 mm, bed
+z = 0). Look-dev adds detail only where the physics does not look: rounded rail-cap and nose edges as real geometry (not shading
+bands), a visible **rubber** strip between cushion cloth and rail where real tables show it, cloth wrapped around the nose with its
+fold at the facings, pocket hardware (9-ft: leather pockets with nets or drop pockets with irons; 7-ft coin-op: castings and gully
+openings with >= 2 mm clearance to jaws and capture volumes, automated fit check), apron and legs with real construction (9-ft:
+veneered apron, legs with levelers; 7-ft: the HALVERSON Stallion 7 cabinet of venue-dive-bar 3.1: laminate box, trim bands,
+pedestal legs, coin mechanism, trap window, ball tray, cue-ball return in the foot-end apron). New render parts are appended to
+`ERbTablePart` by M2-L (with `ToString`). Non-physics body parts may come from Blender (`Tools/blender/table/**`, reading the
+`rbsim --geometry` JSON in `Art/Tables/`, e.g. `rbsim --table 7ft-bar --balls oldbar --geometry --no-trajectories --no-states
+--out Art/Tables/tablespec_seven_foot_bar.json`), imported by `rb_import_table.py` to `/Game/Generated/Tables/<Preset>/Body/` and
+loaded by `ARbTable`; `db_build_all.py` runs the table generators with the venue ones.
+
+**Materials** (`rb_make_materials.py` + `Shaders/Private/*.ush`, Substrate): worsted cloth for the 9-ft (tight weave, fibre-level
+detail in a tiling micro-normal + a fuzz / sheen lobe at grazing angles, realistic albedo — cloth green about 0.05-0.10 linear,
+checked against a known-albedo card in the capture — subtle unevenness, chalk dust around the head string and the pockets, faint
+ball tracks); napped bar cloth for the 7-ft (`MI_RbCloth_BarGreen`: nap direction, pilling, worn lanes, stains); lacquered wood with
+depth (clear coat over figured veneer from CC0 wood scans, `Art/Tables/cc0_inputs.json`); black laminate rail caps with burns /
+rings for the bar table (`MI_RbRail_BlackLaminate`); rubber, leather, net, cast metal / ABS; dirty balls for the dive bar
+(`MI_RbBall_DiveBar`, the oversized cue ball included). **References**: web reference photos are listed (URL + what to compare) in
+`Docs/references/table-lookdev.md` and never committed as images unless their licence allows it; the owner's photos of his local
+pool bar replace them when they arrive.
+
+**Acceptance**: M1 table tests green + new `RawBreak.Unit.Table.*` (rail-cap edge radius >= 3 mm with >= 8 segments, nose-profile
+sagitta < 0.05 mm, rubber strip inside the rail outline and never above the nose line, casting / jaw clearance >= 2 mm, baked
+triangle counts == runtime); `rb_make_all.py --strict` regenerates both presets idempotently (A2 metrics); strict captures through
+`ARbLookDevCamera`s (Eyes preset) with `capture_table.py`: `Docs/images/dev/m2l/{9ft,7ft}_{chin_on_cue,standing,pocket_closeup,
+cushion_grazing,rail_closeup,overhead}.png` (the 7-ft in a neutral look-dev room `/Game/Dev/M2L/L_TableLookDev` until `L_DiveBar`
+exists) and a side-by-side sheet against the reference list per iteration; iterate until table and cloth read as real at
+chin-on-cue and standing (Claude's written verdict per view in the package report; the owner's verdict in the M2 playtest);
+`Docs/images/m1/*` re-captured (A7).
+
+### 18.8 M2-A / M2-B — The Low Bridge Tavern, slice v1 (DB-0..DB-3 without Meshy / Higgsfield)
+
+**Pipeline** (venue-dive-bar 13): Blender 5.2 headless through `Tools/blender/rbbl.py` (`run <script>`; `all` = `db_build_all.py`,
+every venue and table generator in order; `--factory-startup`, `--python-exit-code 1`, fails on `RBBL_FAIL` / a traceback, kills the
+tree on timeout, never leaves Blender running). Generators are deterministic (`rb_bl.rng(asset, instance, seed)`) and export FBX +
+`<Asset>.json` (target dimensions asserted: hero +-2 mm, others +-1 cm, VDB-T4; UV0 world scale, UV1 unique, `UCX_` hulls that are
+leg-accurate for balls rolling under furniture) into `Art/DiveBar/Export/<Asset>/` (LFS). `rb_import_divebar.py` (M2-A) scans the
+asset JSONs, imports with Interchange (materials off), sets Nanite (full fallback), collision from UCX, profiles `RbVenueBlock` /
+`RbVenueProp`, material slots -> `MI_DB_<slot>`, and refuses an asset without a ledger row.
+
+**M2-A**: `layout.json` / `lights.json` transcribed from venue-dive-bar 2.3 / 4.2; shell (`db_arch.py`); `rb_make_divebar.py` builds
+`L_DiveBar` + lighting sublevels (Open, LightsUp; AfterHours as a stub state) with the imported mesh or the greybox box of every
+element (always playable); `ARbTable` at (1375.9, 542.7, 0) cm, yaw 0 (SevenFootBar, OldBarOversizedCue, `TableIndex` 0, tag
+`RbPlayerTable`, venue seed searched for the roll-off toward the jukebox, `LampUndersideHeight` 0.86 m, lamp footprint x [-0.650,
+0.650] y [-0.210, 0.170] m); `ARbVenueInfo` (DiveBar, seed, Age 0.80); PlayerStart at the head end; World Settings `ARbGameMode`;
+post-process (Eyes); height fog + local fog volumes with the haze rules of 4.1 / 4.7 (every light with volumetric scattering > 0
+casts volumetric shadows; outside and enclosed lights scatter 0; neon proxies `SpecularScale` 0 and flux = tube flux / pi; tube
+meshes out of Lumen GI while the proxy lights); the 3-shade lamp's bulbs (key light), neons (`db_neon.py`), practicals; floor
+physical material, kick plates, the `RbBallReturn` volume behind the bar; audio anchor tags `RbAudio_<Anchor>` (venue-dive-bar 10);
+capture cameras `RbCam_DB_V01..V12`, `RbCam_DB_TH1..TH7` and menu stations `RbCam_Menu_S0..S7` (all `ARbLookDevCamera`); the
+validator `ARbVenueInfo::ValidateVenueLevel`; `capture_divebar.py` (12 s warm-up, EV report).
+
+**M2-B**: bar counter (H08), back bar (H09), booths + tables (M02), stools (H10 procedural variants A / B / C, spectator stools),
+ledges and column shelf, the 3-shade lamp body (H03), wall cue rack + prop cues + chalk cubes (H05 / H06), jukebox body (H12), dart
+machine + board (M03), a first lathe-prop set (bottles, glasses, ashtray); masters `M_DB_Opaque`, `M_DB_Coated`, `M_DB_Glass`,
+`M_DB_Emissive`, `M_DB_Floor` (baked 2K masks until the RVT path is proven), `M_DB_Decal` with the Age system (venue slider 0.80 in
+`MPC_DB_Venue` + per-asset bias; HLSL in `Shaders/Private/Venue/RbVenueWear.ush`); every `MI_DB_*` of venue-dive-bar 6.3 incl. the
+architecture surfaces (brick, VCT, ceiling tiles, paneling); CC0 inputs pinned by `fetch_cc0.py` (Poly Haven / ambientCG only); the
+first decal set (rings, burns, scuffs, stains; atlases from procedural sources, no Higgsfield); text textures with fictional brands
+only.
+
+**Acceptance (the VDB tests that fit M2)**:
+
+| Check | Owner | Pass |
+|---|---|---|
+| DB-0 | A, B | `SM_DB_AxisTest` bounds 100.0 +- 0.1 cm, arrow +X, pivot on the floor; the stool end to end (Blender -> UE); the ledger check fails on purpose once (negative test); `Docs/images/divebar/db0/{axis_test,stool}.png` |
+| DB-1 / VDB-T3 | A | greybox level walkable (PIE: capsule r 0.25 m through the 1.04 m and 1.10 m gaps); `cue_sweep_check.py` on `layout.json` reproduces 2.5 (class shares +-0.5 points); in-engine sweeps at the 12 positions on the `RbCueSweep` channel (after M2-F's switch) blocked where 2.5 predicts, +-2 cm; V10 plan matches 2.4; `db1/{V10_plan,V01..V04}.png` |
+| DB-2 / VDB-T1, T2, T8, T11 | A | lamp-only lux probe inside the 4.4 bands (min >= 90 lux; analytic + in-engine white card); adapted EV100 inside the 4.5 bands for Open and LightsUp (12 s warm-up); no sequence above 3 flashes / s; light-flag validator clean; `db2/{V01..V05,V08}.png` + `lux_report.txt` + `ev_report.txt` |
+| VDB-T4, T7 | B (A re-checks on import) | every exported asset within its tolerance; every imported asset has a ledger row, no NC licence (the OCR pass waits for Higgsfield art in DB-5) |
+| VDB-T10 | A | preset / ball set / actor transform / `LampUndersideHeight` 0.86 / `layout.json` bed height == `FRbTableContext::BedHeight()` 0.743; roll-off within +-25 deg of the jukebox (two-roll behaviour test) |
+| VDB-T12 (M2 part) | A | the lighting sublevels switch with ramps >= 0.8 s (no one-frame step); `RbCam_Menu_S0..S7` exist with the UX 6.3 poses (phone anchor, Polaroid wall, TV-1 input, beer clock: later) |
+| DB-3 pre-check | A, B, L | "is it real" views `db3/{V02,V03,V04,V06,V07}.png` with M2-B's props and M2-L's cabinet, reviewed by Claude against reference photos (written notes); no Meshy / Higgsfield item required |
+| Playable | A | `RawBreak.Functional.DiveBarRack`: a complete 9-ball practice rack on `L_DiveBar` through the cheats (like M1Rack) with the oversized cue ball, a hot-seat turn change, ball in hand after a scratch, a replay; `capture_divebar.py --set m2` renders every V / TH camera |
+
+### 18.9 Config, pipeline and content additions (architect)
+
+* `DefaultEngine.ini`: see 18.1. `DefaultGame.ini` (at integration): `MapsToCook` + `L_DiveBar`, `L_Title`; `GameDefaultMap` ->
+  `L_Title` once it exists. `DefaultInput.ini` is M2-F's (mouse smoothing / axis config), `DefaultScalability.ini` M2-D's.
+* `rbue.py`: `test --sound` (keeps the audio device for `RawBreak.Functional.Audio.*`), `capture` / `test --extra <UE args>`.
+* `rb_make_all.py` order: materials (M2-L) -> physics (M2-E) -> table (M2-L) -> ball (M2-E) -> cue (M2-F) -> player (M2-F) -> audio
+  (M2-C) -> test room (M2-L) -> venue materials (M2-B) -> dive-bar import + level (M2-A) -> title (M2-D); validators: M1 level,
+  venue level. Blender first: `python Tools/blender/rbbl.py all`. Packages never edit these lists; a new generator is a request.
+* Content roots per package: 18.2. Scratch maps `/Game/Dev/M2<x>/` (git-ignored). `Art/Third/` (raw CC0 downloads) is git-ignored;
+  the lock files with the SHA-256 pins are committed.
+* Licence ledger: per-package fragments `Docs/licenses/ledger/M2-<x>.csv` (the columns of `asset-ledger.csv`), merged by the
+  architect; `ai_generated` = n for everything in M2.
+
+### 18.10 M2 acceptance (integration round)
+
+| # | Check | How |
+|---|---|---|
+| M2-A1 | Build clean | editor and game target: 0 errors, 0 project warnings |
+| M2-A2 | Regenerate | `rbbl.py all` + `rb_make_all.py --strict` from a clean `Content/Generated` recreate everything; a second run with `--compare` gives equal metrics; validators OK for `L_M1_TestRoom` and `L_DiveBar` |
+| M2-A3 | Tests | all `RawBreak.Unit.*` and `RawBreak.Functional.*` green (M1's 163 + the packages'), core 904 green; `RawBreak.Functional.Audio.*` with `--sound` |
+| M2-A4 | Feel | 18.3 F1-F9 green; the owner re-tests P1, P2, P3, P5 |
+| M2-A5 | Look | 18.7 captures (both tables) + `Docs/images/divebar/m2/{V01..V09,TH1..TH7}.png`, strict, inspected; the owner re-tests P4 |
+| M2-A6 | Venue | the 18.8 table |
+| M2-A7 | Audio | the 18.5 list; the owner hears a full dive-bar rack |
+| M2-A8 | Menus | the 18.4 list; the owner plays from the title screen into both venues and back |
+| M2-A9 | Performance (logged, no gate yet) | `L_DiveBar`, High, 1440p, TSR at the DLSS-Q internal resolution: GPU mean / P95 logged against the 10.3 / 11.1 ms target; game thread < 6 ms in a break; P95 <= 16.7 ms is the floor that must hold |
+| M2-A10 | **Owner playtest** | packaged Development build: title -> dive bar hot-seat and test-room practice; P1-P5 verdicts recorded in `Docs/playtests/` |
+
+### 18.11 Risks
+
+| Risk | Mitigation |
+|---|---|
+| `r.VirtualTextures=True` recompiles every shader (cold DDC) | switched on once in the architect step; the first capture per worktree needs a long timeout; warm the DDC once after the merge |
+| Seven packages on one machine (RAM, GPU, shader compiles) | the waves of 18.2, at most three capturing packages, `rbue.py` sequential per worktree, never leave an editor / Blender running |
+| P5 motion causes discomfort | Eyes preset stabilised, every scale in the settings, Reduced motion = Quick / Cut, the owner's playtest sets the defaults |
+| Human motion vs "what you see is what hits" | the motion layer moves only the eye; the cue pose stays `SampleHand` (M1 tests stay green) |
+| Audio anchor precision in the editor binary / on the null device | AU-0 spike first; fallback 1024 x 1 buffers; engine tests on the null device where no output exists |
+| Blender -> UE axis / scale | DB-0 axis test frozen before any prop; exporter and importer both assert dimensions |
+| Table look without the owner's photos | web references first (URLs only); the owner's photos replace them in a later round |
+| Loose balls vs replays / determinism | loose balls are presentation only; hashes compared with the subsystem disabled; replays never spawn them |
+| M2-F is the largest package | it may run as one agent with a reviewer per sub-feature; P1 / P3 land first (smallest, highest value), then P2, then P5 |
