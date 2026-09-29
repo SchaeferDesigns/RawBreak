@@ -2,13 +2,16 @@
 
 #include "Balls/RbBallSet.h"
 #include "Core/RbAssetPaths.h"
+#include "Cue/RbCue.h"
+#include "Game/RbMatchDirector.h"
 #include "Simulation/RbTableContext.h"
 #include "Table/RbTable.h"
 
 #include "Engine/World.h"
 #include "EngineUtils.h"
 
-// Owner: M2-E. Table queries implemented by the M2 architect step; sessions are registered by ARbGameMode (TODO(M2-E)).
+// Owner: M2-E. Table queries (the architect step's) + sessions (registered by ARbGameMode). The ONLY file that iterates the
+// world's tables, ball sets or cues (RawBreak.Unit.MultiTable.NoSingleTableLookups).
 
 URbTableSubsystem* URbTableSubsystem::Get(const UObject* WorldContext)
 {
@@ -116,6 +119,10 @@ bool URbTableSubsystem::ValidateTables(FString& OutReport) const
 	const TArray<ARbTable*> Tables = GetTables();
 	bool bOk = Tables.Num() > 0;
 	OutReport = FString::Printf(TEXT("tables: %d\n"), Tables.Num());
+	if (Tables.IsEmpty())
+	{
+		OutReport += TEXT("FAIL no ARbTable in the level\n");
+	}
 	TSet<int32> Seen;
 	for (const ARbTable* Table : Tables)
 	{
@@ -126,8 +133,61 @@ bool URbTableSubsystem::ValidateTables(FString& OutReport) const
 			bOk = false;
 			OutReport += FString::Printf(TEXT("FAIL table %s: TableIndex %d duplicate or negative\n"), *Table->GetName(), Table->TableIndex);
 		}
+		else
+		{
+			OutReport += FString::Printf(TEXT("OK   table %s: TableIndex %d%s\n"), *Table->GetName(), Table->TableIndex,
+				Table->ActorHasTag(RbAssetPaths::Tag::PlayerTable) ? TEXT(" (player table)") : TEXT(""));
+		}
+	}
+	const int32 Tagged = CountPlayerTableTags();
+	if (Tagged > 1)
+	{
+		bOk = false;
+		OutReport += FString::Printf(TEXT("FAIL %d tables tagged %s (at most one player table)\n"), Tagged, *RbAssetPaths::Tag::PlayerTable.ToString());
 	}
 	return bOk;
+}
+
+ARbBallSet* URbTableSubsystem::FindUnassignedBallSet() const
+{
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<ARbBallSet> It(World); It; ++It)
+		{
+			if (IsValid(*It) && It->GetTable() == nullptr)
+			{
+				return *It;
+			}
+		}
+	}
+	return nullptr;
+}
+
+int32 URbTableSubsystem::CountPlayerTableTags() const
+{
+	int32 Count = 0;
+	for (const ARbTable* Table : GetTables())
+	{
+		Count += Table->ActorHasTag(RbAssetPaths::Tag::PlayerTable) ? 1 : 0;
+	}
+	return Count;
+}
+
+const FRbTableSession* URbTableSubsystem::FindSessionForDirector(const URbMatchDirector* Director) const
+{
+	return Director ? Sessions.FindByPredicate([Director](const FRbTableSession& S) { return S.Director.Get() == Director; }) : nullptr;
+}
+
+URbMatchDirector* URbTableSubsystem::GetPlayerDirector() const
+{
+	const FRbTableSession* Session = GetPlayerSession();
+	return Session ? Session->Director.Get() : nullptr;
+}
+
+ARbBallSet* URbTableSubsystem::GetPlayerBallSet() const
+{
+	const FRbTableSession* Session = GetPlayerSession();
+	return Session ? Session->BallSet.Get() : nullptr;
 }
 
 void URbTableSubsystem::RegisterSession(const FRbTableSession& Session)

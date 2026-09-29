@@ -11,8 +11,12 @@
 //     GetCue() remain as the PLAYER session's accessors (UI, cheats, tests of M1 keep working).
 //   * Per-table consumers key their state by TableIndex: loose balls (URbLooseBallSubsystem), table audio + shot clocks
 //     (URbTableAudioComponent, one per table), replays (the player's table), later the score slates.
-// Owner: M2-E. The table queries are implemented by the M2 architect step (actor iteration, no caching assumptions); the
-// session registration is M2-E's (TODO(M2-E) in ARbGameMode).
+// Owner: M2-E. The table queries are implemented by the M2 architect step (actor iteration, no caching assumptions); ARbGameMode
+// registers one session per table of the level (M2-E; the player's session drives the M1 accessors of the game mode).
+//
+// Rule (enforced by RawBreak.Unit.MultiTable.NoSingleTableLookups): TActorIterator / TActorRange / GetAllActorsOfClass over
+// ARbTable, ARbBallSet or ARbCue ("the first table found") appear ONLY in RbTableSubsystem.cpp; everything else asks this
+// subsystem for a specific table or for the player's.
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
@@ -67,6 +71,18 @@ public:
 	const TArray<FRbTableSession>& GetSessions() const { return Sessions; }
 
 	FRbOnTableSessionsChanged OnSessionsChanged;
+
+	// --- additions (M2-E) --------------------------------------------------------------------------------------------
+
+	// The session a director runs (nullptr if none).
+	const FRbTableSession* FindSessionForDirector(const URbMatchDirector* Director) const;
+	// The player session's director / ball set (nullptr without a player session).
+	URbMatchDirector* GetPlayerDirector() const;
+	ARbBallSet* GetPlayerBallSet() const;
+	// Tables tagged RbAssetPaths::Tag::PlayerTable (ValidateTables fails on more than one).
+	int32 CountPlayerTableTags() const;
+	// A ball set placed in the level that no table has initialised yet (GetTable() == nullptr; dev maps place one), else nullptr.
+	ARbBallSet* FindUnassignedBallSet() const;
 
 private:
 	TArray<FRbTableSession> Sessions;

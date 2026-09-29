@@ -9,7 +9,9 @@
 // Clock: live shots are anchored at the tip contact, ShotTime = (FPlatformTime::Seconds() - ContactTime) * Rate,
 // so a late hand-off never shifts the motion; replays start at StartShotTime with their own rate. The clock is
 // NOT affected by global time dilation. Pocketed / off-table balls: the Terminal segment freezes the ball where
-// it was captured; the component hides it after DropHideDelay (the pocket-fall animation is a later package).
+// it was captured; the component hides a pocketed ball after DropHideDelay (the pocket-fall animation is a later package),
+// a ball that left the table at its hand-off time (M2-E: URbLooseBallSubsystem continues a live shot's ball under engine
+// physics; HideTimeOf), and leaves a ball that came to rest on the rail / frame where it is until the finals.
 // The cue follows rb::CueTipAt of strike 0 while the tip path lasts (what the rules judged is what is shown).
 // Events: each rb::ShotEvent whose time is passed fires OnShotEvent once, in log order (audio / VFX / chalk later).
 //
@@ -124,6 +126,13 @@ public:
 
 	// FinishTime of Shot for a given drop-hide delay (pure).
 	static double ComputeFinishTime(const FRbShot& Shot, double DropHideDelay);
+
+	// M2-E (balls off the table, Docs/ue-architecture.md 18.6.1): shot time from which the table instance of a ball with this
+	// final is hidden. Pocketed: capture + DropHideDelay (the pocket-fall animation is later). Off the table with reason Floor /
+	// ExternalObjectRebound: the capture itself = the HAND-OFF time (a live shot continues the ball as an ARbLooseBall from
+	// there, a replay shows the ball leaving and hides it at that moment). RestsOnRailOrFrame: never during the playback (the
+	// ball stays where the core froze it on the rail / frame; the finals hide it). Balls on the table: never (+inf).
+	static double HideTimeOf(const rb::BallFinal& Final, double DropHideDelay);
 
 	// Core state of a ball as last shown (Play / SeekTo / tick): bitwise rb::StateAt / OrientationAt at GetShotTime().
 	// False if the ball is not part of the playing shot.

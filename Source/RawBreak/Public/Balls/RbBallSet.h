@@ -120,7 +120,27 @@ public:
 	// Pushes every ball centre into the occlusion collection (also done automatically on every change).
 	void UpdateOcclusionParameters();
 
+	// --- M2-E additions: balls off the table (Docs/ue-architecture.md 18.6.1) --------------------------------------------
+
+	// A ball whose physical copy lies off the table (ARbLooseBall) is WITHHELD: its table instance stays hidden whatever the
+	// presentation asks for (ShowSimBalls, the playback, SetBallVisible) - "awaiting return" - until URbLooseBallSubsystem
+	// returns it. Un-withholding applies the visibility the presentation asked for last (a ball the committed table state has
+	// back in play reappears where the table shows it; the reappearance is a jump, so its motion history is dropped).
+	void SetBallWithheld(int32 BallId, bool bWithheld);
+	bool IsBallWithheld(int32 BallId) const;
+	// The visibility the presentation asked for last (SetBallVisible / ShowSimBalls / playback), independent of withholding.
+	bool IsBallRequestedVisible(int32 BallId) const;
+	// Replays show the recorded shot with every ball: while a replay plays, withholding is suspended (URbReplaySubsystem via
+	// URbLooseBallSubsystem::SetReplayActive).
+	void SetWithholdSuspended(bool bSuspended);
+	bool IsWithholdSuspended() const { return bWithholdSuspended; }
+
+	// AActor
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 protected:
+	// Applies requested visibility and withholding to the ball's component.
+	void ApplyBallVisibility(int32 BallId);
 	// One ball's MPC entry.
 	void UpdateOcclusionParameter(int32 BallId);
 
@@ -149,5 +169,8 @@ protected:
 	TWeakObjectPtr<ARbTable> Table;
 	TArray<double> BallRadiiCm;          // index = ball id
 	TArray<FQuat> BallOrientations;      // index = ball id, table-local UE
+	TArray<bool> BallRequestedVisible;   // index = ball id (M2-E)
+	TArray<bool> BallWithheld;           // index = ball id (M2-E)
+	bool bWithholdSuspended = false;
 	bool bOcclusionCollectionOverridden = false;
 };

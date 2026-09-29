@@ -8,7 +8,7 @@
 #include "Engine/World.h"
 #include "Misc/App.h"
 
-// Owner: UE-2.
+// Owner: UE-2; M2-E: the hide rule of balls that leave the table (HideTimeOf).
 
 namespace
 {
@@ -43,6 +43,25 @@ URbShotPlaybackComponent::URbShotPlaybackComponent()
 	PrimaryComponentTick.bTickEvenWhenPaused = true; // to hold the clock while the world is paused (not to advance it)
 	rb::ResetCursor(Cursor);
 	FMemory::Memset(ShownCache, -1, sizeof(ShownCache));
+}
+
+double URbShotPlaybackComponent::HideTimeOf(const rb::BallFinal& Final, double InDropHideDelay)
+{
+	if (!FMath::IsFinite(Final.Time))
+	{
+		return rb::kInfinity;
+	}
+	switch (Final.Status)
+	{
+	case rb::BallFinalStatus::Pocketed:
+		return Final.Time + FMath::Max(InDropHideDelay, 0.0);
+	case rb::BallFinalStatus::OffTable:
+		return Final.OffReason == rb::OffTableReason::RestsOnRailOrFrame ? rb::kInfinity : Final.Time;
+	case rb::BallFinalStatus::NotInPlay:
+	case rb::BallFinalStatus::OnTable:
+		break;
+	}
+	return rb::kInfinity;
 }
 
 double URbShotPlaybackComponent::ComputeFinishTime(const FRbShot& InShot, double InDropHideDelay)
@@ -393,8 +412,7 @@ void URbShotPlaybackComponent::ApplyAt(double Time)
 		{
 			continue;
 		}
-		const rb::BallFinal& Final = Result.Finals[Ball];
-		const bool bGone = IsCaptured(Final) && Time >= Final.Time + static_cast<double>(DropHideDelay);
+		const bool bGone = Time >= HideTimeOf(Result.Finals[Ball], static_cast<double>(DropHideDelay));
 		if (!bGone)
 		{
 			Balls->SetBallCore(Ball, State.Position, Orientation);

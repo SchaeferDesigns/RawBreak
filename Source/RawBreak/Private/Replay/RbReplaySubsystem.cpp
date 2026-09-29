@@ -2,17 +2,17 @@
 
 #include "RawBreak.h"
 #include "Balls/RbBallSet.h"
+#include "Balls/RbLooseBallSubsystem.h"
 #include "Balls/RbShotPlaybackComponent.h"
 #include "Camera/RbCameraRigComponent.h"
 #include "Cue/RbCue.h"
-#include "Game/RbGameMode.h"
 #include "Game/RbMatchDirector.h"
+#include "Game/RbTableSubsystem.h"
 #include "Replay/RbReplayCamera.h"
 #include "Table/RbTable.h"
 
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
@@ -109,6 +109,11 @@ bool URbReplaySubsystem::PlayReplayFrom(int32 IndexFromLast, ERbReplayView View,
 	if (Playback->IsPlaying())
 	{
 		Playback->Stop(false); // our previous replay (restart / next view)
+	}
+	// M2-E: the recorded shot shows every ball (withholding suspended) and no loose actor (no second copy of a ball).
+	if (URbLooseBallSubsystem* LooseBalls = URbLooseBallSubsystem::Get(this))
+	{
+		LooseBalls->SetReplayActive(true);
 	}
 	// The pre-shot table of the stored input, then the stored result with its own clock (never re-simulated).
 	Balls->ShowSimBalls(Shot->Request.Input.Balls, rb::kMaxBalls);
@@ -222,8 +227,9 @@ void URbReplaySubsystem::RestoreLive()
 		}
 	}
 	// The cue followed the stored tip path: back to hidden (the stroke component shows it again when the player gets down).
-	const ARbGameMode* GameMode = ARbGameMode::Get(this);
-	if (ARbCue* Cue = GameMode ? GameMode->GetCue() : nullptr)
+	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	const FRbTableSession* PlayerSession = Tables ? Tables->GetPlayerSession() : nullptr;
+	if (ARbCue* Cue = PlayerSession ? PlayerSession->Cue.Get() : nullptr)
 	{
 		if (Cue->GetDrive() == ERbCueDrive::Playback)
 		{
@@ -268,6 +274,11 @@ void URbReplaySubsystem::RestoreLive()
 		{
 			Director->SetReplayActive(false);
 		}
+	}
+	// M2-E: balls that lie off the table are withheld again and their loose actors visible (the live room).
+	if (URbLooseBallSubsystem* LooseBalls = URbLooseBallSubsystem::Get(this))
+	{
+		LooseBalls->SetReplayActive(false);
 	}
 	UE_LOG(LogRawBreak, Log, TEXT("RbReplay: ended (shot %u), live table restored"), Ended.IsValid() ? Ended->Id : 0u);
 	OnReplayChanged.Broadcast();
@@ -387,42 +398,30 @@ void URbReplaySubsystem::BindPlayback(URbShotPlaybackComponent* Playback)
 	}
 }
 
+// M2-E (18.6.2): the replay history is the PLAYER's table (its session, URbTableSubsystem); dev maps without a match use the
+// player table's ball set (the tagged or lowest-index table).
 URbMatchDirector* URbReplaySubsystem::FindDirector() const
 {
-	const ARbGameMode* GameMode = ARbGameMode::Get(this);
-	return GameMode ? GameMode->GetDirector() : nullptr;
+	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	return Tables ? Tables->GetPlayerDirector() : nullptr;
 }
 
 ARbBallSet* URbReplaySubsystem::FindBallSet() const
 {
-	if (const ARbGameMode* GameMode = ARbGameMode::Get(this))
-	{
-		if (ARbBallSet* Balls = GameMode->GetBallSet())
-		{
-			return Balls;
-		}
-	}
-	UWorld* World = GetWorld();
-	if (!World)
+	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	if (!Tables)
 	{
 		return nullptr;
 	}
-	for (TActorIterator<ARbBallSet> It(World); It; ++It)
+	if (ARbBallSet* Balls = Tables->GetPlayerBallSet())
 	{
-		return *It;
+		return Balls;
 	}
-	return nullptr;
+	return Tables->FindBallSet(Tables->GetPlayerTable());
 }
 
 ARbTable* URbReplaySubsystem::FindTable() const
 {
-	if (const ARbGameMode* GameMode = ARbGameMode::Get(this))
-	{
-		if (ARbTable* Table = GameMode->GetTable())
-		{
-			return Table;
-		}
-	}
 	if (const ARbBallSet* Balls = FindBallSet())
 	{
 		if (ARbTable* Table = Balls->GetTable())
@@ -430,16 +429,8 @@ ARbTable* URbReplaySubsystem::FindTable() const
 			return Table;
 		}
 	}
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-	for (TActorIterator<ARbTable> It(World); It; ++It)
-	{
-		return *It;
-	}
-	return nullptr;
+	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	return Tables ? Tables->GetPlayerTable() : nullptr;
 }
 
 APlayerController* URbReplaySubsystem::FindLocalController() const

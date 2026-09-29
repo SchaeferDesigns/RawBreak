@@ -530,7 +530,9 @@ private:
 			{
 				const double Error = FVector::Dist(Ball->GetComponentLocation(), Table->CoreToWorld(State.Balls[Id].State.Position));
 				Worst = FMath::Max(Worst, Error);
-				Wrong += (Error > 1.0e-3 || !Balls->IsBallVisible(Id)) ? 1 : 0;
+				// M2-E: a ball whose loose copy still lies off the table (awaiting return) is requested visible but withheld.
+				const bool bShown = Balls->IsBallVisible(Id) || (Balls->IsBallWithheld(Id) && Balls->IsBallRequestedVisible(Id));
+				Wrong += (Error > 1.0e-3 || !bShown) ? 1 : 0;
 			}
 			else
 			{

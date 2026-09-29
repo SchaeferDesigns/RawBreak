@@ -4,6 +4,7 @@
 #include "Camera/RbCameraModel.h"
 #include "Camera/RbCameraRigComponent.h"
 #include "Core/RbCoords.h"
+#include "Game/RbTableSubsystem.h"
 #include "Table/RbTable.h"
 
 #include "CineCameraComponent.h"
@@ -239,9 +240,16 @@ FVector ARbReplayCamera::ClampToRoom(const FVector& LookAt, const FVector& Eye) 
 	{
 		Params.AddIgnoredActor(TableActor);
 	}
-	for (TActorIterator<ARbBallSet> It(World); It; ++It)
+	// Every table's balls (M2-E: through the table registry, never by iterating the world's ball sets).
+	if (const URbTableSubsystem* Tables = URbTableSubsystem::Get(World))
 	{
-		Params.AddIgnoredActor(*It);
+		for (const ARbTable* Any : Tables->GetTables())
+		{
+			if (const ARbBallSet* Balls = Tables->FindBallSet(Any))
+			{
+				Params.AddIgnoredActor(Balls);
+			}
+		}
 	}
 	const FVector Start = LookAt + FVector(0.0, 0.0, 10.0);
 	FHitResult Hit;
