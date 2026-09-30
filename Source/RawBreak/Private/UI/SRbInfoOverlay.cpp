@@ -1,5 +1,7 @@
 #include "UI/SRbInfoOverlay.h"
 
+#include "UI/Core/RbUiStyle.h"
+
 #include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Styling/CoreStyle.h"
@@ -9,7 +11,8 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
-// Owner: UE-7. Corner panel of Docs/ue-architecture.md 6.6 (layout and colour rules in the header).
+// Owner: UE-7; since M2 M2-D (text sizes from the UI tokens, UX-T05). Corner panel of Docs/ue-architecture.md 6.6 (layout and
+// colour rules in the header).
 
 namespace RbOverlayWidget
 {
@@ -17,17 +20,12 @@ namespace RbOverlayWidget
 	constexpr float CornerMarginX = 30.0f;
 	constexpr float CornerMarginY = 26.0f;
 	constexpr float CardMinWidth = 340.0f;
-	constexpr float CardMaxWidth = 560.0f;
+	constexpr float CardMaxWidth = 620.0f;
 	constexpr float CardGap = 8.0f;
 	constexpr float BarWidth = 3.0f;
 	constexpr float CardRadius = 6.0f;
 
 	const FLinearColor CardColor(0.0f, 0.0f, 0.0f, 0.58f);
-
-	FSlateFontInfo Font(const ANSICHAR* Face, float Size)
-	{
-		return FCoreStyle::GetDefaultFontStyle(Face, Size);
-	}
 
 	FLinearColor Srgb(uint8 R, uint8 G, uint8 B)
 	{
@@ -235,7 +233,7 @@ void SRbInfoOverlay::RebuildMandatory()
 		return;
 	}
 	MandatoryBox->ClearChildren();
-	const FSlateFontInfo LineFont = Font("Regular", 13);
+	const FSlateFontInfo LineFont = RbUi::Font(RbUi::EFont::OverlayLine);
 	for (int32 Index = 0; Index < Model.MandatoryLines.Num(); ++Index)
 	{
 		MandatoryBox->AddSlot()
@@ -255,11 +253,12 @@ void SRbInfoOverlay::RebuildFull()
 		return;
 	}
 	FullBox->ClearChildren();
-	const FSlateFontInfo TitleFont = Font("Bold", 15);
-	const FSlateFontInfo SubtitleFont = Font("Regular", 13);
-	const FSlateFontInfo LineFont = Font("Regular", 12);
-	const FSlateFontInfo SectionFont = Font("Bold", 10);
-	const FSlateFontInfo DebugFont = Font("Mono", 10);
+	// UX-T05 (M2-D): every size >= 18 px body height at 1080p (RbUi tokens).
+	const FSlateFontInfo TitleFont = RbUi::Font(RbUi::EFont::OverlayTitle);
+	const FSlateFontInfo SubtitleFont = RbUi::Font(RbUi::EFont::OverlayLine);
+	const FSlateFontInfo LineFont = RbUi::Font(RbUi::EFont::OverlayLine);
+	const FSlateFontInfo SectionFont = RbUi::Font(RbUi::EFont::OverlaySmall);
+	const FSlateFontInfo DebugFont = RbUi::Font(RbUi::EFont::OverlayMono);
 	bool bFirst = true;
 	const auto AddWidget = [this, &bFirst](const TSharedRef<SWidget>& Widget, float Gap) {
 		FullBox->AddSlot()

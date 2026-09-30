@@ -83,6 +83,44 @@ struct FRbCameraSettings
 	ERbPostureTransition PostureTransition = ERbPostureTransition::Natural;
 };
 
+// --- M2-D additions (storage only; readers never need them) ------------------------------------------------------------
+
+// The rows Reduced motion overrides (ui-ux 13.10, M2 subset) as they were before it was switched on, so switching it off
+// restores exactly them (UX-T20). Persisted with the settings: a restart while Reduced motion is on still restores them later.
+USTRUCT()
+struct FRbReducedMotionBackup
+{
+	GENERATED_BODY()
+
+	UPROPERTY(config) bool bValid = false;
+	UPROPERTY(config) float HeadBobScale = 1.0f;
+	UPROPERTY(config) float BodySwayScale = 1.0f;
+	UPROPERTY(config) float MountShakeScale = 1.0f;
+	UPROPERTY(config) float MotionBlurScale = 1.0f;
+	UPROPERTY(config) ERbPostureTransition PostureTransition = ERbPostureTransition::Natural;
+};
+
+// The individual quality levels of a Custom mix (the UE scalability groups live in the engine's own [ScalabilityGroups] state,
+// which the editor saves to a different ini): stored with the RAW BREAK settings so a Custom mix survives a restart as it was.
+USTRUCT()
+struct FRbCustomQualityLevels
+{
+	GENERATED_BODY()
+
+	UPROPERTY(config) bool bValid = false;
+	UPROPERTY(config) int32 ViewDistance = 2;
+	UPROPERTY(config) int32 AntiAliasing = 2;
+	UPROPERTY(config) int32 Shadows = 2;
+	UPROPERTY(config) int32 GlobalIllumination = 2;
+	UPROPERTY(config) int32 Reflections = 2;
+	UPROPERTY(config) int32 PostProcess = 2;
+	UPROPERTY(config) int32 Textures = 2;
+	UPROPERTY(config) int32 Effects = 2;
+	UPROPERTY(config) int32 Foliage = 2;
+	UPROPERTY(config) int32 Shading = 2;
+	UPROPERTY(config) float ScreenPercentage = 66.662f;
+};
+
 // Volumes 0..1 per category (ui-ux 13.8, audio.md 7.1 submixes). Consumer: M2-C (URbAudioSubsystem).
 USTRUCT(BlueprintType)
 struct FRbAudioVolumes

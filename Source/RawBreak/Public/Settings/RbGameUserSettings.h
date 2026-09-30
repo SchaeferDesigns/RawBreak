@@ -3,7 +3,8 @@
 // User settings (Docs/ue-architecture.md 8.1): the RAW BREAK quality preset on top of UE scalability, camera preset and
 // comfort options. QUALITY FIRST (ue5-realism-plan 9.1, decisions 2026-09-27): a preset only fills in defaults for every
 // individually adjustable option; Epic / Cinematic are authored for the best image and never capped to the dev PC (the
-// RTX 3070 Ti is the High test tier). Registered through [/Script/Engine.Engine] GameUserSettingsClassName. Owner: UE-8.
+// RTX 3070 Ti is the High test tier). Registered through [/Script/Engine.Engine] GameUserSettingsClassName. Owner: UE-8; since
+// M2 M2-D (storage, validation, persistence; the rows of the settings menu are FRbSettingsRegistry).
 //
 // How a preset plugs in (plan 9.4):
 //   1. the UE scalability groups (sg.*): every group at the preset level, Low 0 .. Cinematic 4 (= UE's Cine level, "Epic +
@@ -122,7 +123,35 @@ public:
 	static FSimpleMulticastDelegate& OnSettingsChanged();
 	void NotifySettingsChanged();
 
+	// --- M2-D (menus and settings, Docs/ue-architecture.md 18.4) ------------------------------------------------------------
+
+	// Selects a preset WITHOUT applying it (the settings registry stores first, applies second): fills every option from it;
+	// Custom keeps the individual values. ApplyQualityPreset = SelectQualityPreset + ApplyQualityRows.
+	void SelectQualityPreset(ERbQualityPreset Preset);
+
+	// The named preset a Custom mix started from ("Custom (based on High)"); the preset itself while it is not Custom.
+	ERbQualityPreset GetCustomBasePreset() const { return QualityPreset == ERbQualityPreset::Custom ? CustomBasePreset : QualityPreset; }
+
+	// Reduced motion (ui-ux 13.10, master switch; M2 rows): on = head bob 0, body sway 30 %, mount shake 0, motion blur 0,
+	// posture transition Quick; the previous values are kept (persisted) and restored exactly when it is switched off (UX-T20).
+	// The rows stay editable while it is on. Does not apply / notify (the registry does).
+	void SetReducedMotion(bool bOn);
+	static constexpr float ReducedMotionBodySway = 0.3f;
+
+	// Post-load fix-ups of the config properties (LoadSettings calls it after LoadConfig; tests after their own LoadConfig): a
+	// named preset re-derives every option, a Custom mix restores its stored levels.
+	void RestoreQualityAfterLoad();
+
+	UPROPERTY(config) ERbQualityPreset CustomBasePreset = ERbQualityPreset::High;
+	UPROPERTY(config) FRbCustomQualityLevels CustomLevels;
+	UPROPERTY(config) FRbReducedMotionBackup ReducedMotionBackup;
+
 protected:
 	// Fills ScalabilityQuality and the RAW BREAK option levels from a preset level.
 	void FillFromPresetLevel(int32 Level);
+
+	// Before an option change: remembers the named preset a Custom mix starts from.
+	void BeginCustom();
+	// Copies the current levels into CustomLevels (persisted with the object's config).
+	void SyncCustomLevels();
 };
