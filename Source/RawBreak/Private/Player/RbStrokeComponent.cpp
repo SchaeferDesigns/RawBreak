@@ -1,14 +1,20 @@
 #include "Player/RbStrokeComponent.h"
 
-// Owner: UE-5a. Stroke state machine (Docs/ue-architecture.md 6.2, the header documents every rule).
+// Owner: UE-5a, M2-F. Stroke state machine (Docs/ue-architecture.md 6.2, 18.3; the header documents every rule).
 
 #include "RawBreak.h"
 #include "Camera/RbCameraRigComponent.h"
 #include "Core/RbCoords.h"
 #include "Cue/RbCue.h"
 #include "Cue/RbCueClearance.h"
+#include "Input/RbAimResponse.h"
 #include "Input/RbRawMouseInput.h"
+#include "Player/RbBallInHandComponent.h"
+#include "Settings/RbGameUserSettings.h"
 #include "Table/RbTable.h"
+
+#include "Engine/World.h"
+#include "rb/Human/NoiseHash.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/SceneComponent.h"
@@ -35,6 +41,7 @@ URbStrokeComponent::URbStrokeComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+	PrimaryComponentTick.bTickEvenWhenPaused = true; // only to notice a pause: a held stroke is dropped (TickComponent)
 }
 
 void URbStrokeComponent::SetTable(ARbTable* InTable)
@@ -58,6 +65,87 @@ bool URbStrokeComponent::HasTrueTimestamps() const
 	return RawMouse.IsValid() && RawMouse->HasTrueTimestamps();
 }
 
+double URbStrokeComponent::StrokeMetersPerCount() const
+{
+	// Stroke sensitivity scales the hand metres per count relative to the calibrated DPI (ui-ux 13.6); 1 = the M1 mapping, exactly.
+	const double Sensitivity = FMath::Clamp(static_cast<double>(Controls.StrokeSensitivity), 0.1, 10.0);
+	return RbStrokeMath::CountsToMeters(1.0, MouseDpi) * Sensitivity;
+}
+
+void URbStrokeComponent::RebaseAim()
+{
+	AimBase = Aim.Azimuth;
+	AimCoarseCounts = 0.0;
+	AimFineCounts = 0.0;
+	AimAccelRadians = 0.0;
+}
+
+void URbStrokeComponent::ApplyUserSettings()
+{
+	if (const URbGameUserSettings* Settings = URbGameUserSettings::Get())
+	{
+		MouseDpi = FMath::Max(1.0, static_cast<double>(Settings->MouseDpi));
+		Controls = Settings->Controls;
+		bHardcore = Settings->bHardcoreStroke;
+	}
+	RebaseAim(); // the new factors apply from the current azimuth on
+}
+
+void URbStrokeComponent::PushRigContext()
+{
+	if (URbCameraRigComponent* Rig = FindRig())
+	{
+		// Never two identical get-downs, reproducibly: the posture seed of this address (the rig adds its change counter).
+		Rig->SetMotionSeed(rb::human::HashKeys(Context.Key.MatchSeed, rb::human::ShooterKey(Context.Key), static_cast<uint64>(Context.Key.ShooterShotIndex),
+			static_cast<uint64>(AddressIndex)));
+		Rig->SetPressure(Context.Situation.Pressure);
+	}
+}
+
+URbBallInHandComponent* URbStrokeComponent::FindBallInHand() const
+{
+	const AActor* Owner = GetOwner();
+	return Owner ? Owner->FindComponentByClass<URbBallInHandComponent>() : nullptr;
+}
+
+bool URbStrokeComponent::GetPlacementTargetCore(rb::Vec2& OutPlan) const
+{
+	if (Phase != ERbStrokePhase::PlacingCueBall)
+	{
+		return false;
+	}
+	if (const URbBallInHandComponent* Hand = FindBallInHand())
+	{
+		if (Hand->GetState() != ERbBallInHandState::Inactive && Hand->HasTarget())
+		{
+			OutPlan = Hand->GetTargetCore();
+			return true;
+		}
+	}
+	if (!bHasPlacement)
+	{
+		return false;
+	}
+	const ARbTable* TableActor = Table.Get();
+	const rb::Vec3 Core = TableActor ? TableActor->WorldToCore(PlacementWorld) : FRbCoords::PositionToCore(PlacementWorld);
+	OutPlan = rb::Vec2(Core.x, Core.y);
+	return true;
+}
+
+void URbStrokeComponent::HandleBallSetDown(const rb::Vec2& PlanCore)
+{
+	// The carried ball touched the cloth at exactly the previewed spot: that is the placement (the director validates it again).
+	if (Phase != ERbStrokePhase::PlacingCueBall)
+	{
+		return;
+	}
+	const URbBallInHandComponent* Hand = FindBallInHand();
+	const double R = Hand ? Hand->GetBallRadius() : CueBallRadius;
+	PlacementWorld = CoreToWorld(rb::Vec3(PlanCore.x, PlanCore.y, R));
+	bHasPlacement = true;
+	OnCueBallPlaced.Broadcast(PlacementWorld);
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // Director -> component
 // ---------------------------------------------------------------------------------------------------------
@@ -73,10 +161,12 @@ void URbStrokeComponent::BeginAddress(const rb::Vec3& InCueBallPosition, double 
 	Aim.Elevation = 0.0;
 	Aim.AxisOffsetA = 0.0;
 	Aim.AxisOffsetB = 0.0;
+	RebaseAim();
 	bAimSetExplicitly = false;
 	SettleSince = -1.0;
 	bFloorDirty = true;
 	bHasPlacement = false;
+	PushRigContext();
 	SetPhase(ERbStrokePhase::Walking);
 }
 
@@ -88,6 +178,7 @@ void URbStrokeComponent::SetStrokeContext(const FRbStrokeContext& InContext)
 	// The floor fields are the component's (RbCueClearance); keep the current ones until the next update.
 	Context.Situation.ElevationFloor = Aim.ElevationFloor;
 	bFloorDirty = true;
+	PushRigContext();
 }
 
 void URbStrokeComponent::SetLocked(bool bLocked)
@@ -111,6 +202,20 @@ void URbStrokeComponent::BeginCueBallPlacement()
 	EndStroke();
 	bHasPlacement = false;
 	SetPhase(ERbStrokePhase::PlacingCueBall);
+	// The hand picks the cue ball up (again after a refused placement): carried over the look point until Confirm sets it down.
+	if (URbBallInHandComponent* Hand = FindBallInHand())
+	{
+		if (Hand->GetState() != ERbBallInHandState::Carrying && Hand->GetState() != ERbBallInHandState::Refused)
+		{
+			const double R = Context.CueBall.Radius > 0.0 ? Context.CueBall.Radius : CueBallRadius;
+			Hand->BeginCarry(Table.Get(), 0, R, PlacementValidator);
+		}
+		if (!SetDownHandle.IsValid())
+		{
+			SetDownHandle = Hand->OnSetDown.AddUObject(this, &URbStrokeComponent::HandleBallSetDown);
+		}
+		UpdatePlacementPoint();
+	}
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -131,13 +236,20 @@ void URbStrokeComponent::RequestGetDownToggle()
 		{
 			InitAimFromView();
 		}
+		RebaseAim();
 		ResetAddress();
 		CueDisplacement = -AddressDistance;
 		DownSince = T + GetDownSeconds;
 		LastTickTime = T;
 		SettleSince = -1.0;
 		bFloorDirty = true;
+		PushRigContext();
 		SetPhase(ERbStrokePhase::GettingDown);
+		// Down starts when the eye arrives: the rig's human get-down (seeded duration; Quick 0.4 s, Cut 0); no rig = GetDownSeconds.
+		if (const URbCameraRigComponent* Rig = FindRig())
+		{
+			DownSince = T + Rig->GetPostureArrivalSeconds();
+		}
 		UpdatePresentation();
 		break;
 	case ERbStrokePhase::GettingDown:
@@ -151,6 +263,7 @@ void URbStrokeComponent::RequestGetDownToggle()
 		++AddressIndex; // standing up and getting down again gives new drift / tremor processes (HF 3.2)
 		Context.Key.AddressIndex = AddressIndex;
 		SettleSince = -1.0;
+		PushRigContext();
 		SetPhase(ERbStrokePhase::Walking);
 		break;
 	case ERbStrokePhase::Watching:
@@ -164,25 +277,40 @@ void URbStrokeComponent::RequestGetDownToggle()
 	}
 }
 
-void URbStrokeComponent::AddAimInput(const FVector2D& LookDelta, bool bFine)
+void URbStrokeComponent::AddAimInput(const FVector2D& LookCounts, bool bFine, double DeltaSeconds)
 {
 	if (Phase != ERbStrokePhase::Down && Phase != ERbStrokePhase::GettingDown)
 	{
 		return;
 	}
-	const double Scale = AimSensitivity * (bFine ? FineAimScale : 1.0);
 	if (bStrokeHeld || bForwardPhase)
 	{
 		// The aim is frozen during a stroke. Look input that the mouse stroke does not explain (not the Stroke button's
 		// own mouse motion) after ForwardStart is a head movement (HF-10).
 		if (bCommittedStroke && !bStrokeHeld)
 		{
-			HeadMoveAccum += (FMath::Abs(LookDelta.X) + FMath::Abs(LookDelta.Y)) * Scale;
+			HeadMoveAccum += (FMath::Abs(LookCounts.X) + FMath::Abs(LookCounts.Y)) * RbAimResponse::RadiansPerCount(bFine, MouseDpi, Controls);
 		}
 		return;
 	}
+	// P3: counts -> cm -> degrees (RbAimResponse). The linear path sums the integer counts and applies the factor once, so any
+	// frame split of the same counts gives bitwise the same azimuth; the acceleration (optional) accumulates radians.
+	if (Controls.AimAcceleration > 0.0f)
+	{
+		AimAccelRadians += RbAimResponse::AimRadians(LookCounts.X, DeltaSeconds, bFine, MouseDpi, Controls);
+	}
+	else if (bFine)
+	{
+		AimFineCounts += LookCounts.X;
+	}
+	else
+	{
+		AimCoarseCounts += LookCounts.X;
+	}
 	// Mouse right (+X) turns the aim clockwise seen from above: the core azimuth (counter-clockwise, +y = left) decreases.
-	Aim.Azimuth = WrapAngle(Aim.Azimuth - LookDelta.X * Scale);
+	const double Turn = AimCoarseCounts * RbAimResponse::RadiansPerCount(false, MouseDpi, Controls) +
+		AimFineCounts * RbAimResponse::RadiansPerCount(true, MouseDpi, Controls) + AimAccelRadians;
+	Aim.Azimuth = WrapAngle(AimBase - Turn);
 	bFloorDirty = true;
 }
 
@@ -299,8 +427,48 @@ void URbStrokeComponent::ConfirmPressed()
 		return;
 	}
 	UpdatePlacementPoint();
+	if (URbBallInHandComponent* Hand = FindBallInHand())
+	{
+		if (Hand->GetState() != ERbBallInHandState::Inactive)
+		{
+			// The hand sets the ball down on exactly the previewed spot (OnSetDown -> OnCueBallPlaced when it touches the cloth), or
+			// hesitates at an illegal spot (Refused: nothing is placed).
+			Hand->RequestSetDown();
+			return;
+		}
+	}
 	const FVector World = bHasPlacement ? PlacementWorld : CoreToWorld(CueBallPosition);
 	OnCueBallPlaced.Broadcast(World);
+}
+
+void URbStrokeComponent::NotifyWorldPaused(bool bPaused)
+{
+	if (bPaused == bWorldPaused)
+	{
+		return;
+	}
+	bWorldPaused = bPaused;
+	if (!bPaused)
+	{
+		return;
+	}
+	// Pausing drops a held stroke (18.2): a committed one aborts (its shown ramp is spent), the scripted samples still to come are
+	// discarded (their times pass during the pause), and a Stroke button still held on resume must be released first.
+	const bool bWasHeld = bStrokeHeld;
+	if (Phase == ERbStrokePhase::Down || Phase == ERbStrokePhase::GettingDown)
+	{
+		EndStroke();
+	}
+	bStrokeHeld = false;
+	bStrokeNeedsRelease = bStrokeNeedsRelease || bWasHeld;
+	PendingScripted.Reset();
+	PendingScriptedStarts.Reset();
+	bScriptedRestart = false;
+	if (RawMouse.IsValid() && RawMouse->IsActive())
+	{
+		RawMouse->Reset();
+	}
+	UE_LOG(LogRawBreak, Log, TEXT("RbStroke: world paused - the held stroke was dropped (button held: %d)"), bWasHeld ? 1 : 0);
 }
 
 void URbStrokeComponent::InjectStrokeSamples(const TArray<FRbStrokeSample>& Samples, bool bNewStroke)
@@ -331,6 +499,7 @@ TArray<FRbStrokeSample> URbStrokeComponent::MakeScriptedStroke(double TipSpeed, 
 void URbStrokeComponent::SetAim(double Azimuth, double Elevation, double AxisOffsetA, double AxisOffsetB)
 {
 	Aim.Azimuth = WrapAngle(Azimuth);
+	RebaseAim();
 	Aim.Elevation = FMath::Clamp(Elevation, 0.0, MaxElevation);
 	Aim.AxisOffsetA = AxisOffsetA;
 	Aim.AxisOffsetB = AxisOffsetB;
@@ -346,10 +515,25 @@ void URbStrokeComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	RawMouse = FRbRawMouseInput::Create();
+	if (bApplyUserSettings)
+	{
+		ApplyUserSettings();
+		SettingsHandle = URbGameUserSettings::OnSettingsChanged().AddWeakLambda(this, [this]() { ApplyUserSettings(); });
+	}
 }
 
 void URbStrokeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (SettingsHandle.IsValid())
+	{
+		URbGameUserSettings::OnSettingsChanged().Remove(SettingsHandle);
+		SettingsHandle.Reset();
+	}
+	if (URbBallInHandComponent* Hand = FindBallInHand())
+	{
+		Hand->OnSetDown.Remove(SetDownHandle);
+	}
+	SetDownHandle.Reset();
 	RawMouse.Reset();
 	Super::EndPlay(EndPlayReason);
 }
@@ -357,6 +541,18 @@ void URbStrokeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void URbStrokeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	const UWorld* World = GetWorld();
+	const bool bPaused = World && World->IsPaused();
+	NotifyWorldPaused(bPaused);
+	if (bPaused)
+	{
+		// The raw reports of the pause (menu mouse moves) never reach a stroke.
+		if (RawMouse.IsValid() && RawMouse->IsActive())
+		{
+			RawMouse->Reset();
+		}
+		return;
+	}
 	TickStroke(ClockNow());
 }
 
@@ -389,6 +585,22 @@ void URbStrokeComponent::SetPhase(ERbStrokePhase NewPhase)
 	}
 	URbCameraRigComponent* Rig = FindRig();
 	ARbCue* CueActor = Cue.Get();
+	if (Rig)
+	{
+		Rig->SetWatching(NewPhase == ERbStrokePhase::Contact || NewPhase == ERbStrokePhase::Watching);
+	}
+	if (Old == ERbStrokePhase::PlacingCueBall)
+	{
+		// Leaving the placement without setting the ball down (locked, a new address, a replay): the hand lets go of it.
+		if (URbBallInHandComponent* Hand = FindBallInHand())
+		{
+			if (Hand->GetState() == ERbBallInHandState::Carrying || Hand->GetState() == ERbBallInHandState::Refused ||
+				Hand->GetState() == ERbBallInHandState::Lowering)
+			{
+				Hand->Cancel();
+			}
+		}
+	}
 	switch (NewPhase)
 	{
 	case ERbStrokePhase::GettingDown:
@@ -455,7 +667,7 @@ void URbStrokeComponent::BeginStroke(bool bRawSource, double StartTime)
 	if (bRawSource)
 	{
 		// Reference sample at the press: the first report after it already moves the cue.
-		const double MetersPerCount = RbStrokeMath::CountsToMeters(1.0, MouseDpi);
+		const double MetersPerCount = StrokeMetersPerCount();
 		FRbStrokeSample Reference;
 		Reference.Time = StartTime;
 		Reference.Position = -static_cast<double>(RawCountsY) * MetersPerCount;
@@ -564,7 +776,7 @@ void URbStrokeComponent::ProcessStrokeSamples(double NowSeconds)
 	// Raw reports of the Stroke button (true timestamps from the input thread, or the reconstructed fallback times).
 	if (bStrokeActive && !bScriptedStroke && bStrokeHeld && Phase == ERbStrokePhase::Down)
 	{
-		const double MetersPerCount = RbStrokeMath::CountsToMeters(1.0, MouseDpi);
+		const double MetersPerCount = StrokeMetersPerCount();
 		for (const FRbRawMouseReport& Report : Reports)
 		{
 			if (Report.Time < StrokeHeldSince || Report.Time < DownSince ||
@@ -1008,9 +1220,19 @@ void URbStrokeComponent::UpdatePlacementPoint()
 	{
 		return;
 	}
-	// The view ray hits the bed plane (z = 0 of the table frame); the ball centre sits R above it.
-	const FVector Origin = Camera->GetComponentLocation();
-	const FVector Dir = Camera->GetForwardVector();
+	// The view ray hits the bed plane (z = 0 of the table frame); the ball centre sits R above it. The ray of the rig's base eye
+	// (the posture without breathing / sway), so the target does not breathe; the hand adds its own human lag and tremor.
+	FVector Origin = Camera->GetComponentLocation();
+	FVector Dir = Camera->GetForwardVector();
+	if (const URbCameraRigComponent* Rig = FindRig())
+	{
+		if (Rig->GetMode() == ERbCameraRigMode::BallInHand || Rig->GetMode() == ERbCameraRigMode::Standing)
+		{
+			const FTransform Base = Rig->GetBaseEyeTransform();
+			Origin = Base.GetLocation();
+			Dir = Base.GetRotation().GetForwardVector();
+		}
+	}
 	const ARbTable* TableActor = Table.Get();
 	const double PlaneZ = TableActor && TableActor->GetClothOrigin() ? TableActor->GetClothOrigin()->GetComponentLocation().Z : 0.0;
 	if (Dir.Z > -1.0e-3)
@@ -1022,7 +1244,21 @@ void URbStrokeComponent::UpdatePlacementPoint()
 	{
 		return;
 	}
-	const FVector Point = Origin + Dir * Distance + FVector(0.0, 0.0, CueBallRadius * FRbCoords::CmPerMeter);
+	FVector Point = Origin + Dir * Distance + FVector(0.0, 0.0, CueBallRadius * FRbCoords::CmPerMeter);
+	if (URbBallInHandComponent* Hand = FindBallInHand())
+	{
+		if (Hand->GetState() == ERbBallInHandState::Carrying || Hand->GetState() == ERbBallInHandState::Refused)
+		{
+			const rb::Vec3 Core = TableActor ? TableActor->WorldToCore(Point) : FRbCoords::PositionToCore(Point);
+			Hand->SetTargetCore(rb::Vec2(Core.x, Core.y));
+			const rb::Vec2 Target = Hand->GetTargetCore(); // clamped to the reachable bed, incl. the fine adjustment
+			Point = CoreToWorld(rb::Vec3(Target.x, Target.y, Hand->GetBallRadius()));
+		}
+		else if (Hand->GetState() == ERbBallInHandState::Lowering || Hand->GetState() == ERbBallInHandState::Placed)
+		{
+			return; // the ball is on its way down / down: the target stays where it was confirmed
+		}
+	}
 	if (!bHasPlacement || !Point.Equals(PlacementWorld, 0.01))
 	{
 		PlacementWorld = Point;

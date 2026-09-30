@@ -4,6 +4,8 @@
 #include "Math/RbCameraMath.h"
 #include "Settings/RbGameUserSettings.h"
 
+#include "rb/Human/NoiseHash.h"
+
 #include "CineCameraComponent.h"
 #include "CollisionQueryParams.h"
 #include "Components/CapsuleComponent.h"
@@ -15,9 +17,10 @@
 #include "SceneViewExtension.h"
 #include "UObject/Package.h"
 
-// Owner: UE-5b. Eye placement + transition, vertical FOV through the filmback, pupil DoF with the accommodation ease, exposure /
-// motion blur / grain / vignette / CA / bloom from the preset, head motion, comfort settings (header). Tests:
-// RawBreak.Unit.Camera.* (Private/Tests/RbCameraRigTests.cpp).
+// Owner: UE-5b, M2-F. Eye placement + human posture changes, vertical FOV through the filmback, pupil DoF with the accommodation
+// ease, exposure / motion blur / grain / vignette / CA / bloom from the preset, the human motion layer (FRbHumanMotion: breathing,
+// sway, walking bob + footsteps, reactions, flinch), gaze follower, comfort settings (header). Tests: RawBreak.Unit.Camera.*
+// (Private/Tests/RbCameraRigTests.cpp), RawBreak.Unit.HumanMotion.* / RawBreak.Unit.Feel.* (M2-F).
 
 namespace
 {
@@ -29,17 +32,13 @@ namespace
 	constexpr double kMaxFocusCm = 3000.0;          // "infinity" of the focus trace
 	constexpr double kAxisSnapCm = 20.0;            // a new address far from the last one snaps the smoothed axis
 	constexpr double kGazeOnLineDeg = 1.5;          // gaze offsets below this still fixate the line's fixation point
+	constexpr double kGazeStep = 1.0 / 480.0;       // gaze follower sub-step (frame-rate independent)
+	constexpr double kFootSideCm = 10.0;            // a foot lands this far left / right of the pawn's centre line
 
 	FVector HorizontalUnit(const FVector& V, const FVector& Fallback = FVector::ForwardVector)
 	{
 		const FVector H(V.X, V.Y, 0.0);
 		return H.SizeSquared() > UE_DOUBLE_SMALL_NUMBER ? H.GetUnsafeNormal() : Fallback;
-	}
-
-	double SmoothStep(double A)
-	{
-		A = FMath::Clamp(A, 0.0, 1.0);
-		return A * A * (3.0 - 2.0 * A);
 	}
 
 	// One transient mask texture per sigma, kept alive by the cameras that reference it (weak cache).
@@ -107,6 +106,14 @@ void URbCameraRigComponent::SetComfort(double InMotionScale, double InMotionBlur
 	ApplyOptics();
 }
 
+void URbCameraRigComponent::SetMotionComfort(double InHeadBobScale, double InBodySwayScale, double InMountShakeScale, ERbPostureTransition InTransition)
+{
+	HeadBobScale = FMath::Clamp(InHeadBobScale, 0.0, 1.0);
+	BodySwayScale = FMath::Clamp(InBodySwayScale, 0.0, 1.0);
+	MountShakeScale = FMath::Clamp(InMountShakeScale, 0.0, 1.0);
+	PostureTransition = InTransition;
+}
+
 void URbCameraRigComponent::ApplyUserSettings()
 {
 	const URbGameUserSettings* Settings = URbGameUserSettings::Get();
@@ -118,7 +125,11 @@ void URbCameraRigComponent::ApplyUserSettings()
 	Params = ModelOverride ? ModelOverride->Get(Preset) : RbCameraModel::Defaults(Preset);
 	VerticalFovOverride = Settings->VerticalFovDeg;
 	const bool bReduced = Settings->bReducedMotion;
-	SetComfort(bReduced ? 0.0 : Settings->HeadBobScale, bReduced ? 0.0 : Settings->MotionBlurScale, Settings->GrainScale, Settings->bDepthOfField);
+	// Reduced motion: no continuous human motion, posture changes as a short plain ease (Cut stays a cut), no motion blur.
+	const ERbPostureTransition Transition = bReduced && Settings->Camera.PostureTransition == ERbPostureTransition::Natural
+		? ERbPostureTransition::Quick : Settings->Camera.PostureTransition;
+	SetMotionComfort(Settings->HeadBobScale, Settings->Camera.BodySwayScale, Settings->Camera.MountShakeScale, Transition);
+	SetComfort(bReduced ? 0.0 : 1.0, bReduced ? 0.0 : Settings->MotionBlurScale, Settings->GrainScale, Settings->bDepthOfField);
 }
 
 void URbCameraRigComponent::SetViewportAspectOverride(double Aspect)
@@ -138,36 +149,67 @@ void URbCameraRigComponent::SetMode(ERbCameraRigMode InMode)
 	if (InMode == ERbCameraRigMode::DownOnShot)
 	{
 		// A new address: the eyes look straight down the new line, the smoothed axis restarts at the new one.
-		GazeYawDeg = 0.0;
-		GazePitchDeg = 0.0;
+		GazeYawDeg = GazePitchDeg = 0.0;
+		ViewGazeYawDeg = ViewGazePitchDeg = 0.0;
+		GazeVelocity = FVector2D::ZeroVector;
 		bSmoothedAxisValid = false;
 	}
 	if (InMode != ERbCameraRigMode::DownOnShot)
 	{
 		bSettleHeld = false;
+		SetWatching(false);
 	}
-	TransitionSeconds = TransitionSecondsFor(FromMode, InMode);
-	if (!bHasPose || TransitionSeconds <= 0.0 || InMode == ERbCameraRigMode::External)
+	if (!bHasPose || InMode == ERbCameraRigMode::External || FromMode == ERbCameraRigMode::External)
 	{
+		// The first pose, or another actor owns / owned the view: a cut.
+		bPostureRunning = false;
 		TransitionAlpha = 1.0;
 		return;
 	}
-	FromEye = BlendedEye;
-	FromRot = BlendedRot;
-	TransitionAlpha = 0.0;
+	// The human movement between the two postures, seeded per change (never two identical get-downs).
+	ERbPostureChange Change = ERbPostureChange::GetDown;
+	if (InMode == ERbCameraRigMode::DownOnShot)
+	{
+		Change = ERbPostureChange::GetDown;
+	}
+	else if (FromMode == ERbCameraRigMode::DownOnShot)
+	{
+		Change = ERbPostureChange::StandUp;
+	}
+	else
+	{
+		Change = InMode == ERbCameraRigMode::BallInHand ? ERbPostureChange::LeanOver : ERbPostureChange::StraightenUp;
+	}
+	++PostureCounter;
+	const uint64 Seed = rb::human::HashKeys(MotionSeed, static_cast<uint64>(PostureCounter), static_cast<uint64>(Change));
+	HumanMotion.BeginPostureChange(Change, FTransform(BlendedRot, BlendedEye), FTransform(BlendedRot, BlendedEye), Seed, PostureTransition);
+	PostureTime = 0.0;
+	bPostureRunning = HumanMotion.GetPostureChangeSeconds() > 0.0;
+	TransitionAlpha = bPostureRunning ? 0.0 : 1.0;
 }
 
-double URbCameraRigComponent::TransitionSecondsFor(ERbCameraRigMode From, ERbCameraRigMode To) const
+double URbCameraRigComponent::GetPostureArrivalSeconds() const
 {
-	if (From == ERbCameraRigMode::External || To == ERbCameraRigMode::External)
+	return bPostureRunning ? HumanMotion.GetPostureArrivalSeconds() : 0.0;
+}
+
+void URbCameraRigComponent::SetWatching(bool bInWatching)
+{
+	if (bWatching == bInWatching)
 	{
-		return 0.0; // camera cut
+		return;
 	}
-	if (From == ERbCameraRigMode::DownOnShot || To == ERbCameraRigMode::DownOnShot)
-	{
-		return Params.GetDownSeconds;
-	}
-	return Params.BallInHandSeconds;
+	bWatching = bInWatching;
+	bReactionOriginValid = false;
+	bHasReactionTarget = false;
+	// No hard reset of the reaction: when the watching ends (standing up, the next address) the head's pursuit relaxes back from
+	// where it is (critically damped, FRbHumanMotion::StepReaction) - zeroing it here would pop the view by the reaction angle.
+}
+
+void URbCameraRigComponent::SetReactionTargetWorld(const FVector& Target)
+{
+	ReactionTargetWorld = Target;
+	bHasReactionTarget = true;
 }
 
 void URbCameraRigComponent::SetCueAxisWorld(const FVector& ContactPoint, const FVector& Direction)
@@ -208,6 +250,8 @@ void URbCameraRigComponent::BeginPlay()
 	if (bApplyUserSettings)
 	{
 		ApplyUserSettings();
+		// The settings menu applies live: re-read on every change (never cache across a broadcast, 18.4).
+		SettingsHandle = URbGameUserSettings::OnSettingsChanged().AddWeakLambda(this, [this]() { ApplyUserSettings(); });
 	}
 	SetPreset(Preset);
 	UWorld* World = GetWorld();
@@ -220,6 +264,11 @@ void URbCameraRigComponent::BeginPlay()
 
 void URbCameraRigComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (SettingsHandle.IsValid())
+	{
+		URbGameUserSettings::OnSettingsChanged().Remove(SettingsHandle);
+		SettingsHandle.Reset();
+	}
 	ExposureProbe.Reset(); // unregisters the view extension
 	Super::EndPlay(EndPlayReason);
 }
@@ -240,20 +289,25 @@ void URbCameraRigComponent::TickRig(double DeltaSeconds)
 	const double Dt = FMath::Max(0.0, DeltaSeconds);
 	UpdateViewportAspect();
 	UpdateCueAxisSmoothing(Dt);
+	UpdateGazeFollower(Dt);
 
-	// 1. Pose of the mode, blended from the pose at the last mode change.
+	// 1. Pose of the mode; a running posture change carries the eye there along its human path (the target may move).
 	FVector Eye;
 	FQuat Rot;
 	ComputeModePose(Mode, Eye, Rot);
-	if (TransitionAlpha < 1.0 && bHasPose)
+	if (bPostureRunning && bHasPose)
 	{
-		TransitionAlpha = TransitionSeconds > 0.0 ? FMath::Min(1.0, TransitionAlpha + Dt / TransitionSeconds) : 1.0;
-		const double A = SmoothStep(TransitionAlpha);
-		Eye = FMath::Lerp(FromEye, Eye, A);
-		Rot = FQuat::Slerp(FromRot, Rot, A).GetNormalized();
+		PostureTime += Dt;
+		FTransform Out;
+		bPostureRunning = HumanMotion.EvaluatePostureChange(PostureTime, FTransform(Rot, Eye), Out);
+		Eye = Out.GetLocation();
+		Rot = Out.GetRotation();
+		const double Total = HumanMotion.GetPostureChangeSeconds();
+		TransitionAlpha = bPostureRunning && Total > 0.0 ? FMath::Clamp(PostureTime / Total, 0.0, 1.0) : 1.0;
 	}
 	else
 	{
+		bPostureRunning = false;
 		TransitionAlpha = 1.0;
 	}
 	BlendedEye = Eye;
@@ -267,35 +321,118 @@ void URbCameraRigComponent::TickRig(double DeltaSeconds)
 	// 2. Focus (dioptre ease) on the base view; it is also the fixation distance of the gaze stabilisation.
 	UpdateFocus(Dt, Eye, Rot);
 
-	// 3. Head motion layer (plan 4.8): translation in the yaw-only frame; Eyes keep the fixation point (VOR), Headcam nods.
+	// 3. Human motion layer (plan 4.8, P5): translation in the yaw-only frame; Eyes keep the fixation point (VOR) and add the
+	// deliberate reactions on top, Headcam nods / rolls.
 	const bool bDown = Mode == ERbCameraRigMode::DownOnShot;
 	const double SettleRate = Params.HeadMotion.SettleSeconds > 0.0 ? Dt / Params.HeadMotion.SettleSeconds : 1.0;
 	SettleAlpha = FMath::Clamp(SettleAlpha + (bSettleHeld && bDown ? SettleRate : -SettleRate), 0.0, 1.0);
 	const AActor* Owner = GetOwner();
-	const double Speed = (Owner && !bDown) ? Owner->GetVelocity().Size2D() / kCmPerM : 0.0;
-	HeadSample = HeadMotion.Step(Dt, Speed, bDown, SettleAlpha, Params, MotionScale);
+	FRbHumanMotionInputs In;
+	In.DeltaSeconds = Dt;
+	In.WalkSpeedMps = (Owner && !bDown) ? Owner->GetVelocity().Size2D() / kCmPerM : 0.0;
+	In.bDown = bDown;
+	In.bWatching = bDown && bWatching;
+	In.Pressure = Pressure;
+	In.SettleAlpha = SettleAlpha;
+	In.MotionScale = MotionScale;
+	In.Preset = Preset;
+	In.HeadBobScale = HeadBobScale;
+	In.BodySwayScale = BodySwayScale;
+	In.MountShakeScale = MountShakeScale;
+	if (In.bWatching && ReactionResolver)
+	{
+		FVector Resolved;
+		if (ReactionResolver(Resolved))
+		{
+			SetReactionTargetWorld(Resolved);
+		}
+	}
+	if (In.bWatching && bHasReactionTarget)
+	{
+		const FVector2D Angles = ReactionAnglesDeg(Eye, Rot);
+		if (!bReactionOriginValid)
+		{
+			ReactionOrigin = Angles;
+			bReactionOriginValid = true;
+		}
+		In.bHasReactionTarget = true;
+		In.ReactionAnglesDeg = Angles - ReactionOrigin;
+	}
+	HumanSample = HumanMotion.Step(In, Params);
 	const FQuat YawOnly = FRotator(0.0, Rot.Rotator().Yaw, 0.0).Quaternion();
-	const FVector FinalEye = Eye + YawOnly.RotateVector(HeadSample.Offset);
+	const FVector FinalEye = Eye + YawOnly.RotateVector(HumanSample.Offset);
 	FQuat FinalRot = Rot;
+	FixationWorld = Eye + Rot.GetForwardVector() * FMath::Clamp(FocusCm > 0.0 ? FocusCm : 200.0, 30.0, 2000.0);
 	if (Params.bStabiliseGaze)
 	{
-		const FVector Fixation = Eye + Rot.GetForwardVector() * FMath::Clamp(FocusCm > 0.0 ? FocusCm : 200.0, 30.0, 2000.0);
-		const FVector Dir = Fixation - FinalEye;
+		const FVector Dir = FixationWorld - FinalEye;
 		if (!Dir.IsNearlyZero())
 		{
 			FRotator View = Dir.Rotation();
 			View.Roll = Rot.Rotator().Roll;
 			FinalRot = View.Quaternion();
 		}
+		FinalRot = FinalRot * HumanSample.Reaction.Quaternion();
 	}
 	else
 	{
-		FinalRot = Rot * HeadSample.Rotation.Quaternion();
+		FinalRot = Rot * HumanSample.Rotation.Quaternion();
 	}
 	Cam->SetWorldLocationAndRotation(FinalEye, FinalRot);
 
-	// 4. Exposure-coupled grain.
+	// 4. Footsteps (audio, M2-C): under the foot that struck, on the floor below the capsule.
+	if (HumanSample.bFootstep && OnFootstep.IsBound() && Owner)
+	{
+		FVector Floor = Owner->GetActorLocation();
+		if (const UCapsuleComponent* Capsule = Cast<UCapsuleComponent>(Owner->GetRootComponent()))
+		{
+			Floor.Z -= Capsule->GetScaledCapsuleHalfHeight();
+		}
+		const FVector Right = YawOnly.GetRightVector();
+		FRbFootstep Step;
+		Step.bLeftFoot = HumanSample.bLeftFoot;
+		Step.WorldLocation = Floor + Right * (Step.bLeftFoot ? -kFootSideCm : kFootSideCm);
+		Step.SpeedMps = static_cast<float>(HumanMotion.GetSmoothedSpeed());
+		OnFootstep.Broadcast(Step);
+	}
+
+	// 5. Exposure-coupled grain.
 	UpdateGrain();
+}
+
+void URbCameraRigComponent::UpdateGazeFollower(double DeltaSeconds)
+{
+	// The head turns toward the gaze targets like a mass on a critically damped spring (no jump, the same path at any frame rate).
+	const double Omega = UE_DOUBLE_TWO_PI * FMath::Max(0.1, bWatching ? WatchGazeFollowHz : GazeFollowHz);
+	const FVector2D Target(GazeYawDeg, GazePitchDeg);
+	FVector2D View(ViewGazeYawDeg, ViewGazePitchDeg);
+	GazeStepRemainder += DeltaSeconds;
+	while (GazeStepRemainder >= kGazeStep)
+	{
+		GazeStepRemainder -= kGazeStep;
+		const FVector2D Accel = (Target - View) * (Omega * Omega) - GazeVelocity * (2.0 * Omega);
+		GazeVelocity += Accel * kGazeStep;
+		View += GazeVelocity * kGazeStep;
+	}
+	if (FVector2D::DistSquared(View, Target) < 1.0e-12 && GazeVelocity.SizeSquared() < 1.0e-10)
+	{
+		View = Target;
+		GazeVelocity = FVector2D::ZeroVector;
+	}
+	ViewGazeYawDeg = View.X;
+	ViewGazePitchDeg = View.Y;
+}
+
+FVector2D URbCameraRigComponent::ReactionAnglesDeg(const FVector& Eye, const FQuat& Rot) const
+{
+	// Direction of the reaction target in the base view's frame: yaw right, pitch up.
+	const FVector Local = Rot.UnrotateVector(ReactionTargetWorld - Eye);
+	if (Local.X <= 1.0)
+	{
+		return bReactionOriginValid ? ReactionOrigin : FVector2D::ZeroVector; // behind the head: no pursuit
+	}
+	return FVector2D(FMath::RadiansToDegrees(FMath::Atan2(Local.Y, Local.X)),
+		FMath::RadiansToDegrees(FMath::Atan2(Local.Z, FMath::Sqrt(Local.X * Local.X + Local.Y * Local.Y))));
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -363,8 +500,8 @@ void URbCameraRigComponent::ComputeModePose(ERbCameraRigMode ForMode, FVector& O
 			const FRotator ToBall = ComputeDownOnShotView(OutEye, U, SmoothedContact).Rotator();
 			const double HalfV = 0.5 * GetEffectiveParams().VerticalFovDeg;
 			View.Pitch = FMath::Min(View.Pitch, ToBall.Pitch + HalfV - kCueBallFrameMarginDeg);
-			View.Pitch = FMath::Clamp(View.Pitch + GazePitchDeg, -89.0, 89.0);
-			View.Yaw += GazeYawDeg;
+			View.Pitch = FMath::Clamp(View.Pitch + ViewGazePitchDeg, -89.0, 89.0);
+			View.Yaw += ViewGazeYawDeg;
 			OutRot = View.Quaternion();
 			return;
 		}

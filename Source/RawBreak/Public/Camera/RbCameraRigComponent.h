@@ -4,7 +4,7 @@
 // UCineCameraComponent: eye placement (standing eye height; down on the shot e = P_axis(s_e) + h_c n_up + y_vc n_side
 // from the cue axis), the get-down / stand-up transition, the authored VERTICAL FOV (MaintainYFOV), DoF focus on the
 // aim target with an accommodation ease and the pupil-equivalent aperture, exposure / motion blur / grain from the
-// preset, and the procedural head motion layer (FRbHeadMotion). Owner: UE-5b.
+// preset, and the procedural human motion layer (FRbHumanMotion, M2-F: the camera IS the eyes). Owner: UE-5b, M2-F.
 //
 // Vertical FOV on a UCineCameraComponent (review R-06, verified in UE 5.8 CameraStackTypes.cpp): with MaintainYFOV the engine
 // derives the vertical FOV from the lens and the camera's OWN aspect ratio (the filmback), V = 2 atan(h_sensor / 2f), and
@@ -24,23 +24,33 @@
 //                clamped so the cue ball stays in the frame; look input adds gaze offsets (pitch while aiming, yaw + pitch while
 //                watching the shot). The control rotation follows the view, so standing up keeps looking where the player looked.
 //   External     another actor owns the view (replay camera): the rig idles
-// Mode changes blend from the last pose to the (moving) target with a smoothstep over GetDownSeconds (BallInHandSeconds for
-// the placement lean). The cue axis is low-passed (CueAxisSmoothingSeconds): the head follows the aim and the slow drift, not
-// the 8-12 Hz hand tremor of SampleHand.
+// Mode changes are HUMAN posture changes (M2-F, P5; FRbHumanMotion): Standing -> DownOnShot = GetDown, back = StandUp, Standing ->
+// BallInHand = LeanOver, back = StraightenUp; hip-hinge arc, weight shift, the head rotation leading, overshoot + damped settle,
+// every movement seeded differently (SetMotionSeed: match seed, shooter shot index, address index; the rig adds its change
+// counter). PostureTransition Quick = a plain 0.4 s ease, Cut = instant (Reduced motion = Quick). GetPostureArrivalSeconds tells
+// the stroke component when the eye arrives (its Down phase starts then). The cue axis is low-passed (CueAxisSmoothingSeconds):
+// the head follows the aim and the slow drift, not the 8-12 Hz hand tremor of SampleHand.
+// Gaze input (AddGazeInput) sets gaze TARGETS; the view follows them like a head (critically damped, GazeFollowHz), so a look never
+// jumps. Watching the shot (SetWatching) the human layer's reactions follow the reaction target (SetReactionTargetWorld: the
+// pawn's cue ball / first object ball) with a pursuit latency, and NotifyImpact flinches on loud impacts; the continuous layer
+// (breathing with SetPressure, sway, walking bob with OnFootstep at every heel strike) moves the eye. Eyes keep the gaze on the
+// fixation point (VOR), the reactions are added on top; Headcam is not stabilised.
 //
 // Optics every tick: filmback = viewport aspect, focus = accommodation ease in dioptres (exp. time constant FocusEaseSeconds)
 // toward the fixation point down on the shot (its distance along the view axis) while the eyes rest on the line, else - standing,
 // or down with the eyes turned away from the line by the gaze input (watching the balls, looking along the line) - the first hit
 // along the view axis; film grain from the CURRENT adapted exposure
 // (FRbExposureProbe reads the renderer's eye adaptation back on the game thread) through RbCameraMath::ExposureCoupledGrain.
-// Comfort (URbGameUserSettings, bApplyUserSettings): camera preset, vertical FOV (Eyes), head bob scale, reduced motion (no
-// head motion, no motion blur), motion blur / grain scales, DoF on / off.
+// Comfort (URbGameUserSettings, bApplyUserSettings, re-read on OnSettingsChanged): camera preset, vertical FOV (Eyes), head bob
+// scale, body sway / breathing scale, mount shake (Headcam), posture transition, reduced motion (no head motion, Quick posture
+// changes, no motion blur), motion blur / grain scales, DoF on / off.
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 
 #include "Camera/RbCameraModel.h"
-#include "Camera/RbHeadMotion.h"
+#include "Camera/RbHumanMotion.h"
+#include "Settings/RbSettingsTypes.h"
 
 #include "RbCameraRigComponent.generated.h"
 
@@ -79,9 +89,17 @@ public:
 	void SetPreset(ERbCameraPreset InPreset);
 	ERbCameraPreset GetPreset() const { return Preset; }
 
-	// Mode change with the eased transition (GetDownSeconds).
+	// Mode change as a human posture change (FRbHumanMotion; PostureTransition Natural / Quick / Cut).
 	void SetMode(ERbCameraRigMode InMode);
 	ERbCameraRigMode GetMode() const { return Mode; }
+	// Seed base of the next posture changes (hash of match seed, shooter, shooter shot index, address index; the stroke component
+	// pushes it). The rig hashes it with its own change counter: every movement differs, reproducibly.
+	void SetMotionSeed(uint64 Seed) { MotionSeed = Seed; }
+	// A posture change is running (incl. its settle).
+	bool IsPostureChanging() const { return bPostureRunning; }
+	// Seconds from the last mode change until the eye arrives at the new pose (the settle continues after it); 0 without a change.
+	double GetPostureArrivalSeconds() const;
+	double GetPostureChangeSeconds() const { return bPostureRunning ? HumanMotion.GetPostureChangeSeconds() : 0.0; }
 
 	// Cue axis in WORLD space for DownOnShot placement: point on the cue-ball surface where the tip touches and
 	// the butt -> tip unit direction.
@@ -122,8 +140,23 @@ public:
 	void AddGazeInput(double YawDeg, double PitchDeg);
 	// Settle (HF-06 exhale and hold): breathing and sway fade by SettleReduction over SettleSeconds while held down on the shot.
 	void SetSettleHeld(bool bHeld);
-	// Comfort scales (plan 4.8 / 9.4): head motion (0 = off), motion blur, grain, DoF.
+	// Comfort scales (plan 4.8 / 9.4): the master scale of the human motion layer (0 = off), motion blur, grain, DoF.
 	void SetComfort(double InMotionScale, double InMotionBlurScale, double InGrainScale, bool bInDepthOfField);
+	// M2 comfort rows (ui-ux 13.5): walking bob, body sway & breathing, Headcam mount shake (0..1 each), posture transition style.
+	void SetMotionComfort(double InHeadBobScale, double InBodySwayScale, double InMountShakeScale, ERbPostureTransition InTransition);
+	ERbPostureTransition GetPostureTransition() const { return PostureTransition; }
+	// Human factors of the active stroke context (StrokeSituation::Pressure, 0..1): breathing rate / depth, tremor.
+	void SetPressure(double InPressure) { Pressure = FMath::Clamp(InPressure, 0.0, 1.0); }
+	// Watching the shot (after the contact, still down): the reactions follow the reaction target.
+	void SetWatching(bool bInWatching);
+	bool IsWatching() const { return bWatching; }
+	// What the head follows while watching (world; the pawn: between the cue ball and the first object ball). Clear = none.
+	void SetReactionTargetWorld(const FVector& Target);
+	void ClearReactionTarget() { bHasReactionTarget = false; }
+	// Asked every tick while watching for the reaction target (the pawn reads the playing shot); false = none this frame.
+	TFunction<bool(FVector& /*OutTarget*/)> ReactionResolver;
+	// A loud impact heard by the player (0..1, the break ~1): a short flinch.
+	void NotifyImpact(double Loudness) { HumanMotion.NotifyImpact(Loudness); }
 	// Re-reads URbGameUserSettings (preset, FOV, comfort).
 	void ApplyUserSettings();
 	// Viewport aspect W / H the filmback follows; > 0 overrides the owning player's viewport (tests, tools).
@@ -133,24 +166,29 @@ public:
 	// Advances the rig by DeltaSeconds (TickComponent calls it; tests drive it directly).
 	void TickRig(double DeltaSeconds);
 
-	// M2 contract (architect, 18.5): fired at every foot contact while walking (M2-F fires it from the human-motion layer; M2-C's
-	// footstep foley listens). TODO(M2-F): not fired yet.
+	// M2 contract (architect, 18.5): fired at every foot contact while walking (the human-motion layer's heel strikes, ~2 Hz at
+	// 1.4 m/s; M2-C's footstep foley listens).
 	FRbOnFootstep OnFootstep;
 
 	// --- state (tests, dev dump) ---------------------------------------------------------------------------
 
-	// Eye pose of the mode incl. the transition, before the head motion layer.
+	// Eye pose of the mode incl. the posture change, before the continuous human motion layer.
 	FTransform GetBaseEyeTransform() const { return FTransform(BlendedRot, BlendedEye); }
 	double GetTransitionAlpha() const { return TransitionAlpha; }
 	double GetFocusDistanceCm() const { return FocusCm; }
 	// EV100 of the last rendered frame of the player's view (< -50 = unknown: no view rendered yet).
 	double GetCurrentEv100() const { return CurrentEv100; }
 	double GetGrainIntensity() const { return GrainIntensity; }
+	// Gaze targets (AddGazeInput) and the gaze the view shows (the head follows the targets).
 	double GetGazeYaw() const { return GazeYawDeg; }
 	double GetGazePitch() const { return GazePitchDeg; }
+	double GetViewGazeYaw() const { return ViewGazeYawDeg; }
+	double GetViewGazePitch() const { return ViewGazePitchDeg; }
 	double GetSettleAlpha() const { return SettleAlpha; }
-	const FRbHeadMotion& GetHeadMotion() const { return HeadMotion; }
-	const FRbHeadMotionSample& GetHeadMotionSample() const { return HeadSample; }
+	const FRbHumanMotion& GetHumanMotion() const { return HumanMotion; }
+	const FRbHumanMotionSample& GetHumanMotionSample() const { return HumanSample; }
+	// The fixation point the Eyes keep the gaze on (VOR) this frame (world).
+	FVector GetFixationWorld() const { return FixationWorld; }
 	// The parameters in effect (preset + FOV override).
 	FRbCameraPresetParams GetEffectiveParams() const;
 
@@ -171,6 +209,13 @@ public:
 	static double EyeAdaptationLuminanceMax();
 	// Centre-weighted metering mask (gaussian of Sigma in image half-sizes, 5 % floor), one transient texture per sigma.
 	static UTexture2D* GetMeteringMask(double Sigma);
+
+	// Gaze follower (the head turning toward the gaze targets): critically damped at this frequency [Hz]; watching the shot (bent over
+	// the table after the contact) the head is slower and heavier - calm, never a jump (P1).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Camera")
+	double GazeFollowHz = 2.5;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Camera")
+	double WatchGazeFollowHz = 1.2;
 
 	// UActorComponent
 	virtual void BeginPlay() override;
@@ -194,7 +239,8 @@ private:
 	void ComputeModePose(ERbCameraRigMode ForMode, FVector& OutEye, FQuat& OutRot) const;
 	FVector StandingEye() const;
 	FQuat ControlQuat() const;
-	double TransitionSecondsFor(ERbCameraRigMode From, ERbCameraRigMode To) const;
+	void UpdateGazeFollower(double DeltaSeconds);
+	FVector2D ReactionAnglesDeg(const FVector& Eye, const FQuat& Rot) const;
 	void UpdateCueAxisSmoothing(double DeltaSeconds);
 	FVector DownFixation() const;
 	double TraceFocusCm(const FVector& Eye, const FVector& Forward) const;
@@ -214,17 +260,23 @@ private:
 	FVector SmoothedDirection = FVector::ForwardVector;
 	bool bHasFocusTarget = false;
 
-	// Transition and last pose (before head motion).
+	// Posture change and last pose (before the continuous human motion).
 	ERbCameraRigMode FromMode = ERbCameraRigMode::Standing;
-	double TransitionSeconds = 1.0;
 	bool bHasPose = false;
-	FVector FromEye = FVector::ZeroVector;
-	FQuat FromRot = FQuat::Identity;
+	bool bPostureRunning = false;
+	double PostureTime = 0.0;
+	uint64 MotionSeed = 0;
+	uint32 PostureCounter = 0;
 	FVector BlendedEye = FVector::ZeroVector;
 	FQuat BlendedRot = FQuat::Identity;
+	FVector FixationWorld = FVector::ZeroVector;
 
-	double GazeYawDeg = 0.0;
+	double GazeYawDeg = 0.0;       // targets
 	double GazePitchDeg = 0.0;
+	double ViewGazeYawDeg = 0.0;   // followed (what the view shows)
+	double ViewGazePitchDeg = 0.0;
+	FVector2D GazeVelocity = FVector2D::ZeroVector;
+	double GazeStepRemainder = 0.0;
 	bool bSettleHeld = false;
 	double SettleAlpha = 0.0;
 
@@ -232,12 +284,23 @@ private:
 	double CurrentEv100 = -100.0;
 	double GrainIntensity = 0.0;
 
-	double MotionScale = 1.0;       // comfort: head motion
+	double MotionScale = 1.0;       // comfort: human motion master scale (0 = off)
 	double MotionBlurScale = 1.0;
 	double GrainScale = 1.0;
 	bool bDepthOfField = true;
+	double HeadBobScale = 1.0;
+	double BodySwayScale = 1.0;
+	double MountShakeScale = 1.0;
+	ERbPostureTransition PostureTransition = ERbPostureTransition::Natural;
+	double Pressure = 0.0;
+	bool bWatching = false;
+	bool bHasReactionTarget = false;
+	FVector ReactionTargetWorld = FVector::ZeroVector;
+	bool bReactionOriginValid = false;
+	FVector2D ReactionOrigin = FVector2D::ZeroVector; // target angles when watching began
+	FDelegateHandle SettingsHandle;
 
-	FRbHeadMotion HeadMotion;
-	FRbHeadMotionSample HeadSample;
+	FRbHumanMotion HumanMotion;
+	FRbHumanMotionSample HumanSample;
 	TSharedPtr<FRbExposureProbe, ESPMode::ThreadSafe> ExposureProbe;
 };

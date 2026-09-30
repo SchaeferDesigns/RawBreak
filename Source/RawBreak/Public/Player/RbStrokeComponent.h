@@ -6,7 +6,25 @@
 // cue-axis tip offsets (arrows), and the stroke itself from TIMESTAMPED raw mouse samples mapped through the gain
 // curve; the tip speed at contact is the quadratic-fit velocity at the crossing time (T9, never per-frame deltas).
 // The component knows nothing about rules or the simulator: it broadcasts OnStrokeContact and the match director
-// executes the stroke. Owner: UE-5a.
+// executes the stroke. Owner: UE-5a, M2-F.
+//
+// M2-F (Docs/ue-architecture.md 18.3):
+//   * Aim in centimetres of mouse travel (P3): AddAimInput takes raw mouse COUNTS; RbAimResponse maps them with MouseDpi and
+//     Controls (FRbControlSettings: 7.2 deg/cm coarse = 90 deg per 12.5 cm, x FineAimFactor 0.075 with Shift, optional
+//     acceleration). The linear path accumulates the counts of the address and applies the factor once (azimuth = base - counts x
+//     rad/count), so the same counts give BITWISE the same azimuth in any frame split; a settings change or an explicit aim
+//     rebases. Controls / MouseDpi / StrokeSensitivity come from URbGameUserSettings (BeginPlay, OnSettingsChanged) unless
+//     bApplyUserSettings is off (tests write the members directly).
+//   * The get-down is the camera rig's human posture change (P5): Down starts when the rig's eye arrives
+//     (URbCameraRigComponent::GetPostureArrivalSeconds; GetDownSeconds without a rig). The component pushes the posture seed
+//     (match seed, shooter, shooter shot index, address index), the pressure and the watching state to the rig.
+//   * Diegetic ball in hand (P2): in PlacingCueBall the owner's URbBallInHandComponent carries the cue ball over the look point
+//     (UpdatePlacementPoint -> SetTargetCore); Confirm asks it to set the ball down, and OnCueBallPlaced fires only when the ball
+//     touches the cloth, at exactly the previewed spot (PlacementValidator = the director's legality: an illegal spot is refused,
+//     nothing is placed). Without that component (tests, tools) Confirm places at once as in M1.
+//   * Pause (18.2 M2-D contract): while the world is paused the component keeps ticking only to notice it: a held stroke is
+//     dropped (a committed one aborts), pending scripted samples and the raw reports of the pause are discarded, and a Stroke
+//     button still held on resume must be released first - no contact can come out of a pause.
 //
 // Phases:
 //   Locked        not this player's turn, simulation / playback / replay / decision running
@@ -53,6 +71,7 @@
 
 #include "Input/RbRawMouseInput.h"
 #include "Math/RbStrokeMath.h"
+#include "Settings/RbSettingsTypes.h"
 
 #include "rb/Human/HumanModel.h"
 #include "rb/Human/NoiseHash.h"
@@ -148,13 +167,24 @@ public:
 
 	// Input -> component (bound by the character).
 	void RequestGetDownToggle();
-	void AddAimInput(const FVector2D& LookDelta, bool bFine);
+	// Look input while down [raw mouse counts, + X = right]: the aim (X) through RbAimResponse. DeltaSeconds = the frame time of
+	// the delta (only the optional acceleration uses it; <= 0 = linear).
+	void AddAimInput(const FVector2D& LookCounts, bool bFine, double DeltaSeconds = 0.0);
 	void AddElevationInput(float Steps);
 	void AddTipOffsetInput(const FVector2D& Delta);
 	void SetStrokeHeld(bool bHeld);
 	void SetCommitHeld(bool bHeld);
 	void SetSettleHeld(bool bHeld);          // HF-06 Settle (exhale and hold): IntendedStroke::SettleStart
 	void ConfirmPressed();
+	// The world was paused (or resumed): a held / scripted stroke is dropped, see the header. TickComponent calls it on its own.
+	void NotifyWorldPaused(bool bPaused);
+	bool IsPausedByWorld() const { return bWorldPaused; }
+
+	// Ball in hand (P2): the legality of a placement (plan position, core table frame) - the pawn sets the director's
+	// CanPlaceCueBall. Unset = every spot is legal (the director still validates PlaceCueBall).
+	TFunction<bool(const rb::Vec2&)> PlacementValidator;
+	// The ball-in-hand target of the current frame (core plan position) and whether one exists.
+	bool GetPlacementTargetCore(rb::Vec2& OutPlan) const;
 
 	// Scripted stroke source (automation tests, cheats): hand positions along the axis with timestamps, consumed
 	// like raw mouse samples. Positions in metres of HAND travel (the gain curve still applies). A scripted stream implies
@@ -177,6 +207,8 @@ public:
 	void SetAim(double Azimuth, double Elevation, double AxisOffsetA, double AxisOffsetB);
 
 	ERbStrokePhase GetPhase() const { return Phase; }
+	// The component's clock (FPlatformTime::Seconds() or ClockOverride): input timestamps of the pawn's look gate.
+	double GetClockNow() const { return ClockNow(); }
 	const FRbAimState& GetAim() const { return Aim; }
 	double GetCueDisplacement() const { return CueDisplacement; } // x_c [m], 0 = tip touching the ball
 	const rb::human::HandPose& GetHandPose() const { return HandPose; } // SampleHand of the current frame (debug, tests)
@@ -224,11 +256,11 @@ public:
 
 	// --- tuning (plan 5.4 defaults) -------------------------------------------------------------------
 	FRbStrokeGain Gain;
-	double MouseDpi = 800.0;             // counts per inch (settings)
+	double MouseDpi = 800.0;             // counts per inch (settings URbGameUserSettings::MouseDpi)
+	FRbControlSettings Controls;         // aim / look / stroke speeds (settings; M2-F, P3)
+	bool bApplyUserSettings = true;      // BeginPlay reads URbGameUserSettings (MouseDpi, Controls, bHardcoreStroke)
 	double FitWindowSeconds = 0.02;      // quadratic-fit window (15-25 ms)
 	double PracticeStopShort = 0.004;    // [m] practice strokes stop this far before the ball
-	double AimSensitivity = 0.0005;      // [rad per mouse count]
-	double FineAimScale = 0.2;           // FineAim held
 	bool bHardcore = false;              // any tip contact is a shot (plan 14 Q2)
 	double AddressDistance = 0.03;       // [m] tip behind the ball after getting down
 	double MaxBackswing = 0.30;          // [m] x_c never goes further back (also the clearance sweep's backswing)
@@ -250,6 +282,9 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+	// Re-reads URbGameUserSettings (MouseDpi, Controls, bHardcoreStroke); the aim keeps its current azimuth.
+	void ApplyUserSettings();
+
 protected:
 	void SetPhase(ERbStrokePhase NewPhase);
 	// Integrates new samples (raw reports and scripted samples up to Now) into the cue displacement, detects the
@@ -260,6 +295,11 @@ protected:
 
 private:
 	double ClockNow() const;
+	double StrokeMetersPerCount() const;     // hand metres per raw count (MouseDpi, StrokeSensitivity)
+	void RebaseAim();                        // Aim.Azimuth becomes the new base of the counted aim input
+	void PushRigContext();                   // posture seed + pressure to the camera rig
+	class URbBallInHandComponent* FindBallInHand() const;
+	void HandleBallSetDown(const rb::Vec2& PlanCore);
 	bool IsLive() const { return bCommitHeld || bHardcore; }
 	void BeginStroke(bool bRawSource, double StartTime);
 	void EndStroke();                         // stroke source released / stood up / locked (aborts a committed stroke)
@@ -286,6 +326,14 @@ private:
 
 	ERbStrokePhase Phase = ERbStrokePhase::Locked;
 	FRbAimState Aim;
+	// Counted aim input of the address (P3): Aim.Azimuth = AimBase - (CoarseCounts rad/count + FineCounts rad/count) - AccelRadians.
+	double AimBase = 0.0;
+	double AimCoarseCounts = 0.0;         // integer counts (exact sums in doubles)
+	double AimFineCounts = 0.0;
+	double AimAccelRadians = 0.0;         // the non-linear part (acceleration on)
+	bool bWorldPaused = false;
+	FDelegateHandle SettingsHandle;
+	FDelegateHandle SetDownHandle;
 	rb::Vec3 CueBallPosition;
 	double CueBallRadius = 0.028575;
 	double CueDisplacement = -0.03;       // x_c [m]; AddressDistance behind the ball after a get-down
