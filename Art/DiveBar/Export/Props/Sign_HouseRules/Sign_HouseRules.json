@@ -1,0 +1,98 @@
+{
+ "acoustic_material": "paper",
+ "anchors_ue_m": {},
+ "asset_id": "Sign_HouseRules",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.01917,
+  0.11323,
+  1.60471
+ ],
+ "bounds_min_m": [
+  0.00035,
+  -0.11109,
+  1.32046
+ ],
+ "bounds_with_hulls_max_m": [
+  0.02,
+  0.11323,
+  1.60471
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.11109,
+  1.32046
+ ],
+ "cast_shadow": true,
+ "centre_z_m": 1.46,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "element": "S20",
+ "external_inputs": [],
+ "face_m": [
+  0.216,
+  0.279
+ ],
+ "family": "Signs",
+ "fbx": "SM_DB_Sign_HouseRules.fbx",
+ "front": "+X",
+ "generator": "db_signs.py",
+ "geometry_sha256": "0f71e264a2ac67db38d24c18727d0c83c26c1ec1818d4a135087b826b29d4203",
+ "kind": "paper",
+ "label": "sign_house_rules",
+ "ledger_asset_id": "SM_DB_Sign_HouseRules",
+ "material_slots": [
+  "MI_DB_Label_Atlas",
+  "MI_DB_Paper_Coaster"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "wall_plane_floor",
+ "placement_hint_ue_cm": {
+  "location": [
+   1195.0,
+   732.0,
+   0.0
+  ],
+  "note": "right wall left of the chalkboard E11 (X 12.30 - 13.20), faces -Y",
+  "yaw_deg": -90.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.01882,
+    0.22432
+   ],
+   "spec_m": [
+    null,
+    0.216
+   ],
+   "tolerance_m": 0.012,
+   "what": "face width",
+   "z_range_m": [
+    1.3105,
+    1.6095
+   ]
+  }
+ ],
+ "spec_id": "S20",
+ "target_dimensions_m": [
+  0.01882,
+  0.216,
+  0.279
+ ],
+ "tolerance_m": 0.012,
+ "translucent": false,
+ "triangles": 828,
+ "triangles_render": 816,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Signs",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Signs/SM_DB_Sign_HouseRules",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Sign_HouseRules/T_DB_Sign_HouseRules_WM.png"
+}

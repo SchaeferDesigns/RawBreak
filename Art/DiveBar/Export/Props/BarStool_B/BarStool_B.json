@@ -1,0 +1,89 @@
+{
+ "acoustic_material": "vinyl_upholstery",
+ "anchors_ue_m": {},
+ "asset_id": "BarStool_B",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.21399,
+  0.21399,
+  0.75981
+ ],
+ "bounds_min_m": [
+  -0.21399,
+  -0.21399,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.21557,
+  0.21557,
+  0.76
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.21557,
+  -0.21557,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 13,
+ "collision_profile": "RbVenueBlock",
+ "element": "E07",
+ "external_inputs": [],
+ "family": "Stools",
+ "fbx": "SM_DB_BarStool_B.fbx",
+ "front": "+X",
+ "generator": "db_stool.py",
+ "geometry_sha256": "470c79db4af67e6d4f0be50dcae287feabbe89f613e450be672b46df37ef0ce6",
+ "ledger_asset_id": "SM_DB_BarStool_B",
+ "material_slots": [
+  "MI_DB_Chrome_Pitted",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Steel_Black",
+  "MI_DB_Vinyl_Oxblood",
+  "MI_DB_Tape"
+ ],
+ "nanite": true,
+ "notes": "duct-taped tear",
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "priority": "hero",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "seat_diameter_m": 0.38,
+ "seat_top_m": 0.76,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.38,
+    0.38
+   ],
+   "spec_m": [
+    0.38,
+    0.38
+   ],
+   "tolerance_m": 0.002,
+   "what": "seat diameter",
+   "z_range_m": [
+    0.69,
+    0.8
+   ]
+  }
+ ],
+ "spec_id": "H10",
+ "target_dimensions_m": [
+  0.42797,
+  0.42797,
+  0.76
+ ],
+ "tolerance_m": 0.002,
+ "translucent": false,
+ "triangles": 11438,
+ "triangles_render": 11122,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Stools",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Stools/SM_DB_BarStool_B",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "variant": "B",
+ "wear_mask": "Art/DiveBar/Textures/BarStool_B/T_DB_BarStool_B_WM.png"
+}

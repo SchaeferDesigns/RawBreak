@@ -1,0 +1,99 @@
+{
+ "acoustic_material": "plastic",
+ "anchors_ue_m": {},
+ "asset_id": "Sign_Restrooms",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.0057,
+  0.18,
+  2.05
+ ],
+ "bounds_min_m": [
+  0.0,
+  -0.18,
+  1.95
+ ],
+ "bounds_with_hulls_max_m": [
+  0.006,
+  0.18,
+  2.05
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.18,
+  1.95
+ ],
+ "cast_shadow": true,
+ "centre_z_m": 2.0,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "element": "E18",
+ "external_inputs": [],
+ "face_m": [
+  0.36,
+  0.1
+ ],
+ "family": "Signs",
+ "fbx": "SM_DB_Sign_Restrooms.fbx",
+ "front": "+X",
+ "generator": "db_signs.py",
+ "geometry_sha256": "f24ce3d824477c03c484f2168f053dff7f717a8020d1dd7eff8407395fffb36a",
+ "kind": "plastic",
+ "label": "sign_restrooms",
+ "ledger_asset_id": "SM_DB_Sign_Restrooms",
+ "material_slots": [
+  "MI_DB_Label_Gloss",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Steel_Zinc"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "wall_plane_floor",
+ "placement_hint_ue_cm": {
+  "location": [
+   1590.0,
+   0.0,
+   0.0
+  ],
+  "note": "left wall by the corridor opening, the arrow points to it (+X), faces +Y",
+  "yaw_deg": 90.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.0057,
+    0.36
+   ],
+   "spec_m": [
+    null,
+    0.36
+   ],
+   "tolerance_m": 0.012,
+   "what": "face width",
+   "z_range_m": [
+    1.94,
+    2.0599999999999996
+   ]
+  }
+ ],
+ "spec_id": "E18",
+ "target_dimensions_m": [
+  0.0057,
+  0.36,
+  0.1
+ ],
+ "tolerance_m": 0.012,
+ "translucent": false,
+ "triangles": 308,
+ "triangles_render": 296,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Signs",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Signs/SM_DB_Sign_Restrooms",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Sign_Restrooms/T_DB_Sign_Restrooms_WM.png"
+}

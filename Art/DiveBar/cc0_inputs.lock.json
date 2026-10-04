@@ -1,0 +1,241 @@
+{
+ "ambientcg/Cardboard002": {
+  "files": {
+   "Cardboard002_1K-JPG_Color.jpg": "94443ec58d123a5bb99a54ae21beb53ce6a70247f52035688678625a31cbddde",
+   "Cardboard002_1K-JPG_Displacement.jpg": "f8b9bb233c958078f5e961f8c889611c3c4ddbfb4819ea7dba1bf47c1fb70675",
+   "Cardboard002_1K-JPG_NormalDX.jpg": "d124fe73a2e18feca5f85dec2558c4868c7eb7e29fa65126a712c0f48d44eaed",
+   "Cardboard002_1K-JPG_Roughness.jpg": "39ead79d0e19ec7470a6bf95dc69e268ddc4079160763db423d93ca9a1fae90e"
+  },
+  "ref": "https://ambientcg.com/a/Cardboard002"
+ },
+ "ambientcg/Fingerprints002": {
+  "files": {
+   "Fingerprints002_1K-JPG_Color.jpg": "5fe9917646072db632a90248e0c48e9ef634051582ffcac2d6f5a85e79b86c4c",
+   "Fingerprints002_1K-JPG_NormalDX.jpg": "3bffe43fb88cb2a1e302a382907c76a700f0c51ddee05d230ace1b40453a9b07",
+   "Fingerprints002_1K-JPG_Opacity.jpg": "bb52b629b769ec9731adc1fdcf12c2ac9976416a6938cd635da8c9991bfc1e99",
+   "Fingerprints002_1K-JPG_Roughness.jpg": "d266aebb62c2f79b7ca6f033105153ecc2e362317fc051e93bb95bb5be6763b0"
+  },
+  "ref": "https://ambientcg.com/a/Fingerprints002"
+ },
+ "ambientcg/Foam002": {
+  "files": {
+   "Foam002_1K-JPG_Color.jpg": "5f45bfa4cce30ca634e486415f3756029cb230e1e57ccb20003641c252c97fd1",
+   "Foam002_1K-JPG_Displacement.jpg": "f5fcf339622561c28b87abb7bcf9f6e8876f136fc341fa7248541be090f1c687",
+   "Foam002_1K-JPG_NormalDX.jpg": "7583b8cbc8038916c072fd7ad54e4eea841f27da0576f48476290e980a9ba7ec",
+   "Foam002_1K-JPG_Opacity.jpg": "7b2e429e79b863761b91579dace2c42922f336e273beaa5bb0801f31bf5dd8fe",
+   "Foam002_1K-JPG_Roughness.jpg": "6ff4e597c15e1dec085395d8b17ce43cda19f412380575d2c4b900fb30f77929"
+  },
+  "ref": "https://ambientcg.com/a/Foam002"
+ },
+ "ambientcg/Leaking003": {
+  "files": {
+   "Leaking003_1K-JPG_Color.jpg": "946891879b9790e2667b46990c3440dfef3a87b58617192c1c5747027d761ba7",
+   "Leaking003_1K-JPG_Displacement.jpg": "6e9a277a5f16d96de2cd7b599ade8e5426b78849c4f72126213e2f854d2cda25",
+   "Leaking003_1K-JPG_NormalDX.jpg": "2930b39c067a02f3cc1828986b3aebbb1fae54f4666ecd951068af11ff55b334",
+   "Leaking003_1K-JPG_Opacity.jpg": "83f44b7175e063b7ee135db4fa7323f80f6d735781d9b37e1246b9ebaaaa6ed7",
+   "Leaking003_1K-JPG_Roughness.jpg": "1dfba470a7a118f91635376af70a73ab360935bdbe101624c44fc3a44fc63b98"
+  },
+  "ref": "https://ambientcg.com/a/Leaking003"
+ },
+ "ambientcg/Metal009": {
+  "files": {
+   "Metal009_1K-JPG_Color.jpg": "e066e240ad0eaab6a73fb0f40fa7caa94365160770331babc91de2e8ce6a986f",
+   "Metal009_1K-JPG_Displacement.jpg": "73095592a8cf4bb983cb2bd2a3bf771492fa9d4697a547f4e3e430d4d871951f",
+   "Metal009_1K-JPG_Metalness.jpg": "843102638fa0a5bf897888868877efab8ccdc4cb84a48e57bdb52bfb30f5e714",
+   "Metal009_1K-JPG_NormalDX.jpg": "683b562ffd99ca396312c93faa1fcf943142be77fc13b9dfc1573fab5f58226e",
+   "Metal009_1K-JPG_Roughness.jpg": "6d06dfe8c240d3b6f33030740110284245bd8aefb2e10e8eb0c563444d9c0c5b"
+  },
+  "ref": "https://ambientcg.com/a/Metal009"
+ },
+ "ambientcg/PaintedMetal009": {
+  "files": {
+   "PaintedMetal009_1K-JPG_AmbientOcclusion.jpg": "07c04e0b73a5efa08ae76c90f750a909b0fd571248e01c6fff272705207c96c0",
+   "PaintedMetal009_1K-JPG_Color.jpg": "02bfeb8810e6c9c99ac87051f6975c500c54932af5f6a2588744a776ae5d2325",
+   "PaintedMetal009_1K-JPG_Displacement.jpg": "5b2e1272552489f4cf541ca84afe254f676d314baf13036bb5cf3ed404e6c1ce",
+   "PaintedMetal009_1K-JPG_Metalness.jpg": "f453fc8c58be8ca4f935a8cd7b664837e736be9a71f8aef848a5e398a061fb62",
+   "PaintedMetal009_1K-JPG_NormalDX.jpg": "35aadfe0d33ec7963831bea6e5252f32f7ee791da677adf6830189edf8d4a871",
+   "PaintedMetal009_1K-JPG_Roughness.jpg": "2d053da1f13eeff9fd47c7bea5aae5a72dec601784858d39b4d0b5dd5f68f084"
+  },
+  "ref": "https://ambientcg.com/a/PaintedMetal009"
+ },
+ "ambientcg/Rubber004": {
+  "files": {
+   "Rubber004_1K-JPG_Color.jpg": "95f9182e8564db9a8c6510cd0c9e0656beec0e5a0212cc177e2abf8eb03820b9",
+   "Rubber004_1K-JPG_Displacement.jpg": "c8a1af10a95405387bd69c82d807967981f08d17103ce5eeb3cd947cc0578707",
+   "Rubber004_1K-JPG_NormalDX.jpg": "948cb99a37b15b11bd05f014cc650eefbb30bfcacd61551adf0192c4094505ec",
+   "Rubber004_1K-JPG_Roughness.jpg": "fd8171577db5a593e981ebd3fe487515aea9d20be28e1a6d2cd1e5475eb13e69"
+  },
+  "ref": "https://ambientcg.com/a/Rubber004",
+  "size_m": [
+   0.75,
+   0.75
+  ]
+ },
+ "ambientcg/Scratches002": {
+  "files": {
+   "Scratches002_1K-JPG_Color.jpg": "f682d6924431b5071cd4be5524ef0aad6fda066a9ecebb0e5261bf3dc6d9c18e",
+   "Scratches002_1K-JPG_NormalDX.jpg": "33f209d7baf6db5458d0a30ff9a61d4e2e7beb298b953f320aa562c25c783500",
+   "Scratches002_1K-JPG_Opacity.jpg": "f682d6924431b5071cd4be5524ef0aad6fda066a9ecebb0e5261bf3dc6d9c18e"
+  },
+  "ref": "https://ambientcg.com/a/Scratches002"
+ },
+ "ambientcg/Smear006": {
+  "files": {
+   "Smear006_1K-JPG_Color.jpg": "410f925d594371fee451cec59b51265a0e75570e2164f4e7d6d9ac90ae4d0549",
+   "Smear006_1K-JPG_NormalDX.jpg": "4ea2f7b43e73f68774aba5a8678efe08412b350c8f6a9bfa774fc17492d851f9",
+   "Smear006_1K-JPG_Opacity.jpg": "410f925d594371fee451cec59b51265a0e75570e2164f4e7d6d9ac90ae4d0549"
+  },
+  "ref": "https://ambientcg.com/a/Smear006"
+ },
+ "ambientcg/SurfaceImperfections003": {
+  "files": {
+   "SurfaceImperfections003_2K-JPG_Color.jpg": "981c51835ee79b761cc940faaa380e99a8b48e22c087ce6f87463ad959a3c313",
+   "SurfaceImperfections003_2K-JPG_NormalDX.jpg": "cb240f6b6bc55dbd6abde1f90fda298895355d7b56c28d39671baaa71b997390",
+   "SurfaceImperfections003_2K-JPG_Opacity.jpg": "981c51835ee79b761cc940faaa380e99a8b48e22c087ce6f87463ad959a3c313"
+  },
+  "ref": "https://ambientcg.com/a/SurfaceImperfections003"
+ },
+ "ambientcg/Wood089": {
+  "files": {
+   "Wood089_1K-JPG_Color.jpg": "caa566c7f574f72fb61c5dff77743db6ad035764ceeee58c909bd3f76b6f88a9",
+   "Wood089_1K-JPG_Displacement.jpg": "641a387fd888bbff934914302ed875e9f52f32836893d0a135ee37a674403933",
+   "Wood089_1K-JPG_NormalDX.jpg": "d96efa0a33f57417db9e886c2356feb5a50de3d5ce25afa3df3ba42c640d5a0e",
+   "Wood089_1K-JPG_Roughness.jpg": "d3c4c1d6145652b64798653baa0128db228f3050ca85ecec7466b4817e39c626"
+  },
+  "ref": "https://ambientcg.com/a/Wood089"
+ },
+ "polyhaven/concrete_block_wall": {
+  "files": {
+   "concrete_block_wall_ao_1k.jpg": "81d53030b08387d27fbaa31624129877478b8add884eed7e87b35d996d23748d",
+   "concrete_block_wall_diff_1k.jpg": "cf80ccec877fc8d18e81b03479a8cd60763a51975de1735fb429af52d8e82421",
+   "concrete_block_wall_nor_dx_1k.jpg": "0d8034e5beaab3c86605294a2de6d10a7aba8bbf75ca1279ac572d4feccb2e5e",
+   "concrete_block_wall_rough_1k.jpg": "2aa209b29fe2522a6a03570639d31aaddacd008348238b79c2242ed1ff221664"
+  },
+  "ref": "https://polyhaven.com/a/concrete_block_wall",
+  "size_m": [
+   2.0,
+   2.0
+  ]
+ },
+ "polyhaven/fabric_leather_02": {
+  "files": {
+   "fabric_leather_02_ao_1k.jpg": "378d95404a2700f65c98e0232692573a3eca984219a2595ef0a8b9f1b7dabcd2",
+   "fabric_leather_02_diff_1k.jpg": "97ba9480c7619efc9b8c08202c3e3773d1dd532dacce4dfe97f86e95339cf132",
+   "fabric_leather_02_nor_dx_1k.jpg": "897943fe8a4b9855b24a32a935227349d23c83a8f74b81dd8043b42f5e338e61",
+   "fabric_leather_02_rough_1k.jpg": "bce3c63ead508ffa0c110c176fdd94e5dbf57b51efdbc6781026a21e217b0edd"
+  },
+  "ref": "https://polyhaven.com/a/fabric_leather_02",
+  "size_m": [
+   0.5,
+   0.5
+  ]
+ },
+ "polyhaven/fine_grained_wood": {
+  "files": {
+   "fine_grained_wood_col_1k.jpg": "d171f45ef01bc6e239b00dfaa4961bcd27f7d8e93e3962da3bd3d0ce703d802c",
+   "fine_grained_wood_nor_dx_1k.jpg": "e041e69f8e7071581de06aba1879900cec810807c6892ec16d9db1e88855f57c",
+   "fine_grained_wood_rough_1k.jpg": "f281f682e62fe322303dfeaa13dac18b5cb9e113617fe0aca43605b49161d82b"
+  },
+  "ref": "https://polyhaven.com/a/fine_grained_wood",
+  "size_m": [
+   0.6,
+   0.6
+  ]
+ },
+ "polyhaven/lacquered_cherry_wood": {
+  "files": {
+   "lacquered_cherry_wood_diff_2k.jpg": "15728956eae2ae99a4d23e69f94f9690a063477e253c92d04c7109b7702332b8",
+   "lacquered_cherry_wood_nor_dx_2k.jpg": "de689e830c549087b800891c17dfb2861909b47e7c0e52a80b02dded1a619fdb",
+   "lacquered_cherry_wood_rough_2k.jpg": "e1d7ec1e5d030e764b8bcad07048a7e197fae4498e57c29facc83d726e44a290"
+  },
+  "ref": "https://polyhaven.com/a/lacquered_cherry_wood",
+  "size_m": [
+   1.0,
+   1.0
+  ]
+ },
+ "polyhaven/leather_red_02": {
+  "files": {
+   "leather_red_02_nor_dx_1k.jpg": "e9725ddbdcd73fcedd561cf4e5a25355574aab0f9df4b765457649d6c05bcdff",
+   "leather_red_02_rough_1k.jpg": "dd3b860a9510a44fd857c04e0c8cc63ea1f944c25abe9bdcbf844cc4a22c88d8"
+  },
+  "ref": "https://polyhaven.com/a/leather_red_02",
+  "size_m": [
+   0.6,
+   0.6
+  ]
+ },
+ "polyhaven/old_linoleum_flooring_01": {
+  "files": {
+   "old_linoleum_flooring_01_nor_dx_2k.jpg": "532dae6b1e84452da1b7d3f7f785707318d51fc854b3479648366ce6071fdf99",
+   "old_linoleum_flooring_01_rough_2k.jpg": "0db161143d8e0c49cfad5b56365b193486a72d4ba96af9b7ed7f6bd7e4f64b48"
+  },
+  "ref": "https://polyhaven.com/a/old_linoleum_flooring_01",
+  "size_m": [
+   1.99,
+   1.99
+  ]
+ },
+ "polyhaven/painted_brick": {
+  "files": {
+   "painted_brick_ao_2k.jpg": "732da9f25fd550c403d58e1a63ee0bab69b1a44b6effbb386f2fd28686d0fa98",
+   "painted_brick_diff_2k.jpg": "d76623127649e0878aecdfe8159bb3f6ec3b89d1b9160b6fd6036fc33737e842",
+   "painted_brick_nor_dx_2k.jpg": "4f31540d484ca655c9a0de96d58af8c2aff94c2220eac787e1c1ea7e68e0de3d",
+   "painted_brick_rough_2k.jpg": "0d720475709282bf70b16962f074b308f01beff83483eab6cbc3de896ce2ed30"
+  },
+  "ref": "https://polyhaven.com/a/painted_brick",
+  "size_m": [
+   1.8,
+   1.8
+  ]
+ },
+ "polyhaven/painted_plaster_wall": {
+  "files": {
+   "painted_plaster_wall_diff_1k.jpg": "440310f05af089f2c93353167573403cbc3f805948203237b5d26431eeb9e19c",
+   "painted_plaster_wall_nor_dx_1k.jpg": "9e6d5ee04ece7b491eafa68042a7f8e42537c678cd1ceeaf2bcb4f34cdddec9b",
+   "painted_plaster_wall_rough_1k.jpg": "e0564c297b22ab1cf4ef02a82157b84ce3b92eb4fd49d9c64b7256a8b300af82"
+  },
+  "ref": "https://polyhaven.com/a/painted_plaster_wall",
+  "size_m": [
+   2.0,
+   2.0
+  ]
+ },
+ "polyhaven/rosewood_veneer1": {
+  "files": {
+   "rosewood_veneer1_diff_1k.jpg": "b4d36340d33b5bc8ff46864992d53ba3fbc92956ad3cc28d6b2acfa107801be0",
+   "rosewood_veneer1_nor_dx_1k.jpg": "b23b1dcfc1702faaa3193fb4fe1be518d21e9155976ad664d850cd83b8999e60",
+   "rosewood_veneer1_rough_1k.jpg": "75a0f4a8d3e0334f453b6d358dc4ef15d145a7e2f9f77cecd02b55e5d360a6d5"
+  },
+  "ref": "https://polyhaven.com/a/rosewood_veneer1",
+  "size_m": [
+   2.43,
+   2.43
+  ]
+ },
+ "polyhaven/rusty_painted_metal": {
+  "files": {
+   "rusty_painted_metal_diff_1k.jpg": "b086937b45c3628116a838363364a29bd3c5d2542cff906ec1d92d681ee80e15",
+   "rusty_painted_metal_nor_dx_1k.jpg": "1a23506df70f1c97deaac1d58dfabd3f4456d9102d39631bd45ada436e4615a2",
+   "rusty_painted_metal_rough_1k.jpg": "2d1c355c793c5886ef9dcecfc06da354e30218a84a9fe28de37741d2f2ed5aaa"
+  },
+  "ref": "https://polyhaven.com/a/rusty_painted_metal",
+  "size_m": [
+   2.2,
+   2.2
+  ]
+ },
+ "polyhaven/wood_plank_wall": {
+  "files": {
+   "wood_plank_wall_ao_1k.jpg": "634d3bc75d3ea66d83592b04ba1734b832fa29f8dafb8916cdef591c3a97050a",
+   "wood_plank_wall_diff_1k.jpg": "680a9959d3f805254e00b3ce9adaffb7b01dccbe84f3e89379bb5f91a116ada5",
+   "wood_plank_wall_nor_dx_1k.jpg": "9fca39552c9593c6509061505439ce8d050de785dc4657c108b8070e7fa0cbd6",
+   "wood_plank_wall_rough_1k.jpg": "11f02759e2e5f49c9963848ea537a7e020661c4913b734e6be7a432e23b75210"
+  },
+  "ref": "https://polyhaven.com/a/wood_plank_wall",
+  "size_m": [
+   1.0,
+   1.0
+  ]
+ }
+}

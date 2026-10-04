@@ -1,0 +1,84 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Bottle_Korvin",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "body_diameter_m": 0.104,
+ "bounds_max_m": [
+  0.05231,
+  0.0524,
+  0.37764
+ ],
+ "bounds_min_m": [
+  -0.052,
+  -0.0524,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.05231,
+  0.0524,
+  0.37764
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.052,
+  -0.0524,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueProp",
+ "design": {
+  "H": 0.33,
+  "R": 0.052,
+  "closure": "pourer",
+  "fill": 0.45,
+  "glass": "Plexi_Scratched",
+  "hb": 0.205,
+  "hs": 0.06,
+  "kind": "spirit",
+  "label": "bottle_korvin",
+  "label_z": 0.105,
+  "liquid": "Liquid_Clear",
+  "rn": 0.016,
+  "shoulder": "square"
+ },
+ "external_inputs": [],
+ "family": "Bottles",
+ "fbx": "SM_DB_Bottle_Korvin.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "22abc8eeed7b44a31803fe401c9e2e617231631a9f5f1224fed760b841426eb8",
+ "glass_height_m": 0.33,
+ "ledger_asset_id": "SM_DB_Bottle_Korvin",
+ "material_slots": [
+  "MI_DB_Plexi_Scratched",
+  "MI_DB_Liquid_Clear",
+  "MI_DB_Label_Atlas",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Steel_Stainless"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "C02",
+ "target_dimensions_m": [
+  0.10431,
+  0.104,
+  0.37764
+ ],
+ "tolerance_m": 0.01,
+ "translucent": true,
+ "triangles": 2864,
+ "triangles_render": 2792,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Bottles",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Bottles/SM_DB_Bottle_Korvin",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Bottle_Korvin/T_DB_Bottle_Korvin_WM.png"
+}

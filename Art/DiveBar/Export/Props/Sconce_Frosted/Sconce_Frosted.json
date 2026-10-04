@@ -1,0 +1,98 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {
+  "light_centre": [
+   0.13,
+   -0.0,
+   1.48
+  ]
+ },
+ "asset_id": "Sconce_Frosted",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.212,
+  0.082,
+  1.566
+ ],
+ "bounds_min_m": [
+  -0.0,
+  -0.082,
+  1.385
+ ],
+ "bounds_with_hulls_max_m": [
+  0.212,
+  0.082,
+  1.566
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.0,
+  -0.082,
+  1.385
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueProp",
+ "element": "E08 / L13-L15",
+ "external_inputs": [],
+ "family": "Lighting",
+ "fbx": "SM_DB_Sconce_Frosted.fbx",
+ "front": "+X",
+ "generator": "db_lamp.py",
+ "geometry_sha256": "f590b984aaaeca0c035f64b2b1fb9add1307b70f6e50e138536a2eb2bf672c5c",
+ "glass_centre_above_floor_m": 1.5,
+ "ledger_asset_id": "SM_DB_Sconce_Frosted",
+ "light": {
+  "cct_k": 2400,
+  "lumens": 250,
+  "note": "M2-A's point light at the anchor light_centre",
+  "source_radius_cm": 3.0
+ },
+ "material_slots": [
+  "MI_DB_Brass_Worn",
+  "MI_DB_Emissive_SconceGlass"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "wall_plane_floor",
+ "placement_hint_ue_cm": {
+  "locations": [
+   [
+    309.5,
+    732.0,
+    0.0
+   ],
+   [
+    502.5,
+    732.0,
+    0.0
+   ],
+   [
+    695.5,
+    732.0,
+    0.0
+   ]
+  ],
+  "note": "venue-dive-bar E08: one per booth on the right wall (Y 7.32), at the booth set centres, faces -Y",
+  "yaw_deg": -90.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": false,
+ "spec_id": "E08",
+ "target_dimensions_m": [
+  0.212,
+  0.164,
+  0.18
+ ],
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 1544,
+ "triangles_render": 1496,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Lighting",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Lighting/SM_DB_Sconce_Frosted",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Sconce_Frosted/T_DB_Sconce_Frosted_WM.png"
+}

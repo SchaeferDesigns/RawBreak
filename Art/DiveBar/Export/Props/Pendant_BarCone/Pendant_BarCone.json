@@ -1,0 +1,107 @@
+{
+ "acoustic_material": "metal_thin",
+ "anchors_ue_m": {
+  "bulb_centre": [
+   0.0,
+   -0.0,
+   -0.79
+  ]
+ },
+ "asset_id": "Pendant_BarCone",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.0996,
+  0.1,
+  0.0
+ ],
+ "bounds_min_m": [
+  -0.1004,
+  -0.1,
+  -0.83531
+ ],
+ "bounds_with_hulls_max_m": [
+  0.1,
+  0.1,
+  0.0
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.1004,
+  -0.1,
+  -0.83531
+ ],
+ "bulb_centre_above_floor_m": 1.95,
+ "bulbs": {
+  "asset": "SM_DB_LampBulb_ST64",
+  "cct_k": 2200,
+  "lumens": 300,
+  "note": "the lights are M2-A's (lights.json L5-L8): a point light at the anchor bulb_centre (Source Radius 1.5 cm, Length 3 cm), shadows on; place SM_DB_LampBulb_ST64 there (no shadow, hidden from ray tracing, 4.1)"
+ },
+ "cast_shadow": true,
+ "ceiling_m": 2.74,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueBlock",
+ "element": "L5-L8",
+ "external_inputs": [],
+ "family": "Lighting",
+ "fbx": "SM_DB_Pendant_BarCone.fbx",
+ "front": "+X",
+ "generator": "db_lamp.py",
+ "geometry_sha256": "5387ca71cd1a6625b688c270725b9612e35453930466d9c390bda4be8c30babd",
+ "ledger_asset_id": "SM_DB_Pendant_BarCone",
+ "material_slots": [
+  "MI_DB_Enamel_Black",
+  "MI_DB_Enamel_WhiteInt",
+  "MI_DB_Steel_Black",
+  "MI_DB_Plastic_Black"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "ceiling_anchor",
+ "placement_hint_ue_cm": {
+  "locations": [
+   [
+    300.0,
+    195.0,
+    274.0
+   ],
+   [
+    500.0,
+    195.0,
+    274.0
+   ],
+   [
+    700.0,
+    195.0,
+    274.0
+   ],
+   [
+    900.0,
+    195.0,
+    274.0
+   ]
+  ],
+  "note": "venue-dive-bar 4.2 L5-L8: X 3.0 / 5.0 / 7.0 / 9.0, Y 1.95, bulb Z 1.95; pivot on the ceiling plane",
+  "yaw_deg": 0.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "rim_diameter_m": 0.2,
+ "spec_id": "L5-L8",
+ "target_dimensions_m": [
+  0.2,
+  0.2,
+  0.835
+ ],
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 8752,
+ "triangles_render": 8716,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Lighting",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Lighting/SM_DB_Pendant_BarCone",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Pendant_BarCone/T_DB_Pendant_BarCone_WM.png"
+}

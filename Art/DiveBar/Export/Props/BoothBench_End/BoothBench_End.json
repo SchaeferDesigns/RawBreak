@@ -1,0 +1,83 @@
+{
+ "acoustic_material": "vinyl_upholstery",
+ "anchors_ue_m": {},
+ "asset_id": "BoothBench_End",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "back_top_z_m": 1.07,
+ "bounds_max_m": [
+  0.2925,
+  0.54,
+  1.07
+ ],
+ "bounds_min_m": [
+  -0.31009,
+  -0.54,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.2925,
+  0.54,
+  1.07
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.31009,
+  -0.54,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueBlock",
+ "element": "E08",
+ "external_inputs": [],
+ "family": "Booths",
+ "fbx": "SM_DB_BoothBench_End.fbx",
+ "front": "+X",
+ "generator": "db_booth.py",
+ "geometry_sha256": "66882ae4b887e6dcbad38324a367d8aa3a3f523501cf267f67b5c09806aae443",
+ "ledger_asset_id": "SM_DB_BoothBench_End",
+ "material_slots": [
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Vinyl_Booth",
+  "MI_DB_Plywood_Painted",
+  "MI_DB_Wood_Stained"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement_hint_ue_cm": {
+  "note": "row along venue X at Y 6.25 - 7.32 (centre Y 6.785): end benches at X 2.13 + 0.2925 (+X facing) and 7.92 - 0.2925 (-X facing), double benches centred at X 4.06 and 5.99, tables at the set centres X 3.095 / 5.025 / 6.955",
+  "y_cm": 678.5,
+  "yaw_deg": 0.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "seat_depth_m": 0.51,
+ "seat_z_m": 0.46,
+ "spec_checks": [
+  {
+   "measured_m": 0.4594,
+   "spec_m": 0.46,
+   "tolerance_m": 0.01,
+   "what": "seat top z"
+  }
+ ],
+ "spec_id": "M02",
+ "target_dimensions_m": [
+  0.60259,
+  1.08,
+  1.07
+ ],
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 11000,
+ "triangles_render": 10976,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Booths",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Booths/SM_DB_BoothBench_End",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/BoothBench_End/T_DB_BoothBench_End_WM.png"
+}

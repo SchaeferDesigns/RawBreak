@@ -1,0 +1,99 @@
+{
+ "acoustic_material": "plastic",
+ "anchors_ue_m": {},
+ "asset_id": "Sign_CashOnly",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.0057,
+  0.15,
+  1.695
+ ],
+ "bounds_min_m": [
+  0.0,
+  -0.15,
+  1.545
+ ],
+ "bounds_with_hulls_max_m": [
+  0.006,
+  0.15,
+  1.695
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.15,
+  1.545
+ ],
+ "cast_shadow": true,
+ "centre_z_m": 1.62,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "element": "S19",
+ "external_inputs": [],
+ "face_m": [
+  0.3,
+  0.15
+ ],
+ "family": "Signs",
+ "fbx": "SM_DB_Sign_CashOnly.fbx",
+ "front": "+X",
+ "generator": "db_signs.py",
+ "geometry_sha256": "a0e349ad75414ee9833954484fccc092ae4ce7ab2d94d45e2033bcd93cd089af",
+ "kind": "plastic",
+ "label": "sign_cash_only",
+ "ledger_asset_id": "SM_DB_Sign_CashOnly",
+ "material_slots": [
+  "MI_DB_Label_Gloss",
+  "MI_DB_Plastic_White",
+  "MI_DB_Steel_Zinc"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "wall_plane_floor",
+ "placement_hint_ue_cm": {
+  "location": [
+   120.0,
+   732.0,
+   0.0
+  ],
+  "note": "right wall above the ATM E03 (X 0.45 - 0.95), faces -Y",
+  "yaw_deg": -90.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.0057,
+    0.3
+   ],
+   "spec_m": [
+    null,
+    0.3
+   ],
+   "tolerance_m": 0.012,
+   "what": "face width",
+   "z_range_m": [
+    1.5350000000000001,
+    1.705
+   ]
+  }
+ ],
+ "spec_id": "S19",
+ "target_dimensions_m": [
+  0.0057,
+  0.3,
+  0.15
+ ],
+ "tolerance_m": 0.012,
+ "translucent": false,
+ "triangles": 308,
+ "triangles_render": 296,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Signs",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Signs/SM_DB_Sign_CashOnly",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Sign_CashOnly/T_DB_Sign_CashOnly_WM.png"
+}

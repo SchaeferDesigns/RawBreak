@@ -1,0 +1,65 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Can_OldCastor",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.0335,
+  0.03346,
+  0.1222
+ ],
+ "bounds_min_m": [
+  -0.03338,
+  -0.03346,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.0335,
+  0.03346,
+  0.1222
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.03338,
+  -0.03346,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "external_inputs": [],
+ "family": "Cans",
+ "fbx": "SM_DB_Can_OldCastor.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "2c95c003cb1fb9dc2f222ce304d246cb5a08686678a0bc6ff0c17fae7eb0c866",
+ "ledger_asset_id": "SM_DB_Can_OldCastor",
+ "material_slots": [
+  "MI_DB_Aluminium",
+  "MI_DB_Label_Gloss"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec": "US 12 oz can 66.2 x 122.2 mm",
+ "spec_id": "C03",
+ "target_dimensions_m": [
+  0.0662,
+  0.0662,
+  0.1222
+ ],
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 1152,
+ "triangles_render": 1108,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Cans",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Cans/SM_DB_Can_OldCastor",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Can_OldCastor/T_DB_Can_OldCastor_WM.png"
+}

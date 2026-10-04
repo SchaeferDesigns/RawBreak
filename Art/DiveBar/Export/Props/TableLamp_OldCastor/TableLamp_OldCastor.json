@@ -1,0 +1,188 @@
+{
+ "acoustic_material": "metal_thin",
+ "anchors_ue_m": {
+  "badge": [
+   0.0,
+   -0.0,
+   -0.7945
+  ],
+  "bulb_L1": [
+   -0.46,
+   -0.0,
+   -0.987
+  ],
+  "bulb_L2": [
+   0.0,
+   -0.0,
+   -0.987
+  ],
+  "bulb_L3": [
+   0.46,
+   -0.0,
+   -0.987
+  ],
+  "chain_anchor_neg": [
+   -0.55,
+   -0.0,
+   0.0
+  ],
+  "chain_anchor_pos": [
+   0.55,
+   -0.0,
+   0.0
+  ],
+  "shade_mouth_1": [
+   -0.46,
+   -0.0,
+   -1.137
+  ],
+  "shade_mouth_2": [
+   0.0,
+   -0.0,
+   -1.137
+  ],
+  "shade_mouth_3": [
+   0.46,
+   -0.0,
+   -1.137
+  ]
+ },
+ "asset_id": "TableLamp_OldCastor",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bed_height_m": 0.743,
+ "bounds_max_m": [
+  0.64011,
+  0.18046,
+  0.0
+ ],
+ "bounds_min_m": [
+  -0.63889,
+  -0.18044,
+  -1.13778
+ ],
+ "bounds_with_hulls_max_m": [
+  0.64011,
+  0.18046,
+  0.0
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.64,
+  -0.18044,
+  -1.13778
+ ],
+ "bulbs": {
+  "above_rim_m": 0.15,
+  "asset": "SM_DB_LampBulb_A19",
+  "cct_k": [
+   2700,
+   2700,
+   3000
+  ],
+  "lumens": [
+   1100,
+   1100,
+   1100
+  ],
+  "note": "the lights are M2-A's (lights.json L1-L3) at the anchors bulb_L1..L3; place SM_DB_LampBulb_A19 there (no shadow, hidden from ray tracing, 4.1), the L3 one with MI_DB_Emissive_Bulb3000"
+ },
+ "cast_shadow": true,
+ "ceiling_m": 2.74,
+ "chain_length_m": 0.857,
+ "collision_hulls": 5,
+ "collision_profile": "RbVenueBlock",
+ "element": "E14",
+ "external_inputs": [],
+ "family": "Lighting",
+ "fbx": "SM_DB_TableLamp_OldCastor.fbx",
+ "front": "+X",
+ "generator": "db_lamp.py",
+ "geometry_sha256": "1c204c0e71ed42c6afead71357d0d4a383af970d6d05b0e7300af97f23c671a2",
+ "lamp_underside_height_m": 0.86,
+ "ledger_asset_id": "SM_DB_TableLamp_OldCastor",
+ "material_slots": [
+  "MI_DB_Steel_Black",
+  "MI_DB_Emissive_LampBadge",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Enamel_Green",
+  "MI_DB_Enamel_WhiteInt",
+  "MI_DB_Label_Gloss",
+  "MI_DB_Steel_Zinc"
+ ],
+ "nanite": true,
+ "notes": "dent on the +X shade (TS-5); the +X bulb is the mismatched 3000 K replacement",
+ "owner": "M2-B",
+ "pivot": "ceiling_anchor",
+ "placement_hint_ue_cm": {
+  "location": [
+   1375.9,
+   544.7,
+   274.0
+  ],
+  "note": "venue-dive-bar E14 / 9.2: centred over the cloth, +2 cm Y, 1.5 deg yaw, pivot on the ceiling plane",
+  "yaw_deg": 1.5
+ },
+ "priority": "hero",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "shade": {
+  "centres_x_m": [
+   -0.46,
+   0.0,
+   0.46
+  ],
+  "depth_m": 0.23,
+  "rim_diameter_m": 0.36
+ },
+ "shade_bottom_above_bed_m": 0.86,
+ "spec_checks": [
+  {
+   "measured_m": [
+    1.279,
+    0.3609
+   ],
+   "spec_m": [
+    null,
+    0.36
+   ],
+   "tolerance_m": 0.002,
+   "what": "shade rim diameter (Y)",
+   "z_range_m": [
+    -1.1380000000000001,
+    -1.1170000000000002
+   ]
+  },
+  {
+   "measured_m": [
+    1.226,
+    0.042
+   ],
+   "spec_m": [
+    1.224,
+    null
+   ],
+   "tolerance_m": 0.002,
+   "what": "bar length incl. end caps",
+   "z_range_m": [
+    -0.8975,
+    -0.8565
+   ]
+  }
+ ],
+ "spec_id": "H03",
+ "target_dimensions_m": [
+  1.28,
+  0.36,
+  1.137
+ ],
+ "tolerance_m": 0.002,
+ "translucent": false,
+ "triangles": 75764,
+ "triangles_render": 75632,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Lighting",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Lighting/SM_DB_TableLamp_OldCastor",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/TableLamp_OldCastor/T_DB_TableLamp_OldCastor_WM.png"
+}

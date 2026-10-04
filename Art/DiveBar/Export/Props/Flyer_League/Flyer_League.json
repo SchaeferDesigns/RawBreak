@@ -1,0 +1,98 @@
+{
+ "acoustic_material": "paper",
+ "anchors_ue_m": {},
+ "asset_id": "Flyer_League",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.01947,
+  0.1447,
+  1.72075
+ ],
+ "bounds_min_m": [
+  0.00035,
+  -0.1448,
+  1.28091
+ ],
+ "bounds_with_hulls_max_m": [
+  0.02,
+  0.1447,
+  1.72075
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.1448,
+  1.28091
+ ],
+ "cast_shadow": true,
+ "centre_z_m": 1.5,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "element": "M15",
+ "external_inputs": [],
+ "face_m": [
+  0.279,
+  0.432
+ ],
+ "family": "Signs",
+ "fbx": "SM_DB_Flyer_League.fbx",
+ "front": "+X",
+ "generator": "db_signs.py",
+ "geometry_sha256": "21e4ca41f8319aa81183261b0810fc1f37afba179d8a23c8ea2500ae6dee6996",
+ "kind": "paper",
+ "label": "flyer_league",
+ "ledger_asset_id": "SM_DB_Flyer_League",
+ "material_slots": [
+  "MI_DB_Label_Atlas",
+  "MI_DB_Paper_Coaster"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "wall_plane_floor",
+ "placement_hint_ue_cm": {
+  "location": [
+   985.0,
+   732.0,
+   0.0
+  ],
+  "note": "right wall between the dart machine and the jukebox, faces -Y",
+  "yaw_deg": -90.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.01912,
+    0.2895
+   ],
+   "spec_m": [
+    null,
+    0.279
+   ],
+   "tolerance_m": 0.012,
+   "what": "face width",
+   "z_range_m": [
+    1.274,
+    1.726
+   ]
+  }
+ ],
+ "spec_id": "M15",
+ "target_dimensions_m": [
+  0.01912,
+  0.279,
+  0.432
+ ],
+ "tolerance_m": 0.012,
+ "translucent": false,
+ "triangles": 908,
+ "triangles_render": 896,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Signs",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Signs/SM_DB_Flyer_League",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Flyer_League/T_DB_Flyer_League_WM.png"
+}

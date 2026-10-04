@@ -1,0 +1,101 @@
+{
+ "acoustic_material": "paper",
+ "anchors_ue_m": {},
+ "asset_id": "Sign_ShotAndBeer",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.00355,
+  0.17352,
+  1.635
+ ],
+ "bounds_min_m": [
+  0.0,
+  -0.17331,
+  1.405
+ ],
+ "bounds_with_hulls_max_m": [
+  0.007,
+  0.17352,
+  1.635
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.17331,
+  1.405
+ ],
+ "cast_shadow": true,
+ "centre_z_m": 1.52,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "element": "S19",
+ "external_inputs": [
+  "Cardboard002"
+ ],
+ "face_m": [
+  0.34,
+  0.23
+ ],
+ "family": "Signs",
+ "fbx": "SM_DB_Sign_ShotAndBeer.fbx",
+ "front": "+X",
+ "generator": "db_signs.py",
+ "geometry_sha256": "e62acd1b8b2043047b58e6be47084b235c127f7633b974b42cff316adf42be01",
+ "kind": "cardboard",
+ "label": "sign_shot_and_beer",
+ "ledger_asset_id": "SM_DB_Sign_ShotAndBeer",
+ "material_slots": [
+  "MI_DB_Label_Atlas",
+  "MI_DB_Cardboard",
+  "MI_DB_Paper_Coaster"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "wall_plane_floor",
+ "placement_hint_ue_cm": {
+  "location": [
+   963.0,
+   0.0,
+   0.0
+  ],
+  "note": "left wall just past the back bar end (X 9.45), faces +Y",
+  "yaw_deg": 90.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.00355,
+    0.34682
+   ],
+   "spec_m": [
+    null,
+    0.34
+   ],
+   "tolerance_m": 0.012,
+   "what": "face width",
+   "z_range_m": [
+    1.395,
+    1.645
+   ]
+  }
+ ],
+ "spec_id": "S19",
+ "target_dimensions_m": [
+  0.00355,
+  0.34,
+  0.23
+ ],
+ "tolerance_m": 0.012,
+ "translucent": false,
+ "triangles": 1104,
+ "triangles_render": 1092,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Signs",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Signs/SM_DB_Sign_ShotAndBeer",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Sign_ShotAndBeer/T_DB_Sign_ShotAndBeer_WM.png"
+}

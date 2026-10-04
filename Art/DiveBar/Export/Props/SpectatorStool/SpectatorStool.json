@@ -1,0 +1,64 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {},
+ "asset_id": "SpectatorStool",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.17988,
+  0.18,
+  0.76185
+ ],
+ "bounds_min_m": [
+  -0.18028,
+  -0.18,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.18,
+  0.18,
+  0.76185
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.18028,
+  -0.18,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 5,
+ "collision_profile": "RbVenueBlock",
+ "element": "E17",
+ "external_inputs": [],
+ "family": "Stools",
+ "fbx": "SM_DB_SpectatorStool.fbx",
+ "front": "+X",
+ "generator": "db_stool.py",
+ "geometry_sha256": "5e513c1785287328acc2289db18d75de5ea1ba92a9a81f69d0c2fdc9541c1ab0",
+ "ledger_asset_id": "SM_DB_SpectatorStool",
+ "material_slots": [
+  "MI_DB_Wood_Stained"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "seat_top_m": 0.76,
+ "spec_id": "M22",
+ "target_dimensions_m": [
+  0.36015,
+  0.36,
+  0.76
+ ],
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 1772,
+ "triangles_render": 1648,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Stools",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Stools/SM_DB_SpectatorStool",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/SpectatorStool/T_DB_SpectatorStool_WM.png"
+}

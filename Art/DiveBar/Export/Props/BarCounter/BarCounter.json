@@ -1,0 +1,143 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {
+  "service_flap_centre": [
+   0.0,
+   -3.655,
+   1.07
+  ],
+  "stool10_plate": [
+   0.235,
+   -2.81,
+   1.07
+  ]
+ },
+ "armrest_crown_z_m": 1.1,
+ "asset_id": "BarCounter",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.39658,
+  3.96,
+  1.1016
+ ],
+ "bounds_min_m": [
+  -0.395,
+  -3.96,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.39658,
+  3.96,
+  1.1016
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.395,
+  -3.96,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 10,
+ "collision_profile": "RbVenueBlock",
+ "die_x_m": 0.135,
+ "drink_surface_z_m": 1.07,
+ "element": "E06",
+ "external_inputs": [],
+ "family": "Bar",
+ "fbx": "SM_DB_BarCounter.fbx",
+ "foot_rail": {
+  "d_m": 0.051,
+  "x_m": 0.305,
+  "z_m": 0.2
+ },
+ "front": "+X",
+ "generator": "db_bar.py",
+ "geometry_sha256": "c7b1f297c399c5db0003ee39b40e221e19b59250eb7215048c212262bd52ca44",
+ "ledger_asset_id": "SM_DB_BarCounter",
+ "material_slots": [
+  "MI_DB_Wood_Lacquered_Bar",
+  "MI_DB_Brass_Worn",
+  "MI_DB_Label_Gloss",
+  "MI_DB_Vinyl_Oxblood",
+  "MI_DB_Wood_PlankWall",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Plywood_Painted",
+  "MI_DB_Wood_Stained",
+  "MI_DB_Steel_Stainless"
+ ],
+ "nanite": true,
+ "notes": "armrest rises 3 cm above the 1.07 m drink surface; Deacon's plate in front of stool #10",
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement_hint_ue_cm": {
+  "location": [
+   579.0,
+   199.5,
+   0.0
+  ],
+  "note": "E06: X 1.83 - 9.75, top Y 1.60 - 2.39; local +X (customer side) -> venue +Y",
+  "yaw_deg": 90.0
+ },
+ "priority": "hero",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "service_flap": {
+  "blender_y_m": [
+   3.35,
+   3.96
+  ],
+  "note": "Blender +Y end = venue high X (E06 X 9.14 - 9.75)"
+ },
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.79158,
+    7.92
+   ],
+   "spec_m": [
+    null,
+    7.92
+   ],
+   "tolerance_m": 0.002,
+   "what": "top length (Y)",
+   "z_range_m": [
+    1.05,
+    1.0712000000000002
+   ]
+  },
+  {
+   "measured_m": 1.07089,
+   "spec_m": 1.07,
+   "tolerance_m": 0.002,
+   "what": "drink surface z"
+  },
+  {
+   "measured_m": [
+    0.05114,
+    0.19897
+   ],
+   "spec_m": [
+    0.051,
+    0.2
+   ],
+   "tolerance_m": 0.002,
+   "what": "foot rail diameter / centre z"
+  }
+ ],
+ "spec_id": "H08",
+ "target_dimensions_m": [
+  0.79,
+  7.92,
+  1.1
+ ],
+ "tolerance_m": 0.002,
+ "translucent": false,
+ "triangles": 34924,
+ "triangles_render": 34804,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Bar",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Bar/SM_DB_BarCounter",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/BarCounter/T_DB_BarCounter_WM.png"
+}
