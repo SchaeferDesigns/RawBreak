@@ -144,6 +144,13 @@ namespace RbVenueLighting
 	inline constexpr float MinRampSeconds = 0.8f;       // 4.6: no light steps on or off within a frame
 	inline constexpr double MaxFlashesPerSecond = 3.0;   // 4.7 / VDB-T8
 	inline constexpr double FlashThreshold = 0.10;       // a luminance change >= 10 % of the maximum counts (Harding-style)
+	inline constexpr double ChaseFadeSeconds = 0.06;     // LED fade of one chase step (L19), independent of the step rate
+
+	// Relative luminance Y of a LINEAR colour (Rec. 709). UE scales a light's flux by its linear LightColor without normalising it (only
+	// the colour-temperature colour is normalised to Y = 1), so a coloured light emits Intensity x Y photometric lumens: the level
+	// generator stores Intensity = flux / Y for lights with a colour (neon proxies, TVs, jukebox, EXIT, ...) and the validator checks
+	// Intensity x Y against the photometric flux of 4.2 / 4.3.
+	RAWBREAK_API double Luminance(const FLinearColor& LinearColor);
 
 	// "LT_DB_<Id>" (light actor tag and label, venue-dive-bar 13.3).
 	RAWBREAK_API FName LightTag(const FName& Id);

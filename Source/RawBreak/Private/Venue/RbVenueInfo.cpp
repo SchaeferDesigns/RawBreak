@@ -70,6 +70,38 @@ static FAutoConsoleCommandWithWorldAndArgs GRbVenueLuxProbe(TEXT("rb.Venue.LuxPr
 		}
 	}));
 
+// rb.Venue.LightingState <Open|LightsUp|AfterHours> [seconds]: switches the lighting state with the 4.6 ramp (look-dev, photo mode, the
+// VDB-T12 transition captures; -RbLightingState= only sets the state at load, without a ramp).
+static FAutoConsoleCommandWithWorldAndArgs GRbVenueLightingState(TEXT("rb.Venue.LightingState"),
+	TEXT("rb.Venue.LightingState <Open|LightsUp|AfterHours> [ramp seconds >= 0.8]: ramps every venue light to the state"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (Args.Num() < 1 || !World)
+		{
+			return;
+		}
+		ERbLightingState State = ERbLightingState::Open;
+		if (Args[0].Equals(TEXT("LightsUp"), ESearchCase::IgnoreCase))
+		{
+			State = ERbLightingState::LightsUp;
+		}
+		else if (Args[0].Equals(TEXT("AfterHours"), ESearchCase::IgnoreCase))
+		{
+			State = ERbLightingState::AfterHours;
+		}
+		else if (!Args[0].Equals(TEXT("Open"), ESearchCase::IgnoreCase))
+		{
+			UE_LOG(LogRawBreak, Warning, TEXT("rb.Venue.LightingState: unknown state %s (Open, LightsUp, AfterHours)"), *Args[0]);
+			return;
+		}
+		const float Seconds = Args.Num() > 1 ? FCString::Atof(*Args[1]) : RbVenueLighting::MinRampSeconds;
+		for (TActorIterator<ARbVenueInfo> It(World); It; ++It)
+		{
+			It->SetLightingState(State, Seconds);
+			UE_LOG(LogRawBreak, Display, TEXT("RbVenue: lighting state -> %s (ramp >= %.2f s)"), *Args[0], FMath::Max(Seconds, RbVenueLighting::MinRampSeconds));
+		}
+	}));
+
 const FName ARbVenueInfo::CeilingTag(TEXT("RbDB_Ceiling"));
 const FName ARbVenueInfo::FanTag(TEXT("RbDB_Fan"));
 const FName ARbVenueInfo::GeometryTag(TEXT("RbDB_Geo"));
@@ -311,8 +343,17 @@ int32 ARbVenueInfo::BindLights()
 				TInlineComponentArray<UStaticMeshComponent*> Meshes(Emitter);
 				for (UStaticMeshComponent* Mesh : Meshes)
 				{
-					for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+					// Only the emitting surface follows the light (the troffer's MI_DB_Troffer_Lens slot, not its MI_DB_Paint_White
+					// housing, which would otherwise glow at the lens luminance too); a one-slot mesh (the greybox stand-in) is all lens.
+					const TArray<FName> SlotNames = Mesh->GetMaterialSlotNames();
+					const int32 NumSlots = Mesh->GetNumMaterials();
+					for (int32 Slot = 0; Slot < NumSlots; ++Slot)
 					{
+						const FString SlotName = SlotNames.IsValidIndex(Slot) ? SlotNames[Slot].ToString() : FString();
+						if (NumSlots > 1 && !SlotName.Contains(TEXT("Lens")) && !SlotName.Contains(TEXT("Emissive")))
+						{
+							continue;
+						}
 						if (UMaterialInstanceDynamic* Mid = Mesh->CreateAndSetMaterialInstanceDynamic(Slot))
 						{
 							B.EmissiveMids.Add(Mid);
@@ -548,11 +589,12 @@ void ARbVenueInfo::ApplyLight(int32 Index, double Time)
 			Component->SetWorldRotation(B.BaseRotation + FRotator(0.0, Yaw, 0.0));
 		}
 	}
+	static const FName EmissiveParam(TEXT("Emissive"));
 	for (const TWeakObjectPtr<UMaterialInstanceDynamic>& Mid : B.EmissiveMids)
 	{
 		if (UMaterialInstanceDynamic* M = Mid.Get())
 		{
-			M->SetScalarParameterValue(TEXT("Emissive"), static_cast<float>(Light.EmissiveNits * B.Ramp.Current));
+			M->SetScalarParameterValue(EmissiveParam, static_cast<float>(Light.EmissiveNits * B.Ramp.Current));
 		}
 	}
 }
@@ -572,7 +614,9 @@ void ARbVenueInfo::UpdateCeilingVisibility()
 	UWorld* World = GetWorld();
 	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
 	const AActor* Target = PC ? PC->GetViewTarget() : nullptr;
-	const bool bHide = Target && Target->ActorHasTag(FName(*RbAssetPaths::CaptureCamera::DiveBarView(10)));
+	// built once: this runs every tick (no per-frame FString / FName construction)
+	static const FName PlanCameraTag(*RbAssetPaths::CaptureCamera::DiveBarView(10));
+	const bool bHide = Target && Target->ActorHasTag(PlanCameraTag);
 	if (bHide == bCeilingHidden)
 	{
 		return;

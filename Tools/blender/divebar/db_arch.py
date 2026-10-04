@@ -906,9 +906,13 @@ def build_troffer(out) -> None:
 	rb_bl.reset_scene()
 	b = rb_bl.Builder("Troffer")
 	w, lgt, dep = 0.600, 1.210, 0.11
-	# pivot at the ceiling plane centre; the lens 8 mm above the grid flange, a 25 mm white door frame
-	b.box(-lgt / 2, lgt / 2, -w / 2, w / 2, 0.0, 0.012, M_WHITE, skip=("+z",))
-	b.box(-lgt / 2 + 0.03, lgt / 2 - 0.03, -w / 2 + 0.03, w / 2 - 0.03, 0.006, 0.010, M_LENS)
+	fw = 0.03  # white door-frame width
+	# pivot at the ceiling plane centre; the lens 6 mm above the face of a 30 mm white door FRAME (four strips: v1 closed the frame
+	# into a full slab whose underside hid the lens, so only the white housing could glow in Lights-Up)
+	for x0, x1, y0, y1 in ((-lgt / 2, lgt / 2, -w / 2, -w / 2 + fw), (-lgt / 2, lgt / 2, w / 2 - fw, w / 2),
+			(-lgt / 2, -lgt / 2 + fw, -w / 2 + fw, w / 2 - fw), (lgt / 2 - fw, lgt / 2, -w / 2 + fw, w / 2 - fw)):
+		b.box(x0, x1, y0, y1, 0.0, 0.012, M_WHITE, skip=("+z",))
+	b.box(-lgt / 2 + fw, lgt / 2 - fw, -w / 2 + fw, w / 2 - fw, 0.006, 0.010, M_LENS)
 	b.box(-lgt / 2, lgt / 2, -w / 2, w / 2, 0.012, dep, M_WHITE, skip=("-z",))
 	obj = b.build(uv_world=True)
 	meta = {"family": "Lighting", "ue_folder": "Lighting", "profile": "RbVenueProp", "frame": "local", "pivot": "ceiling_center",
@@ -941,13 +945,17 @@ def build_diffuser(out) -> None:
 	rb_bl.export_asset("HvacDiffuser", [obj], pathlib.Path(out) / FOLDER, meta, package=PACKAGE)
 
 
-# Simple stroke glyphs for the EXIT letters (unit cap height, boxes of stroke width w).
+# Simple stroke glyphs for the EXIT letters (unit cap height, boxes of stroke width w). Proportions of a UL 924 sign: 150 mm letters
+# in a 330 mm housing, so the word (with strokes) must stay inside the face: v1's 0.62-0.66 wide letters and 0.30 gaps made a 445 mm
+# word that stuck out of both ends, and from the front the other face's letters showed beyond the housing ("EXIT" + a mirrored E).
 EXIT_GLYPHS = {
-	"E": [((0, 0), (0, 1)), ((0, 1), (0.62, 1)), ((0, 0.52), (0.52, 0.52)), ((0, 0), (0.62, 0))],
-	"X": [((0, 0), (0.66, 1)), ((0, 1), (0.66, 0))],
+	"E": [((0, 0), (0, 1)), ((0, 1), (0.40, 1)), ((0, 0.52), (0.34, 0.52)), ((0, 0), (0.40, 0))],
+	"X": [((0, 0), (0.46, 1)), ((0, 1), (0.46, 0))],
 	"I": [((0.0, 0), (0.0, 1))],
-	"T": [((0, 1), (0.66, 1)), ((0.33, 1), (0.33, 0))],
+	"T": [((0, 1), (0.46, 1)), ((0.23, 1), (0.23, 0))],
 }
+EXIT_WIDTHS = {"E": 0.40, "X": 0.46, "I": 0.0, "T": 0.46}
+EXIT_GAP = 0.16  # [cap heights] between letters
 
 
 def build_exit_sign(out) -> None:
@@ -959,10 +967,12 @@ def build_exit_sign(out) -> None:
 	# housing (white thermoplastic), pivot at the top centre, faces +X and -X (double-faced, L25b) - the level rotates it
 	b.box(-D / 2, D / 2, -W / 2, W / 2, -H, 0.0, M_WHITE)
 	cap, sw = 0.150, 0.019
-	widths = {"E": 0.62, "X": 0.66, "I": 0.0, "T": 0.66}
-	gap = 0.30
+	widths, gap = EXIT_WIDTHS, EXIT_GAP
 	total = sum(widths[c] for c in "EXIT") + gap * 3
 	scale = cap
+	word = total * scale + sw  # outer width of the word, strokes included
+	if word > W - 0.02:
+		rb_bl.fail(f"ExitSign: the word is {word * 1000:.0f} mm wide, the housing face only {W * 1000:.0f} mm")
 	u = -0.5 * total * scale
 	for ch in "EXIT":
 		for (p0, p1) in EXIT_GLYPHS[ch]:
@@ -985,7 +995,8 @@ def build_exit_sign(out) -> None:
 	meta = {"family": "Lighting", "ue_folder": "Lighting", "profile": "RbVenueProp", "frame": "local", "pivot": "top_center",
 		"notes": "double-faced LED EXIT sign (L25, 40 cd/m2 letters, 150 mm)", "owner": PACKAGE, "generator": "db_arch.py",
 		"acoustic_material": "none", "cast_shadow": False}
-	rb_bl.export_asset("ExitSign", [obj], pathlib.Path(out) / FOLDER, meta, package=PACKAGE)
+	# VDB-T4: the sign (letters included) is exactly its housing face wide; the letters stand 1.5 mm proud of both faces
+	rb_bl.export_asset("ExitSign", [obj], pathlib.Path(out) / FOLDER, meta, target_m=(D + 0.006, W, H + 0.02), tolerance_m=0.002, package=PACKAGE)
 
 
 # ------------------------------------------------------------------------------------------------------------------------------

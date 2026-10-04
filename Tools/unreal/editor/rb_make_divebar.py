@@ -307,14 +307,15 @@ def place_ceiling_fixtures(L: dict, A: Assets) -> None:
 		if A.has("HvacDiffuser"):
 			mesh_actor(A.mesh("HvacDiffuser"), cm((x, y, zc)), label=f"HvacDiffuser_{k + 1}", tags=(TAG_GEO, TAG_CEIL, "RbDB_Diffuser"),
 				profile="RbVenueProp")
-	# EXIT signs: L25a over the back exit (faces -X into the corridor), L25b double-faced at the front door (faces +X / -X).
+	# EXIT signs (pivot = housing top): L25a over the back exit at Z 2.20 - 2.38 (E21, faces -X into the corridor), L25b double-faced
+	# at the front door at Z 2.40 - 2.58 (E02, faces +X / -X); the lights L25a-c sit at the letters' centre (Z 2.29 / 2.49).
 	if A.has("ExitSign"):
-		mesh_actor(A.mesh("ExitSign"), cm((20.09, 0.80, 2.44)), (0.0, 0.0, 0.0), label="ExitSign_L25a", tags=(TAG_GEO, "RbDB_Exit"),
+		mesh_actor(A.mesh("ExitSign"), cm((20.09, 0.80, 2.38)), (0.0, 0.0, 0.0), label="ExitSign_L25a", tags=(TAG_GEO, "RbDB_Exit"),
 			profile="RbVenueProp", shadow=False)
-		mesh_actor(A.mesh("ExitSign"), cm((0.35, 6.10, 2.62)), (0.0, 0.0, 0.0), label="ExitSign_L25b", tags=(TAG_GEO, "RbDB_Exit"),
+		mesh_actor(A.mesh("ExitSign"), cm((0.35, 6.10, 2.58)), (0.0, 0.0, 0.0), label="ExitSign_L25b", tags=(TAG_GEO, "RbDB_Exit"),
 			profile="RbVenueProp", shadow=False)
-		# the hanging sign's stem to the ceiling
-		gb_cyl((0.35, 6.10, 2.68), 0.008, 0.12, "chrome", "ExitSign_L25b_Stem", profile="RbVenueProp")
+		# the hanging sign's stem from its canopy (top + 2 cm) to the ceiling
+		gb_cyl((0.35, 6.10, 0.5 * (2.60 + zc)), 0.008, zc - 2.60, "chrome", "ExitSign_L25b_Stem", profile="RbVenueProp")
 
 
 def facing_yaw(facing: str) -> float:
@@ -940,14 +941,63 @@ def place_fx(L: dict, A: Assets) -> None:
 
 ANIM = {"tv": "TV", "cycle": "CYCLE", "chase": "CHASE", "headlights": "HEADLIGHTS"}
 
+# lights.json gas names -> its "neon_gases" table (the sign data uses the short names of rb_import_divebar.NEON_GASES)
+GAS_ALIASES = {"StdBlue": "StandardBlue", "Green": "StandardGreen"}
 
-def venue_light(j: dict, defaults: dict, ramp: float):
+
+def _srgb8(c: float) -> int:
+	c = max(0.0, min(1.0, float(c)))
+	s = 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1.0 / 2.4) - 0.055
+	return int(round(255.0 * s))
+
+
+def _linear_of8(v: int) -> float:
+	s = v / 255.0
+	return s / 12.92 if s <= 0.04045 else ((s + 0.055) / 1.055) ** 2.4
+
+
+def light_photometry(j: dict, LJ: dict) -> tuple:
+	"""(UE intensity [lm], 8-bit sRGB light colour or None) of a lights.json entry.
+
+	Colours in lights.json ("color", "color_tint", the gases of "neon_gases") are LINEAR RGB, like the emissive colours and
+	ARbVenueInfo's cycle colours (SetLightColor(FLinearColor) sRGB-encodes them). UE keeps LightColor as an sRGB FColor and scales the
+	lumens by the linear colour WITHOUT normalising it (only the colour-temperature colour has Y = 1), so a coloured light at
+	Intensity = flux would emit only flux x Y photometric lumens (the EXIT red ~24 %, a TV ~70 %). The level therefore stores
+	Intensity = flux / Y(colour) (the max channel normalised to 1); ARbVenueInfo::ValidateVenueLevel checks Intensity x Y against the
+	tube flux / pi of the neon proxies (VDB-T11). Neon proxies take the flux-weighted mix of their gases' colours (4.3 "per gas"; v1 left
+	them white)."""
+	flux = float(j["flux_lm"])
+	lin = None
+	if "cct_k" in j:
+		lin = j.get("color_tint")
+	elif "color" in j:
+		lin = j["color"]
+	elif j.get("gases"):
+		table = LJ.get("neon_gases", {})
+		acc, total = [0.0, 0.0, 0.0], 0.0
+		for name, lm in j["gases"].items():
+			gas = table.get(name) or table.get(GAS_ALIASES.get(name, ""))
+			if gas is None:
+				rb.fail(f"{j['id']}: gas {name} not in lights.json neon_gases")
+			for i in range(3):
+				acc[i] += float(lm) * float(gas["color"][i])
+			total += float(lm)
+		lin = [a / total for a in acc]
+	if not lin:
+		return flux, None
+	peak = max(lin)
+	rgb8 = tuple(_srgb8(c / peak) for c in lin)
+	y = 0.2126 * _linear_of8(rgb8[0]) + 0.7152 * _linear_of8(rgb8[1]) + 0.0722 * _linear_of8(rgb8[2])
+	return flux / y, rgb8
+
+
+def venue_light(j: dict, defaults: dict, ramp: float, LJ: dict):
 	states = dict(defaults.get("states", {}))
 	states.update(j.get("states", {}))
 	v = unreal.RbVenueLight()
 	v.set_editor_property("id", j["id"])
 	v.set_editor_property("group", j.get("group", ""))
-	v.set_editor_property("intensity", float(j["flux_lm"]))
+	v.set_editor_property("intensity", float(light_photometry(j, LJ)[0]))
 	v.set_editor_property("open_factor", float(states.get("Open", 1.0)))
 	v.set_editor_property("lights_up_factor", float(states.get("LightsUp", 1.0)))
 	v.set_editor_property("after_hours_factor", float(states.get("AfterHours", 0.0)))
@@ -988,7 +1038,8 @@ def kelvin_color(k: float):
 	return tuple(max(0.0, min(255.0, c)) / 255.0 for c in (r, g, b))
 
 
-def spawn_light(j: dict, defaults: dict, quality_index: int = 0):
+def spawn_light(j: dict, LJ: dict, quality_index: int = 0):
+	defaults = LJ["defaults"]
 	kind = j["type"]
 	cls = {"point": unreal.PointLight, "rect": unreal.RectLight, "spot": unreal.SpotLight}[kind]
 	r = j.get("rot", [0.0, 0.0, 0.0])
@@ -998,20 +1049,14 @@ def spawn_light(j: dict, defaults: dict, quality_index: int = 0):
 	comp.set_editor_property("intensity_units", unreal.LightUnits.LUMENS)
 	states = dict(defaults.get("states", {}))
 	states.update(j.get("states", {}))
-	comp.set_editor_property("intensity", float(j["flux_lm"]) * float(states.get("Open", 1.0)))
+	intensity, rgb8 = light_photometry(j, LJ)
+	comp.set_editor_property("intensity", float(intensity) * float(states.get("Open", 1.0)))
 	comp.set_editor_property("attenuation_radius", 100.0 * float(j.get("attenuation_radius_m", defaults.get("attenuation_radius_m", 14.0))))
+	comp.set_editor_property("use_temperature", "cct_k" in j)
 	if "cct_k" in j:
-		comp.set_editor_property("use_temperature", True)
 		comp.set_editor_property("temperature", float(j["cct_k"]))
-		tint = j.get("color_tint")
-		if tint:
-			comp.set_editor_property("light_color", unreal.Color(r=int(255 * tint[0]), g=int(255 * tint[1]), b=int(255 * tint[2]), a=255))
-	elif "color" in j:
-		c = j["color"]
-		comp.set_editor_property("use_temperature", False)
-		comp.set_editor_property("light_color", unreal.Color(r=int(round(255 * c[0])), g=int(round(255 * c[1])), b=int(round(255 * c[2])), a=255))
-	elif j.get("gases"):
-		pass
+	if rgb8 is not None:
+		comp.set_editor_property("light_color", unreal.Color(r=rgb8[0], g=rgb8[1], b=rgb8[2], a=255))
 	comp.set_editor_property("specular_scale", float(j.get("specular", defaults.get("specular", 1.0))))
 	comp.set_editor_property("volumetric_scattering_intensity", float(j.get("vol", defaults.get("vol", 0.0))))
 	comp.set_editor_property("cast_volumetric_shadow", bool(j.get("vol_shadow", defaults.get("vol_shadow", False))))
@@ -1097,7 +1142,15 @@ def place_cameras(L: dict) -> int:
 			cam = spawn_actor(unreal.RbLookDevCamera, cm(eye), rotation, label=c["tag"], tags=(c["tag"],))
 			preset = unreal.RbCameraPreset.HEADCAM if c.get("preset") == "Headcam" else unreal.RbCameraPreset.EYES
 			cam.set_editor_property("preset", preset)
-			cam.set_editor_property("focus_distance_cm", 0.0)
+			# The eye focuses on what it looks at: the authored target (an optional "focus_m" in layout.json overrides it, e.g. for a
+			# macro lens that should hold a ball's near surface). The look-dev camera's fallback (a visibility trace along the view axis)
+			# passes through the balls and the table, which have no visibility collision, so V06 / TH3 focused on the wall behind and
+			# rendered the rack blurred. Chin on cue focuses on its aim point, the orthographic V10 has no depth of field.
+			if "chin_on_cue" in c or c.get("ortho_width_m"):
+				focus_cm = 0.0
+			else:
+				focus_cm = 100.0 * float(c.get("focus_m", math.dist(eye, target)))
+			cam.set_editor_property("focus_distance_cm", focus_cm)
 			if "chin_on_cue" in c:
 				coc = c["chin_on_cue"]
 				cam.set_editor_property("placement", unreal.RbLookDevPlacement.CHIN_ON_CUE)
@@ -1141,7 +1194,7 @@ def place_venue_info(L: dict, LJ: dict):
 	info.set_editor_property("age", float(L.get("age", 0.8)))
 	info.set_editor_property("initial_lighting_state", unreal.RbLightingState.OPEN)
 	ramp = float(LJ.get("ramp_seconds", 0.8))
-	info.set_editor_property("lights", [venue_light(j, LJ["defaults"], ramp) for j in LJ["lights"]])
+	info.set_editor_property("lights", [venue_light(j, LJ["defaults"], ramp, LJ) for j in LJ["lights"]])
 	lamp = L["lamp"]
 	info.set_editor_property("lamp_efficiency", float(lamp.get("efficiency", 0.6)))
 	info.set_editor_property("lamp_cutoff_deg", float(lamp.get("cutoff_deg", 50.2)))
@@ -1222,13 +1275,13 @@ def main() -> None:
 	for j in LJ["lights"]:
 		if j.get("group") == "troffers":
 			continue
-		spawn_light(j, LJ["defaults"])
+		spawn_light(j, LJ)
 		n_lights += 1
 	place_fog(LJ)
 	use_level(levels["Light_LightsUp"])
 	for j in LJ["lights"]:
 		if j.get("group") == "troffers":
-			spawn_light(j, LJ["defaults"])
+			spawn_light(j, LJ)
 			n_lights += 1
 	use_level(levels["Light_AfterHours"])
 	spawn_actor(unreal.TargetPoint, (820.0, 366.0, 250.0), label="AfterHours_StateStub", tags=("RbDB_AfterHours",))

@@ -16,7 +16,8 @@
 // on the venue's key light), the slow ceiling fan (actors tagged RbDB_Fan), the plan capture (the ceiling actors tagged
 // RbDB_Ceiling are hidden while a camera tagged RbCam_DB_V10 is the view target), the EV report of the captures (-RbEvLog or a
 // capture run: "RbVenue EV" log lines with the adapted exposure, VDB-T2) and the level validator.
-// Command line: -RbLightingState=Open|LightsUp|AfterHours sets the initial state (captures V12).
+// Command line: -RbLightingState=Open|LightsUp|AfterHours sets the initial state (captures V12); the console command
+// rb.Venue.LightingState <State> [seconds] ramps to a state at run time (look-dev, VDB-T12 transition captures).
 // Owner: M2-A.
 
 #include "CoreMinimal.h"

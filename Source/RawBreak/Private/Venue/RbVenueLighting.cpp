@@ -168,6 +168,11 @@ namespace RbVenueLighting
 		return FName(TEXT("RbDB_Light"));
 	}
 
+	double Luminance(const FLinearColor& LinearColor)
+	{
+		return 0.2126 * LinearColor.R + 0.7152 * LinearColor.G + 0.0722 * LinearColor.B;
+	}
+
 	double Ramp01(double T, double Duration)
 	{
 		if (Duration <= 0.0)
@@ -191,7 +196,8 @@ namespace RbVenueLighting
 			const double Phase = T * Rate;
 			const double Step = FMath::FloorToDouble(Phase);
 			const double Frac = Phase - Step;
-			const double Fade = Smooth(Frac * Rate / 0.06);
+			// time since the step [s] = Frac / Rate (a step lasts 1 / Rate s); the LED fade takes ChaseFadeSeconds at every rate
+			const double Fade = Smooth(Frac / Rate / ChaseFadeSeconds);
 			const double Prev = FMath::Fmod(Step + 1.0, 2.0);
 			const double Curr = FMath::Fmod(Step, 2.0);
 			const double Pattern = FMath::Lerp(Prev, Curr, Fade);

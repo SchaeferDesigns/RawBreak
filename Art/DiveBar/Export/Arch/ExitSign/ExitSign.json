@@ -3,12 +3,12 @@
  "asset_id": "ExitSign",
  "bounds_max_m": [
   0.0305,
-  0.2225,
+  0.165,
   0.02
  ],
  "bounds_min_m": [
   -0.0305,
-  -0.2225,
+  -0.165,
   -0.19
  ],
  "cast_shadow": false,
@@ -27,6 +27,12 @@
  "owner": "M2-A",
  "pivot": "top_center",
  "profile": "RbVenueProp",
+ "target_m": [
+  0.061,
+  0.33,
+  0.21
+ ],
+ "tolerance_m": 0.002,
  "triangles": 240,
  "ue_folder": "Lighting"
 }

@@ -14,6 +14,8 @@
 // controls) the in-engine threshold is measured by bisection and must equal 2.5's within +-2 cm (cue_sweep_check.py reproduces
 // the same thresholds from layout.json within 1 mm); the 52 / 48-in offers exist where 2.5 predicts them.
 //
+// RawBreak.Functional.DiveBar.Validator (editor world): ARbVenueInfo::ValidateVenueLevel passes on the saved level.
+//
 // RawBreak.Functional.DiveBarRack (PIE on L_DiveBar, DB-1 walkability with the real pawn + the M2 "playable" check): the pawn walks
 // the tight spots with its CharacterMovement (the 1.04 m, 1.10 m and 1.02 m gaps and the foot end); then a complete 9-ball practice
 // rack through the cheats (like M1Rack) on the placed 7-ft bar table with the OLD-BAR ball set (oversized 60.325 mm cue ball in the
@@ -882,6 +884,57 @@ bool FRbDiveBarCueSweepTest::RunTest(const FString& Parameters)
 	}
 	AutomationOpenMap(RbAssetPaths::DiveBarMap);
 	ADD_LATENT_AUTOMATION_COMMAND(FRbDiveBarCueSweepCommand(this));
+	return true;
+}
+
+// ==================================================================================================================================
+// RawBreak.Functional.DiveBar.Validator (editor world): the saved L_DiveBar passes its own level validator (VDB-T1 analytic, T8, T10,
+// T11, T12 parts, cameras, tables, sublevels) - the generator runs it after a build, this keeps a stale or hand-edited map from
+// passing the suite (review M2-A).
+// ==================================================================================================================================
+
+class FRbDiveBarValidatorCommand : public IAutomationLatentCommand
+{
+public:
+	explicit FRbDiveBarValidatorCommand(FAutomationTestBase* InTest) : Test(InTest) {}
+
+	virtual bool Update() override
+	{
+		UWorld* World = RbDiveBarTest::EditorWorld();
+		if (!Test->TestNotNull(TEXT("editor world"), World))
+		{
+			return true;
+		}
+		bool bOk = false;
+		const FString Report = ARbVenueInfo::ValidateVenueLevel(World, bOk);
+		TArray<FString> Lines;
+		Report.ParseIntoArrayLines(Lines);
+		for (const FString& Line : Lines)
+		{
+			if (Line.StartsWith(TEXT("FAIL")))
+			{
+				Test->AddError(Line);
+			}
+		}
+		Test->AddInfo(Report);
+		Test->TestTrue(TEXT("ARbVenueInfo::ValidateVenueLevel on the saved L_DiveBar"), bOk);
+		return true;
+	}
+
+private:
+	FAutomationTestBase* Test;
+};
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbDiveBarValidatorTest, "RawBreak.Functional.DiveBar.Validator", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FRbDiveBarValidatorTest::RunTest(const FString& Parameters)
+{
+	if (!RbDiveBarTest::MapExists(*this))
+	{
+		return false;
+	}
+	AutomationOpenMap(RbAssetPaths::DiveBarMap);
+	ADD_LATENT_AUTOMATION_COMMAND(FRbDiveBarValidatorCommand(this));
 	return true;
 }
 

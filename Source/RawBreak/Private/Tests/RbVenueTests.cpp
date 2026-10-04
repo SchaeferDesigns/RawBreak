@@ -303,6 +303,39 @@ bool FRbVenuePhotosensitivity::RunTest(const FString& Parameters)
 	return true;
 }
 
+// --- L19 dart-machine chase: the LED fade lasts ChaseFadeSeconds at every step rate (review M2-A: it scaled with the rate squared) -----
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbVenueChaseFade, "RawBreak.Unit.Venue.T8_ChaseFade", RB_UNIT_TEST_FLAGS)
+
+bool FRbVenueChaseFade::RunTest(const FString& Parameters)
+{
+	for (const double Rate : {0.5, 1.0, 1.5, 2.0})
+	{
+		FRbVenueLight Light;
+		Light.Animation = ERbVenueLightAnimation::Chase;
+		Light.AnimRate = static_cast<float>(Rate);
+		Light.AnimDepth = 0.08f;
+		const double Depth = Light.AnimDepth;
+		const double StepStart = 1.0 / Rate; // step 1 begins: the pattern goes 0 -> 1
+		const double Before = RbVenueLighting::AnimationFactor(Light, StepStart - 1e-6);
+		const double Half = RbVenueLighting::AnimationFactor(Light, StepStart + 0.5 * RbVenueLighting::ChaseFadeSeconds);
+		const double Done = RbVenueLighting::AnimationFactor(Light, StepStart + 1.01 * RbVenueLighting::ChaseFadeSeconds);
+		TestEqual(*FString::Printf(TEXT("%.1f steps/s: low level before the step"), Rate), Before, 1.0 - 0.5 * Depth, 1e-6);
+		TestEqual(*FString::Printf(TEXT("%.1f steps/s: half way through the fade after %.0f ms"), Rate, 500.0 * RbVenueLighting::ChaseFadeSeconds), Half, 1.0, 1e-6);
+		TestEqual(*FString::Printf(TEXT("%.1f steps/s: fade done after %.0f ms"), Rate, 1000.0 * RbVenueLighting::ChaseFadeSeconds), Done, 1.0 + 0.5 * Depth, 1e-6);
+		// smooth: the largest change between two 144 Hz frames stays below the whole step
+		double MaxStep = 0.0, Prev = RbVenueLighting::AnimationFactor(Light, 0.0);
+		for (int32 I = 1; I < 144 * 4; ++I)
+		{
+			const double Now = RbVenueLighting::AnimationFactor(Light, I / 144.0);
+			MaxStep = FMath::Max(MaxStep, FMath::Abs(Now - Prev));
+			Prev = Now;
+		}
+		TestTrue(*FString::Printf(TEXT("%.1f steps/s: largest 144 Hz frame change %.4f < 0.6 x the step %.2f"), Rate, MaxStep, Depth), MaxStep < 0.6 * Depth);
+	}
+	return true;
+}
+
 // --- lights.json data (VDB-T11 on the data) ----------------------------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbVenueLightsData, "RawBreak.Unit.Venue.T11_LightsData", RB_UNIT_TEST_FLAGS)

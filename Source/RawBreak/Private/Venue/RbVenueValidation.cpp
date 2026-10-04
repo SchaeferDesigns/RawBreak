@@ -55,7 +55,7 @@ namespace RbVenueValidationPrivate
 	// Luminance weight of a light colour (Rec. 709) for the flash counter.
 	double Luma(const FLinearColor& C)
 	{
-		return 0.2126 * C.R + 0.7152 * C.G + 0.0722 * C.B;
+		return RbVenueLighting::Luminance(C);
 	}
 
 	// Complex (render-triangle) traces: the lamp's shades occlude their bulbs beyond the cut-off exactly like the rendered shadow does,
@@ -444,14 +444,21 @@ FString ARbVenueInfo::ValidateVenueLevel(const UObject* WorldContextObject, bool
 			const ULocalLightComponent* L = *Found;
 			if (Light.TubeFluxLm > 0.0f)
 			{
+				// Photometric flux of the proxy: UE scales the lumens by the linear light colour (not normalised), so a red-gold proxy
+				// carries Intensity x Y(colour); the proxy must be coloured like its gas mix (4.3: "per gas"; a white proxy lit the
+				// walls white while the tubes glowed red / blue).
 				const double Want = RbVenueLighting::NeonProxyFlux(Light.TubeFluxLm);
-				const bool bFlux = L->IntensityUnits == ELightUnits::Lumens && FMath::Abs(Light.Intensity / Want - 1.0) <= 0.05 &&
+				const FLinearColor Color = L->bUseTemperature ? FLinearColor::White : L->GetLightColor();
+				const double Photometric = Light.Intensity * RbVenueLighting::Luminance(Color);
+				const bool bFlux = L->IntensityUnits == ELightUnits::Lumens && FMath::Abs(Photometric / Want - 1.0) <= 0.05 &&
 					FMath::Abs(L->Intensity - Light.Intensity * Light.OpenFactor) <= 0.01 * FMath::Max(1.0f, Light.Intensity);
 				const bool bSpec = FMath::IsNearlyZero(L->SpecularScale);
-				if (!bFlux || !bSpec)
+				const bool bColoured = Color.GetMax() - FMath::Min3(Color.R, Color.G, Color.B) >= 0.15f;
+				if (!bFlux || !bSpec || !bColoured)
 				{
 					++NeonBad;
-					Details += FString::Printf(TEXT(" neon:%s(%.1f lm vs %.1f, spec %.2f)"), *Light.Id.ToString(), L->Intensity, Want, L->SpecularScale);
+					Details += FString::Printf(TEXT(" neon:%s(%.1f lm x Y %.3f = %.1f vs %.1f, spec %.2f, colour %s)"), *Light.Id.ToString(), L->Intensity,
+						RbVenueLighting::Luminance(Color), Photometric, Want, L->SpecularScale, *Color.ToString());
 				}
 			}
 			if ((Light.bOutside || Light.bEnclosed) && L->VolumetricScatteringIntensity > 0.0f)
@@ -484,7 +491,8 @@ FString ARbVenueInfo::ValidateVenueLevel(const UObject* WorldContextObject, bool
 			}
 		}
 		Line(R, bOutOk, Missing == 0 && Info->Lights.Num() > 0, TEXT("venue lights bound (lights.json)"), FString::Printf(TEXT("%d listed, %d missing"), Info->Lights.Num(), Missing));
-		Line(R, bOutOk, NeonBad == 0, TEXT("VDB-T11 neon proxies: SpecularScale 0, flux = tube flux / pi (+-5 %)"), FString::Printf(TEXT("%d violation(s)"), NeonBad));
+		Line(R, bOutOk, NeonBad == 0, TEXT("VDB-T11 neon proxies: SpecularScale 0, photometric flux = tube flux / pi (+-5 %), coloured like the gases"),
+			FString::Printf(TEXT("%d violation(s)"), NeonBad));
 		Line(R, bOutOk, EnclosedBad == 0, TEXT("VDB-T11 outside / enclosed lights scatter 0"), FString::Printf(TEXT("%d violation(s)"), EnclosedBad));
 		Line(R, bOutOk, RampBad == 0, TEXT("VDB-T11 / T12 every state change ramps >= 0.8 s"), FString::Printf(TEXT("%d light(s) below"), RampBad));
 		Line(R, bOutOk, FlashBad == 0, TEXT("VDB-T8 photosensitivity (<= 3 flashes / s, headlights >= 20 s apart)"), FString::Printf(TEXT("worst %.0f flash(es) / s%s"), WorstFlash,
