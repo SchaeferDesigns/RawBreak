@@ -256,7 +256,16 @@ FRbKeyHintsModel FRbKeyHintsModel::BuildFromContext(const FRbKeyHintContext& C)
 	{
 		// LMB is routed to Confirm while placing (R-17), so the stroke button places too.
 		const FText PlaceKeys = FText::Format(LOCTEXT("PlaceKeys", "{0} / {1}"), C.KeyFor(TEXT("Stroke")), LastKey(Confirm));
-		if (!C.bHasBallInHand || C.BallInHand == ERbBallInHandState::Carrying || C.BallInHand == ERbBallInHandState::Inactive)
+		if (C.bHasBallInHand && C.BallInHand == ERbBallInHandState::Inactive)
+		{
+			// The carrying hand is empty while placing only when the cue ball lies off the table (18.6.1, integration round): it has to
+			// be picked up first (the gazed ball offers "Pick up the ball" above), nothing can be placed yet.
+			if (C.InteractionVerb.IsEmpty())
+			{
+				M.Note = LOCTEXT("FetchCueBall", "Pick up the cue ball first");
+			}
+		}
+		else if (!C.bHasBallInHand || C.BallInHand == ERbBallInHandState::Carrying)
 		{
 			Add(M, PlaceKeys, LOCTEXT("Place", "Place the cue ball"));
 			if (C.bHasBallInHand)

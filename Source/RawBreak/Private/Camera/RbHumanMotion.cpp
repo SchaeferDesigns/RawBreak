@@ -4,6 +4,19 @@
 
 // Owner: M2-F. The human head / body motion of the header (P5). Tests: RawBreak.Unit.HumanMotion.* (Private/Tests/RbHumanMotionTests.cpp).
 
+// Helpers whose names other files of the module also define (RbBallInHandComponent.cpp) live in a namespace named after this file:
+// the RawBreak module is a unity build and a merge can put those files into one blob (ue-architecture 18.12).
+namespace RbHumanMotion
+{
+	constexpr double kInternalStep = 1.0 / 480.0; // reaction spring sub-step
+
+	inline double SmoothStep(double U)
+	{
+		U = FMath::Clamp(U, 0.0, 1.0);
+		return U * U * (3.0 - 2.0 * U);
+	}
+}
+
 namespace
 {
 	constexpr double kSlowSpeed = 0.8;          // [m/s] of the 3 cm bob (Hirasaki et al. 1999)
@@ -14,7 +27,6 @@ namespace
 	constexpr double kSettleEnvelopeCm = 0.05;  // the posture change ends when the settle envelope is below 0.5 mm
 	constexpr double kDownBlendSeconds = 0.4;   // standing <-> down amplitude blend (never a jump of the sway / breathing)
 	constexpr double kPressureSeconds = 1.0;    // breathing follows a pressure change
-	constexpr double kInternalStep = 1.0 / 480.0; // reaction spring sub-step
 	constexpr double kReactionHistorySeconds = 1.0;
 	constexpr double kFlinchPeakSeconds = 0.065;  // 50-80 ms
 	constexpr double kFlinchSeconds = 0.6;
@@ -34,12 +46,6 @@ namespace
 	{
 		U = FMath::Clamp(U, 0.0, 1.0);
 		return U * U * U * (10.0 + U * (-15.0 + 6.0 * U));
-	}
-
-	double SmoothStep(double U)
-	{
-		U = FMath::Clamp(U, 0.0, 1.0);
-		return U * U * (3.0 - 2.0 * U);
 	}
 
 	// Seeded uniform in [A, B] (draw K of Seed).
@@ -170,7 +176,7 @@ void FRbHumanMotion::EvaluateProgress(const FRbPostureParams& P, double Seconds,
 	}
 	if (P.Style == ERbPostureTransition::Quick)
 	{
-		OutHorizontal = OutVertical = OutRotation = SmoothStep(Seconds / P.MainSeconds);
+		OutHorizontal = OutVertical = OutRotation = RbHumanMotion::SmoothStep(Seconds / P.MainSeconds);
 		return;
 	}
 	const bool bDown = IsDownward(P.Change);
@@ -327,12 +333,12 @@ void FRbHumanMotion::StepReaction(double Dt, const FRbHumanMotionInputs& Inputs,
 	// Critically damped pursuit, sub-stepped at a fixed rate (frame-rate independent).
 	const double Omega = UE_DOUBLE_TWO_PI * P.ReactionPursuitHz;
 	ReactionStepRemainder += Dt;
-	while (ReactionStepRemainder >= kInternalStep)
+	while (ReactionStepRemainder >= RbHumanMotion::kInternalStep)
 	{
-		ReactionStepRemainder -= kInternalStep;
+		ReactionStepRemainder -= RbHumanMotion::kInternalStep;
 		const FVector2D Accel = (Target - ReactionAngle) * (Omega * Omega) - ReactionVelocity * (2.0 * Omega);
-		ReactionVelocity += Accel * kInternalStep;
-		ReactionAngle += ReactionVelocity * kInternalStep;
+		ReactionVelocity += Accel * RbHumanMotion::kInternalStep;
+		ReactionAngle += ReactionVelocity * RbHumanMotion::kInternalStep;
 	}
 }
 

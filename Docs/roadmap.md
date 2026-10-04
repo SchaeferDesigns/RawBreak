@@ -27,10 +27,11 @@ Claude arbeitet autonom durch alle Limit-Fenster (der PC läuft durch, die Forts
 - Körper & Hände (MetaHuman – braucht einen Schritt vom Nutzer), Karriere, KI-Gegner, weitere Spielarten/Venues, Steam-Store-Page, Trailer (erst nach Freigabe durch den Nutzer)
 
 
-## M2 (läuft seit 28.09. abends; Plan + Stubs gemergt 29.09., 7 Pakete M2-F/L/A/B/C/D/E parallel in Arbeit)
-- [ ] Feel-Fixes aus dem Playtest (M2-F): P1 ruhige Kamera nach dem Stoß, P2 Hand trägt den Ball, P3 schnelles Zielen + Shift-Feinzielen, P5 menschliche Kopf-/Körperbewegung
-- [ ] Tisch- & Tuch-Look-Dev (M2-L, P4)
-- [ ] Dive Bar v1 (The Low Bridge Tavern, DB-0..DB-3 ohne Meshy-Props), Sound v1 (alle Physik-Sounds, Raumklang), Pause-/Settings-Menü v1, Kugeln fallen vom Tisch auf den Boden, Vorbereitung Mehr-Tisch-Räume → Integration + gepackter M2-Build
+## M2 (seit 28.09. abends; Plan + Stubs gemergt 29.09.; Integration `integ/m2` am 04.10.: alle 7 Pakete + M2-0 gemergt, 285/285 UE-Tests, 938/938 Core-Tests)
+- [x] Feel-Fixes aus dem Playtest (M2-F): P1 ruhige Kamera nach dem Stoß, P2 Hand trägt den Ball, P3 schnelles Zielen + Shift-Feinzielen, P5 menschliche Kopf-/Körperbewegung
+- [x] Tisch- & Tuch-Look-Dev (M2-L, P4)
+- [x] Dive Bar v1 (The Low Bridge Tavern, DB-0..DB-3 ohne Meshy-Props), Sound v1 (alle Physik-Sounds, Raumklang), Titel-/Pause-/Settings-Menü v1, Kugeln fallen vom Tisch auf den Boden, Vorbereitung Mehr-Tisch-Räume → Integration + gepackter M2-Build (`RawBreak_Builds/M2`, Startanleitung SO_STARTEST_DU.txt)
+- [ ] Playtest des Nutzers (P1–P5, Dive Bar, Sound, Menüs) → Feedback in M3 einarbeiten
 
 ## M3 (nach M2)
 - [ ] Arme & Hände (zuerst Unreal-Mannequin, später MetaHuman): Brückenhand auf dem Tuch (offen/geschlossen/Bande), Stoßhand am Queue, Kreiden, Hand-Unperfektheiten aus dem Human-Factors-Modell (zitternde Brückenhand unter Druck, kriechende Finger bei harten Stößen, weiße Knöchel, Hände an der Jeans abwischen, Queue auf dem Tisch rollen), alles mit menschlicher Kopf-/Körperbewegung gekoppelt

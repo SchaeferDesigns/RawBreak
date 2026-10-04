@@ -857,6 +857,14 @@ ball", gazed within 1.2 m, a `URbInteractionSubsystem` provider), or automatical
 rests in an `RbBallReturn` volume, falls below kill Z or lies unreachable for 20 s; a picked-up cue ball that is in hand goes into
 M2-F's carrying hand. Replays show the ball leaving and hide it at the hand-off time (no second loose actor). Events `OnImpact` /
 `OnRolling` (audio AU-25) and `OnReturned`. Physical materials by `rb_make_physics.py`.
+M2-E review additions (integration round): a loose ball that comes to lie on ANY table (a lamp rebound handed off above the bed, a
+bounce off furniture onto a rail) is taken off after `OnTableReturnSeconds` 0.3 s (`ERbLooseBallReturn::OnTable`, appended to the
+enum). **The cue ball:** while it lies loose, M2-F's hand does not take it at the start of the ball-in-hand placement
+(`URbStrokeComponent::BeginCueBallPlacement`), Confirm with the empty hand first tries the gazed pick-up
+(`ARbPlayerCharacter::HandleConfirm`) and never places a ball that is still on the floor; EVERY return of a loose cue ball while the
+director waits for the placement (pick-up, unreachable, return volume, kill Z, on a table, manual) puts it into the player's
+carrying hand (`URbLooseBallSubsystem::GiveCueBallToHand`), so the player is never left with nothing to place; a hand that already
+carries the cue ball returns a loose copy as `Carried`.
 
 #### 18.6.2 Several tables per level (how multi-table works)
 
@@ -1141,3 +1149,61 @@ package --label M2`; `rbue.py perf --exe <RawBreak_Builds>/M2/Windows/RawBreak.e
 * M2-A (information): `capture_divebar.py` starts one process per view and hides the ceiling / logs the EV through `ARbVenueInfo`
   (`RbVenue EV:`) instead of `--camera V01,V02,...`, `--hide-tags RbDB_Ceiling` and `RbCapture: EV100`; compatible with `rbue.py
   capture`, only slower (a shader / DDC warm start per view). Its choice; the multi-view path stays available.
+
+### 18.13 M2 integration (round 6, `integ/m2`, 2026-10-04)
+
+Branch `integ/m2` = `main` + `m20-reviewed` first (the runbook), then `m2e-`, `m2f-`, `m2d-`, `m2c-`, `m2l-`, `m2a-`, `m2b-reviewed`
+(`--no-ff`, the 18.2 order). Every merge textually clean; `rbue.py owners` OK on all seven package branches before their merge. All
+eight reviewed branches existed (no fallback to an unreviewed branch).
+
+**Integration fixes (applied by the architect at the merge; each one is a request of a review or found by this round)**
+
+| Area (owner) | Fix |
+|---|---|
+| Unity build (M2-F, request of the M2-0 review) | `RbHumanMotion.cpp` and `RbBallInHandComponent.cpp` both defined `kInternalStep` / `SmoothStep(double)` in an anonymous namespace (C2374 / C2084 once the M2-C merge put them into one blob); `RbBallInHandComponent.cpp`'s `LoadGenerated<T>` duplicated `RbBallSet.cpp`'s. The three helpers moved into namespaces named after their files (`RbHumanMotion::`, `RbBallInHandComponent::`), every use qualified. `rbue.py unity`: 0 collisions, 0 latent |
+| Config (M2-0, 18.12 step 4) | `GameDefaultMap` -> `L_Title`; `MapsToCook` + `L_Title`, `L_DiveBar` and its four sublevels (`_Geo`, `_Light_Open`, `_Light_LightsUp`, `_Light_AfterHours`); cook-list preflight `[]` |
+| Licence ledger (M2-0) | `rbue.py ledger --merge`: the 110 fragment rows of M2-A (25), M2-B (82), M2-L (3) merged into `asset-ledger.csv`; `--check` clean |
+| `Unit.MultiTable.NoSingleTableLookups` (M2-A / M2-E) | `RbDiveBarTest.cpp` counts / ignores the tables through `URbTableSubsystem::GetTables()` instead of `TActorIterator<ARbTable>`; the grep test's pending list keeps only the look-dev camera's cached fallback cue (M2-L), the resolved entries of M2-L / M2-F are gone |
+| `Functional.PauseMidShot` (M2-C, preferred option of the M2-0 review) | `URbAudioSubsystem::IsPausedMix()` reads the world's pause live (it lagged a resume by one tick); the mix ramp stays in the tick |
+| Audio renders in the tree (M2-C) | `RawBreak.Functional.Audio.*` write the master WAVs to `Saved/RbAudio/m2c/masters/`; `rbue.py test --sound --extra=-RbAudioWriteDocs` writes them into `Docs/audio/m2/` on purpose. A suite run no longer modifies the committed LFS renders |
+| `Functional.DiveBarRack` (M2-A vs M2-F) | the planner played draw plans (B = -0.3) through `RbStroke`, which strikes the centre: the oversized cue ball followed every straight-in. `PlanPot` now also returns the best centre (B = 0) plan; only that one goes through the human layer, a draw plan is played with `RbStrike`. A practice rack lost on three fouls is racked again instead of failing the "9 down" checks |
+| Cue ball off the table (M2-F vs M2-E, 18.6.1) | M2-F's `BeginCueBallPlacement` took the cue ball into the hand at once, so a cue ball lying on the floor vanished (`Unit.LooseBall.CueBallInHand` red). Now the hand does not take a loose cue ball; Confirm with the empty hand tries the gazed pick-up first and never places a ball still on the floor; every automatic return goes into the hand (M2-E). Key hints: an empty hand while placing shows "Pick up the cue ball first" (M2-D's hint model + test) |
+| Test room surfaces (M2-L, request of the M2-E review) | `ARbTestRoom` floor / walls / ceiling get `PM_RbSurface_Concrete` (loose balls bounced with the engine default, no surface type for the audio) |
+| Dive-bar floor (M2-A import vs M2-E physics) | the committed `SM_DB_Arch_Floor` had no physical material (M2-A imported it before M2-E's `PM_RbSurface_*` existed); the regeneration below sets `PM_RbSurface_Vct` (the new integration test asserts the VCT surface under a loose ball) |
+| L_DiveBar without M2-B's props (M2-A / M2-B) | M2-A's committed level was built before M2-B's props existed: every element was a greybox. Regenerated (below): 12 elements with M2-B meshes + 27 hero props, 20 greyboxes left (elements M2-B has not modelled yet) |
+| Hero pint H14b (M2-A layout) | `layout.json` stood "a pint left on the head rail" on the head-left corner pocket's jaws (y 4.93 = the side nose line); now on the head rail cap between the corner and the centre diamond (y 5.18) |
+| `Functional.DiveBar.CueSweeps` TS-4 (M2-A vs M2-B) | with M2-B's jukebox in place its hulls (body 2 cm, arched top 8 cm less deep than the E10 box) free the 58-in cue at 0.260 m instead of the box's 0.305 m; the test expects 0.260 +- 0.02 when the prop stands there, 0.305 for the greybox |
+| A2 metrics (M2-0) | `rb_make_all.py --compare` failed only on the editor's unique-name counters in the venue validator report (`RbTable_0` vs `RbTable_1`, `PointLight_0` vs `_15`); report lines are compared with `Name_#` |
+| New test (M2-0) | `RawBreak.Functional.M2Integration.{DiveBar,TestRoom}` (`RawBreakEditor/Private/Tests/RbM2IntegrationTest.cpp`): a complete 9-ball practice rack in the venue through the director (break, planned pots, ball in hand, decisions) until a rack is won; for EVERY shot the table's audio plan is built once and every impact event (strike, recontact, ball-ball, cushion / jaw / rail top, slate, liner / rim, pocketed) is scheduled as a sound or counted silent by design; then the 9 is sent over a side rail: handed to engine physics, lands, rests grounded on the venue floor's surface outside the table, every engine hit sounded, the foul spots the 9 on the foot spot, the next shot returns the loose 9 (Address) and the table shows it at the committed position |
+
+**Acceptance (18.10)**
+
+| # | Result |
+|---|---|
+| M2-A1 | `rbue.py build` and `--target RawBreak`: 0 errors, 0 compiler warnings (after every fix of this round) |
+| M2-A2 | `rbbl.py all -- --strict`: 16 Blender generators OK (164.7 s). `rb_make_all.py --strict`: 14 generators + the test dev level, M1 validator OK, venue validator OK (lamp-only lux of the analytic 4.4 model in every band; the UE direct-light trace below the bands as documented by M2-A); second run `--compare`: "A2: asset metrics identical". A regeneration from an EMPTY `Content/Generated` also runs through, but without the git-ignored raw CC0 downloads (`Art/Third`, `Tools/art/fetch_cc0.py`) M2-L's walnut / leather scans fall back to the procedural surfaces (by design of `rb_make_materials.py`); the committed content is the in-place regeneration (the CC0 textures kept) with the 64 stale assets the clean run does not produce removed (M2-A fallback / greybox instances replaced by M2-B's materials and props, two unused CC0 sets) |
+| M2-A3 | `rbue.py test --filter RawBreak. --sound`: **285 / 285** (285 found and completed, `TEST COMPLETE. EXIT CODE: 0`, 302 s; no working-tree change). `rbue.py core`: **938 / 938** (default run without `_Slow_`). `rbue.py ledger --check` clean, `selftest` OK, `unity` OK, `Tools/art/check_m2b.py` 0 problems |
+| M2-A4 | F1-F9 (`Unit.Feel.*`, `Unit.HumanMotion.*`, `Unit.BallInHand.*`, `Functional.Feel.*`) green in the suite; the owner's re-test of P1 / P2 / P3 / P5 is part of the playtest |
+| M2-A5 | `Docs/images/m2/{V01..V12,TH1..TH7}.png` (venue-dive-bar 12.1-12.3: every test and trailer camera, High, 1920x1080, strict) + `ev_report.txt`, inspected (below). Table look-dev captures: M2-L's of its review |
+| M2-A6 | `Functional.DiveBar.*` (validator, walkability with the real pawn, cue sweeps, rack) green; VDB-T2 bands: V01, V08, V12 in band; V02 3.47 (4.5-5.5), V03 5.50 (6.5-7.5), V04 6.04 (7.8-8.4), V05 5.76 (4.5-5.5) out - known since M2-A (darker cloth of M2-L's table than the greybox the bands were set with) |
+| M2-A7 | `Functional.Audio.*` green with `--sound`; L_DiveBar "10 room-tone layers, 9 of them at the level's RbAudio_* anchors (21 anchors)" as M2-C asked; `OnFootstep` (M2-F) and `OnImpact` / `OnRolling` / `OnReturned` (M2-E) are bound and fire (M2Integration: 6 / 11 loose-ball hits = 6 / 11 floor hits played); M2Integration: dive bar 13 shots, 151 impact events, all 151 scheduled; test room 11 shots, 134 events, 133 scheduled + 1 silent by design. The owner's listening test is open |
+| M2-A8 | `Functional.MenuFlow` (title -> dive bar hot-seat -> pause -> settings -> FOV 55 -> resume -> quit to title; "the camera rig follows the new FOV": M2-D's request to M2-F is resolved in the merged tree), `PauseMidShot`, `Unit.UI.*` green |
+| M2-A9 | logged, NOT a baseline (GPU 42 % busy before the run from foreign processes, 9 % after): packaged build, `L_DiveBar`, 2560x1440, High, `r.ScreenPercentage 66.67`, `rb.Match.Break 9`, 600 frames -> GPU mean 25.0 / p95 26.6 ms, frame p95 28.4 ms (over the 16.7 ms floor), game thread mean 1.14 / max 2.92 ms (< 6 ms) - `Docs/perf/m2/divebar_1440p.json`. The GPU cost of the dive bar is the open M3 item: an idle-GPU measurement first (M2-0 saw the same ~21-24 ms in the test room under foreign load), then the venue's lights / Lumen budget |
+| M2-A10 | `rbue.py package --label M2`: preflight `[]`, editor + game target 0 / 0, `BuildCookRun` BUILD SUCCESSFUL, no cook warning -> `RawBreak_Builds/M2/Windows/RawBreak.exe` (not in git). Started headless: the default map is the title (`Docs/images/m2/packaged/title.png`, `--show-ui`), `L_DiveBar` V01 / V04 render as in the editor (`packaged/divebar_RbCam_DB_{V01,V04}.png`), a muted-audio run plays a live break (shot 1 simulated in 4.4 ms, 199 events, room tone "10 layers, 9 at anchors", every voice "device found"). The owner's playtest is open; instructions in German: `RawBreak_Builds/M2/SO_STARTEST_DU.txt` |
+
+**Captures inspected** (`Docs/images/m2/`): the regeneration turned the greybox room into M2-B's bar (stools, booths, back bar with
+labelled bottles and the mug club, jukebox, dart machine, cue rack, ledges, signs, lamp with the Old Castor shades, chalk, drinks)
+around M2-L's 7-ft coin-op table; V04 / V06 / TH3 read as real. Seen and left: the 20 greybox elements (radiator, draft curtain,
+mats, ATM, coolers, POS, TV-1, popcorn machine, tap tower, beer clock, sconces, polaroid wall, ...) are plain boxes; the greybox ATM
+screen (TH7) and the cooler interiors (V05) clip to white at their spec luminance; TV-1 shows a half-noise picture; TH3's 100 mm f/2.8
+macro is soft (M2-A's note).
+
+**Requests that stay open** (owners in brackets): E05 / E02m rubber mats let loose balls fall through to the floor (`RbVenueProp`
+ignores `RbLooseBall`; M2-A); `ARbLookDevCamera`'s fallback cue lookup (M2-L); clipped greybox screens (M2-A / M2-B); VDB-T2 band
+re-derivation for M2-L's cloth and VDB-T3 class split (architect / M2-A); audio.md 7.3 should state that `IsPausedMix` follows the
+world pause live (M2-C); settings are saved when a menu closes, Alt+F4 inside the settings loses changes (M2-D); a reduced-motion
+upgrade has no backup of the motion rows (M2-D); M2-C's open list (T1 / T2 voice reduction, replay low-pass, `PauseLowPassHz`, loudness
+-32.4 LUFS vs -29); M2-F's doubts (stand-in sleeve, faint contact preview, Eyes stabilisation test true by construction, P3 not
+tested through real Enhanced Input events); `capture_divebar.py`'s URL option `?Game=NineBall` is the ENGINE's game-mode option
+("Failed to load game mode 'NineBall' specified by URL options", harmless: the World Settings mode runs; M2-A); the dive bar's GPU
+cost (M2-A9 above).

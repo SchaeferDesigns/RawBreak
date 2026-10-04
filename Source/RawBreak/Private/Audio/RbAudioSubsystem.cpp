@@ -789,6 +789,12 @@ void URbAudioSubsystem::SetPausedMix(bool bPaused)
 	bPausedMix = bPaused;
 }
 
+bool URbAudioSubsystem::IsPausedMix() const
+{
+	const UWorld* World = GetWorld();
+	return bPausedMix || (World && World->IsPaused());
+}
+
 float URbAudioSubsystem::StepMixGain(float Gain, bool bActive, double DepthDb, double AttackSeconds, double ReleaseSeconds, double Dt)
 {
 	// Linear in dB: the mix's whole depth in its stage time, both ways (a release of a -12 dB mix over 0.3 s is 40 dB/s; review M2-C:

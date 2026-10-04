@@ -3,6 +3,8 @@
 // Owner: UE-5a, M2-F. Stroke state machine (Docs/ue-architecture.md 6.2, 18.3; the header documents every rule).
 
 #include "RawBreak.h"
+#include "Balls/RbLooseBall.h"
+#include "Balls/RbLooseBallSubsystem.h"
 #include "Camera/RbCameraRigComponent.h"
 #include "Core/RbCoords.h"
 #include "Cue/RbCue.h"
@@ -34,6 +36,32 @@ namespace
 	double WrapAngle(double A)
 	{
 		return FMath::UnwindRadians(A);
+	}
+}
+
+namespace RbStrokeComponentLoose
+{
+	// The cue ball lies off the table: an ARbLooseBall of the table awaits its return (M2-E, 18.6.1). Without a table yet (a
+	// component the director arms before the pawn bound it), a loose cue ball of any table.
+	bool IsCueBallLoose(const UObject* WorldContext, const ARbTable* InTable)
+	{
+		const URbLooseBallSubsystem* Loose = URbLooseBallSubsystem::Get(WorldContext);
+		if (!Loose)
+		{
+			return false;
+		}
+		if (InTable)
+		{
+			return Loose->IsAwaitingReturn(InTable->TableIndex, 0);
+		}
+		for (const ARbLooseBall* Ball : Loose->GetLooseBalls())
+		{
+			if (Ball && Ball->GetBallId() == 0)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 }
 
@@ -209,9 +237,11 @@ void URbStrokeComponent::BeginCueBallPlacement()
 	bHasPlacement = false;
 	SetPhase(ERbStrokePhase::PlacingCueBall);
 	// The hand picks the cue ball up (again after a refused placement): carried over the look point until Confirm sets it down.
+	// A cue ball that lies off the table (M2-E's loose ball) is NOT taken from the floor at a distance: the player picks it up, or it
+	// comes back by itself (unreachable, return volume, ...) into this hand (18.6.1; integration round, M2-E request).
 	if (URbBallInHandComponent* Hand = FindBallInHand())
 	{
-		if (Hand->GetState() != ERbBallInHandState::Carrying && Hand->GetState() != ERbBallInHandState::Refused)
+		if (Hand->GetState() != ERbBallInHandState::Carrying && Hand->GetState() != ERbBallInHandState::Refused && !RbStrokeComponentLoose::IsCueBallLoose(this, Table.Get()))
 		{
 			const double R = Context.CueBall.Radius > 0.0 ? Context.CueBall.Radius : CueBallRadius;
 			Hand->BeginCarry(Table.Get(), 0, R, PlacementValidator);
@@ -454,6 +484,10 @@ void URbStrokeComponent::ConfirmPressed()
 			// hesitates at an illegal spot (Refused: nothing is placed).
 			Hand->RequestSetDown();
 			return;
+		}
+		if (RbStrokeComponentLoose::IsCueBallLoose(this, Table.Get()))
+		{
+			return; // the empty hand has nothing to put down: the cue ball still lies off the table (pick it up first)
 		}
 	}
 	const FVector World = bHasPlacement ? PlacementWorld : CoreToWorld(CueBallPosition);

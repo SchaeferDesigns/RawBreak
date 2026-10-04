@@ -22,6 +22,7 @@ turns a difference into a failure.
 
 import json
 import os
+import re
 import runpy
 import sys
 
@@ -144,8 +145,15 @@ def collect_metrics() -> dict:
 			report, ok = unreal.RbTestRoom.validate_m1_level(world)
 		else:
 			report, ok = unreal.RbVenueInfo.validate_venue_level(world)
-		metrics["levels"][level] = {"validator_ok": bool(ok), "report": str(report).splitlines()}
+		metrics["levels"][level] = {"validator_ok": bool(ok), "report": [_stable_line(line) for line in str(report).splitlines()]}
 	return metrics
+
+
+def _stable_line(line: str) -> str:
+	"""A validator report line without the editor's unique-name counters of actors / components (RbTable_0 vs RbTable_1,
+	PointLight_0 vs PointLight_15: a second run in the same level gets new numbers while the content is the same; integration
+	round M2, the --compare run failed on nothing else)."""
+	return re.sub(r"\b([A-Za-z][A-Za-z0-9]*)_\d+\b", r"\1_#", line)
 
 
 def diff(old, new, path: str = "") -> list:

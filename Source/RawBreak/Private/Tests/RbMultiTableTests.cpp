@@ -446,12 +446,11 @@ bool FRbMultiTableGrep::RunTest(const FString& Parameters)
 	const FRegexPattern Pattern(TEXT("(TActorIterator|TActorRange|TObjectIterator|TObjectRange)\\s*<\\s*(const\\s+)?ARb(Table|BallSet|Cue)\\s*>|")
 		TEXT("(GetAllActorsOfClass|GetActorOfClass|ForEachObjectOfClass|GetObjectsOfClass)\\s*\\([^;]*ARb(Table|BallSet|Cue)::StaticClass"));
 	const FString Allowed = TEXT("RbTableSubsystem.cpp");
-	// Files of other M2 packages with a lookup the M2-E report asks their owners to replace (removed here at the merge).
+	// Files of other M2 packages with a lookup the M2-E report asks their owners to replace (removed here at the merge). Integration
+	// round (integ/m2): RbTestRoom.cpp, RbCueDemo.cpp and RbPlayerCharacter.cpp no longer iterate; the look-dev camera's fallback
+	// cue (a look-dev level without a session) is the one accepted lookup left.
 	const TMap<FString, FString> Pending = {
-		{TEXT("RbTestRoom.cpp"), TEXT("M2-L: ARbTestRoom::FindTable / the validator -> URbTableSubsystem::GetPlayerTable / GetTables")},
-		{TEXT("RbLookDevCamera.cpp"), TEXT("M2-L: ARbLookDevCamera table / cue lookup -> URbTableSubsystem::GetPlayerTable, the player session's cue")},
-		{TEXT("RbCueDemo.cpp"), TEXT("M2-F: ARbCueDemo table lookup -> URbTableSubsystem::GetPlayerTable")},
-		{TEXT("RbPlayerCharacter.cpp"), TEXT("M2-F: ARbPlayerCharacter table fallback -> URbTableSubsystem::GetPlayerTable")},
+		{TEXT("RbLookDevCamera.cpp"), TEXT("M2-L: ARbLookDevCamera fallback cue lookup (no session in a look-dev level), cached once")},
 	};
 	int32 Violations = 0;
 	int32 PendingHits = 0;

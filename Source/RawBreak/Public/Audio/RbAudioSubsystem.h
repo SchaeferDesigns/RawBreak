@@ -76,9 +76,10 @@ public:
 	void ApplyVolumes();
 
 	// Pause-menu mix state (the UI calls it when it pauses / resumes the game; audio.md 7.3 CBM_RB_Pause). A paused world turns
-	// it on as well.
+	// it on as well. IsPausedMix reads the world's pause live (integration round, M2-0 request: a cached flag refreshed on the next
+	// tick lagged a resume by one frame); the ramp of the mix itself still runs in the tick.
 	void SetPausedMix(bool bPaused);
-	bool IsPausedMix() const { return bPausedMix || bWorldPausedMix; }
+	bool IsPausedMix() const;
 	// Current linear gains of the mix states (ramped; 1 = inactive).
 	float GetPauseMixGain() const { return PauseGain; }
 	float GetReplayMixGain() const { return ReplayGain; }

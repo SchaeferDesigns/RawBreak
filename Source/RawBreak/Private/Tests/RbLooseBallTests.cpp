@@ -660,9 +660,12 @@ bool FRbLooseBallCueBallInHand::RunTest(const FString& Parameters)
 	if (Stroke && Hand)
 	{
 		Stroke->RegisterComponent();
+		// The cue ball lies loose when the placement reaches the stroke component (as after a live shot that sent it off the table):
+		// M2-F's hand does not take it from the floor (18.6.1; integration round - M2-F's BeginCueBallPlacement carries a cue ball
+		// that is not lying loose at once).
+		TestNotNull(TEXT("cue ball loose again"), DropResting(*Loose, *D.Scene.Balls, 0, Center));
 		D.Director->SetStrokeComponent(Stroke);
 		TestEqual(TEXT("still waiting for the placement"), D.Director->GetPhase(), ERbDirectorPhase::AwaitPlacement);
-		TestNotNull(TEXT("cue ball loose again"), DropResting(*Loose, *D.Scene.Balls, 0, Center));
 		Loose->UpdateAutomaticReturns(0.1);
 		TestTrue(TEXT("an empty hand does not take a cue ball that lies loose"), Loose->IsAwaitingReturn(TableIndex, 0) && Hand->GetState() == ERbBallInHandState::Inactive);
 		TestTrue(TEXT("returned by itself (unreachable)"), Loose->ReturnBall(TableIndex, 0, ERbLooseBallReturn::Unreachable));

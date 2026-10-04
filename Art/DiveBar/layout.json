@@ -148,7 +148,7 @@
   {"id": "H06d", "asset": "ChalkCube", "at": [14.05, 5.08, 0.0], "yaw_deg": 61.0, "note": "chalk under the table"},
   {"id": "C08", "asset": "Ashtray_Glass", "at": [13.62, 3.54, 1.12], "note": "the old glass ashtray as the coin dish on the C3 shelf (S5)"},
   {"id": "H14a", "asset": "Glass_Pint_Beer", "at": [13.60, 3.76, 1.12], "note": "the opponent's pint on the C3 shelf (W1, A7)"},
-  {"id": "H14b", "asset": "Glass_Pint_Beer", "at": [12.66, 4.93, 0.791], "note": "a pint left on the head rail (A7, bad etiquette)"},
+  {"id": "H14b", "asset": "Glass_Pint_Beer", "at": [12.66, 5.18, 0.791], "note": "a pint left on the head rail (A7, bad etiquette); integration round: y 4.93 stood it on the corner pocket's jaws, now on the head rail cap between the corner and the centre diamond"},
   {"id": "H14c", "asset": "Can_LanternFlats", "at": [16.36, 6.05, 1.07], "yaw_deg": 40.0, "note": "a can on the back ledge (W2)"},
   {"id": "H14d", "asset": "Glass_Rocks", "at": [16.34, 6.55, 1.07], "note": "a rocks glass on the back ledge"},
   {"id": "H14e", "asset": "Glass_Pint", "at": [8.52, 1.93, 1.07], "note": "an empty pint on the bar at Deacon's stool (V02 foreground)"},

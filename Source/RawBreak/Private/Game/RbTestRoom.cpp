@@ -26,6 +26,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/PackageName.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "UObject/SoftObjectPath.h"
 
 #include "rb/Equipment/TableSpec.h"
@@ -460,9 +461,16 @@ void ARbTestRoom::BuildShell()
 	const double W = WallThickness;
 	const FVector S = InnerSize;
 	const FTransform Frame(FRotator(0.0, GetActorRotation().Yaw, 0.0), GetActorLocation());
+	// Floor and walls are concrete for loose balls (bounce, friction) and the audio's surface type (18.6.1; integration round,
+	// M2-E request: the engine default made them bounce with 0.7 / 0.3 and report no surface).
+	UPhysicalMaterial* Concrete = RbTestRoomPrivate::LoadIfExists<UPhysicalMaterial>(*RbTestRoomPrivate::ObjectPathOf(RbAssetPaths::PhysMatConcrete));
 	auto Box = [&](const TCHAR* Name, const FVector& LocalCenter, const FVector& Size, UMaterialInterface* Material)
 	{
-		AddBox(Name, Frame.TransformPosition(LocalCenter), Size, Frame.Rotator(), Material, false);
+		UStaticMeshComponent* Part = AddBox(Name, Frame.TransformPosition(LocalCenter), Size, Frame.Rotator(), Material, false);
+		if (Part && Concrete)
+		{
+			Part->SetPhysMaterialOverride(Concrete);
+		}
 	};
 	UMaterialInterface* Wall = WallMaterialOverride.IsNull() ? nullptr : WallMaterialOverride.LoadSynchronous();
 	Wall = Wall ? Wall : SurfaceMaterial(RbAssetPaths::MatRoomWall, WallAlbedo, 0.85f);

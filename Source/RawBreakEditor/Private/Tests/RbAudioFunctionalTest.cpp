@@ -10,7 +10,8 @@
 //                       every sound class of the plan found in the recording at its scheduled frame (event log vs onsets), the
 //                       gully runs, rolling, footsteps (OnFootstep path), a loose-ball floor hit, room tone at its level, the reverb
 //                       tail, no clipping after the master limiter (AU-T16), the audio render time per block (AU-T19); the master
-//                       mix is written to Docs/audio/m2/<venue>_break_master.wav, the stems to Saved/RbAudio/m2c/
+//                       mix is written to Saved/RbAudio/m2c/masters/<venue>_break_master.wav (Docs/audio/m2/ with
+//                       -RbAudioWriteDocs), the stems to Saved/RbAudio/m2c/
 //   MixReplayPauseVolumes  volume sliders (-12 dB at 0.5, the dry sound and its reverb return), the replay mix (ambience -10 dB) and film-style slow motion (x 0.25:
 //                       impacts 4 x farther apart), a pause mid-shot holds the table without a click and resumes, the pause mix
 //                       (World -12 dB and low-passed)
@@ -68,9 +69,15 @@ namespace RbAudioFunctional
 		return GEditor ? GEditor->PlayWorld.Get() : nullptr;
 	}
 
+	// The master renders go to Saved/RbAudio/m2c/masters/ by default (integration round, M2-0 request: a suite run must not rewrite
+	// the committed LFS renders); `rbue.py test --sound --extra=-RbAudioWriteDocs` writes them into Docs/audio/m2/ on purpose.
 	FString OutDir()
 	{
-		return FPaths::Combine(FPaths::ProjectDir(), TEXT("Docs/audio/m2"));
+		if (FParse::Param(FCommandLine::Get(), TEXT("RbAudioWriteDocs")))
+		{
+			return FPaths::Combine(FPaths::ProjectDir(), TEXT("Docs/audio/m2"));
+		}
+		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("RbAudio/m2c/masters"));
 	}
 
 	FString StemDir()

@@ -20,9 +20,32 @@
 // Owner: M2-F. The carrying hand of the header (P2): state machine, human follow (critically damped, sub-stepped, speed-limited),
 // exact set-down on the previewed target, the refusal hitch, the visuals (hand, carried ball, contact preview).
 
-namespace
+// Helpers whose names other files of the module also define (RbHumanMotion.cpp, RbBallSet.cpp) live in a namespace named after
+// this file: the RawBreak module is a unity build and a merge can put those files into one blob (ue-architecture 18.12).
+namespace RbBallInHandComponent
 {
 	constexpr double kInternalStep = 1.0 / 480.0;
+
+	inline double SmoothStep(double A)
+	{
+		A = FMath::Clamp(A, 0.0, 1.0);
+		return A * A * (3.0 - 2.0 * A);
+	}
+
+	template <class T>
+	T* LoadGenerated(const TCHAR* PackagePath)
+	{
+		if (!FPackageName::DoesPackageExist(PackagePath))
+		{
+			return nullptr;
+		}
+		const FString ObjectPath = FString::Printf(TEXT("%s.%s"), PackagePath, *FPackageName::GetShortName(PackagePath));
+		return LoadObject<T>(nullptr, *ObjectPath);
+	}
+}
+
+namespace
+{
 	constexpr double kReferenceRadius = 0.028575;   // the hand mesh is modelled around a 2 1/4 in ball
 	constexpr double kRefuseSeconds = 0.45;         // the hesitation
 	constexpr double kRefuseLiftCm = 0.8;
@@ -41,23 +64,6 @@ namespace
 	constexpr double kSmoothStepPeakSlope = 1.5;    // ... along a smoothstep, whose peak speed is 1.5 x the mean speed
 	const TCHAR* const kPreviewMaterial = TEXT("/Game/Generated/Player/M_RbContactPreview");
 	const TCHAR* const kPlaneMesh = TEXT("/Engine/BasicShapes/Plane.Plane");
-
-	double SmoothStep(double A)
-	{
-		A = FMath::Clamp(A, 0.0, 1.0);
-		return A * A * (3.0 - 2.0 * A);
-	}
-
-	template <class T>
-	T* LoadGenerated(const TCHAR* PackagePath)
-	{
-		if (!FPackageName::DoesPackageExist(PackagePath))
-		{
-			return nullptr;
-		}
-		const FString ObjectPath = FString::Printf(TEXT("%s.%s"), PackagePath, *FPackageName::GetShortName(PackagePath));
-		return LoadObject<T>(nullptr, *ObjectPath);
-	}
 
 	UStaticMeshComponent* NewVisual(AActor* Owner, USceneComponent* Parent, const TCHAR* Name)
 	{
@@ -325,13 +331,13 @@ void URbBallInHandComponent::TickCarry(double DeltaSeconds)
 		const double Omega = UE_DOUBLE_TWO_PI * FMath::Max(0.1, static_cast<double>(FollowHz));
 		const double MaxSpeed = FMath::Max(0.05, static_cast<double>(MaxHandSpeed));
 		StepRemainder += Dt;
-		while (StepRemainder >= kInternalStep)
+		while (StepRemainder >= RbBallInHandComponent::kInternalStep)
 		{
-			StepRemainder -= kInternalStep;
+			StepRemainder -= RbBallInHandComponent::kInternalStep;
 			const double Ax = Omega * Omega * (Target.x - HandPlan.x) - 2.0 * Omega * HandVelocity.x;
 			const double Ay = Omega * Omega * (Target.y - HandPlan.y) - 2.0 * Omega * HandVelocity.y;
-			double Vx = HandVelocity.x + Ax * kInternalStep;
-			double Vy = HandVelocity.y + Ay * kInternalStep;
+			double Vx = HandVelocity.x + Ax * RbBallInHandComponent::kInternalStep;
+			double Vy = HandVelocity.y + Ay * RbBallInHandComponent::kInternalStep;
 			const double V = FMath::Sqrt(Vx * Vx + Vy * Vy);
 			if (V > MaxSpeed)
 			{
@@ -339,7 +345,7 @@ void URbBallInHandComponent::TickCarry(double DeltaSeconds)
 				Vy *= MaxSpeed / V;
 			}
 			HandVelocity = rb::Vec2(Vx, Vy);
-			HandPlan = rb::Vec2(HandPlan.x + Vx * kInternalStep, HandPlan.y + Vy * kInternalStep);
+			HandPlan = rb::Vec2(HandPlan.x + Vx * RbBallInHandComponent::kInternalStep, HandPlan.y + Vy * RbBallInHandComponent::kInternalStep);
 		}
 		// Tremor (horizontal ~7 Hz + a slow drift; vertical only upward) and, when refused, the hesitation: a small lift and shake.
 		const double Tremor = 0.001 * TremorMm;
@@ -373,12 +379,12 @@ void URbBallInHandComponent::TickCarry(double DeltaSeconds)
 		// The hand lines the ball up with the target in the first part (at most at the hand's speed: LowerDuration, RequestSetDown) and
 		// sets it down on EXACTLY the target.
 		const double A = LowerDuration > 0.0 ? FMath::Clamp(StateTime / LowerDuration, 0.0, 1.0) : 1.0;
-		const double Align = SmoothStep(FMath::Min(1.0, kAlignRate * A));
+		const double Align = RbBallInHandComponent::SmoothStep(FMath::Min(1.0, kAlignRate * A));
 		ShownPlan = rb::Vec2(FMath::Lerp(LowerFrom.x, Target.x, Align), FMath::Lerp(LowerFrom.y, Target.y, Align));
 		// The hand lags behind the look point, so lining the ball up may pass over a ball next to the target: it goes over it,
 		// never through it (review). The margin fades out as the ball lines up: at a legal target, which touches no ball, the
 		// clearance is 0 and the ball lands. Coming in from outside the bed it stays over the rail as a carry does (0 on the bed).
-		ShownBottomCm = FMath::Max3(LowerFromBottomCm * (1.0 - SmoothStep(A)), ClearanceBottomCm(ShownPlan, kClearanceMarginCm * (1.0 - Align)),
+		ShownBottomCm = FMath::Max3(LowerFromBottomCm * (1.0 - RbBallInHandComponent::SmoothStep(A)), ClearanceBottomCm(ShownPlan, kClearanceMarginCm * (1.0 - Align)),
 			OutsideLiftCm(ShownPlan));
 		HandPlan = ShownPlan;
 		HandVelocity = rb::Vec2();
@@ -487,13 +493,13 @@ void URbBallInHandComponent::EnsureVisuals()
 		return;
 	}
 	HandMesh = NewVisual(Owner, this, TEXT("CarryHand"));
-	if (UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(RbAssetPaths::HandCarryMesh))
+	if (UStaticMesh* Mesh = RbBallInHandComponent::LoadGenerated<UStaticMesh>(RbAssetPaths::HandCarryMesh))
 	{
 		HandMesh->SetStaticMesh(Mesh);
 	}
 	HandMesh->SetCastShadow(true);
 	ArmMesh = NewVisual(Owner, this, TEXT("CarryArm"));
-	if (UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(RbHandMesh::ArmMeshPath))
+	if (UStaticMesh* Mesh = RbBallInHandComponent::LoadGenerated<UStaticMesh>(RbHandMesh::ArmMeshPath))
 	{
 		ArmMesh->SetStaticMesh(Mesh);
 	}
@@ -502,7 +508,7 @@ void URbBallInHandComponent::EnsureVisuals()
 	BallMesh->SetCastShadow(true);
 	PreviewMesh = NewVisual(Owner, this, TEXT("ContactPreview"));
 	PreviewMesh->SetCastShadow(false);
-	UMaterialInterface* PreviewMaterial = LoadGenerated<UMaterialInterface>(kPreviewMaterial);
+	UMaterialInterface* PreviewMaterial = RbBallInHandComponent::LoadGenerated<UMaterialInterface>(kPreviewMaterial);
 	if (PreviewMaterial)
 	{
 		PreviewMesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, kPlaneMesh));
@@ -587,7 +593,7 @@ void URbBallInHandComponent::UpdateVisuals()
 	FVector HandLocation = Ball;
 	if (State == ERbBallInHandState::Placed)
 	{
-		const double A = SmoothStep(StateTime / kReleaseSeconds);
+		const double A = RbBallInHandComponent::SmoothStep(StateTime / kReleaseSeconds);
 		HandLocation += (Shoulder - Ball).GetSafeNormal() * (18.0 * A) + FVector::UpVector * (4.0 * A);
 	}
 	const double Scale = BallRadius / kReferenceRadius;

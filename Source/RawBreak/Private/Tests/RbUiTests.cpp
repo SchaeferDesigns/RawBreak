@@ -904,6 +904,9 @@ bool FRbUiKeyHints::RunTest(const FString& Parameters)
 	TestTrue(TEXT("refused: a note, no key"), Text(C).StartsWith(TEXT("Not here")));
 	C.BallInHand = ERbBallInHandState::Lowering;
 	TestEqual(TEXT("lowering: nothing"), Text(C), FString());
+	// Integration round (18.6.1): an empty hand while placing = the cue ball lies off the table; it is picked up first.
+	C.BallInHand = ERbBallInHandState::Inactive;
+	TestEqual(TEXT("empty hand: a note, no place key"), Text(C), FString(TEXT("Pick up the cue ball first")));
 	C.DirectorPhase = ERbDirectorPhase::AwaitDecision;
 	TestEqual(TEXT("decision"), Text(C), FString(TEXT("[Q / E] Choose  [Enter / F] Confirm")));
 	C.DirectorPhase = ERbDirectorPhase::RackOver;

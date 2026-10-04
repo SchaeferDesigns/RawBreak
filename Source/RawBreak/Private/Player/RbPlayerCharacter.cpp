@@ -408,6 +408,16 @@ void ARbPlayerCharacter::HandleConfirm()
 {
 	if (Stroke->GetPhase() == ERbStrokePhase::PlacingCueBall)
 	{
+		// Ball in hand with an empty hand: the cue ball lies off the table (18.6.1) - a gazed pick-up takes the press first (the
+		// picked-up cue ball goes into the carrying hand); otherwise Confirm sets the carried ball down (integration round).
+		const URbBallInHandComponent* Hand = FindComponentByClass<URbBallInHandComponent>();
+		URbInteractionSubsystem* Interaction = URbInteractionSubsystem::Get(this);
+		const UCineCameraComponent* Eye = GetCamera();
+		if (Hand && Hand->GetState() == ERbBallInHandState::Inactive && Interaction && Eye &&
+			Interaction->TryInteract(*this, Eye->GetComponentLocation(), Eye->GetForwardVector()))
+		{
+			return;
+		}
 		Stroke->ConfirmPressed();
 		return;
 	}
