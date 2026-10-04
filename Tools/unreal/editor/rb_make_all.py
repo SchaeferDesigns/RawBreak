@@ -9,7 +9,9 @@ generator is added by the architect step, its script may be a stub until the pac
 Order: materials (UE-3; the bakes assign the generated part materials when they exist) -> baked table meshes (UE-1) -> ball
 mesh (UE-2) -> cue meshes (UE-4) -> M1 test room level (UE-8, validated by ARbTestRoom::ValidateM1Level). Each generator runs
 in this editor process with its own sys.argv; a generator that fails (RBUE_FAIL / exception) stops the run. A generator whose
-script does not exist yet is skipped with a warning (fails with --strict).
+script does not exist yet is skipped with a warning (fails with --strict). M2: the full list is GENERATORS below (18.9), then the
+dev levels that automation tests open (TEST_DEV_LEVELS, git-ignored /Game/Dev), so `rb_make_all.py` + `rbue.py test` work in a
+fresh tree.
 
 A2 ("regenerate from scratch; a second run gives the same asset metrics", byte-identical packages are not required because UE
 re-saves packages with new GUIDs): after the generators, the metrics of everything under /Game/Generated - static meshes
@@ -43,8 +45,16 @@ GENERATORS = [
 	("rb_make_test_room.py", "M2-L (UE-8)"),
 	("rb_make_divebar_materials.py", "M2-B"),        # venue masters, MI_DB_*, MPC_DB_Venue, decals
 	("rb_import_divebar.py", "M2-A"),                # Blender exports of M2-A / M2-B (Tools/blender/rbbl.py runs them first)
+	("rb_make_divebar_fx.py", "M2-A"),               # dust-mote material + glass-block light function (the level uses them if present)
 	("rb_make_divebar.py", "M2-A"),                  # L_DiveBar + sublevels + cameras + validator
 	("rb_make_title.py", "M2-D"),                    # L_Title
+]
+
+# Dev levels that automation tests open (scratch content under the git-ignored /Game/Dev, built after the generators because they
+# use the generated tables / physics materials): without them a fresh tree fails those tests ("... missing: run rb_dev_m2e.py";
+# found in the M2-0 review's integration dry run). Not part of the A2 metrics (those cover /Game/Generated only).
+TEST_DEV_LEVELS = [
+	("rb_dev_m2e.py", "M2-E"),                       # /Game/Dev/M2E/L_TwoTables: RawBreak.Functional.MultiTable / LooseBall
 ]
 
 # Level validators run after the generators: (map, validator name). A map that does not exist is skipped.
@@ -154,6 +164,7 @@ def main() -> None:
 	args = [a for a in sys.argv[1:] if a and not a.lower().endswith(".py")]
 	strict = "--strict" in args
 	ran = [script for script, owner in GENERATORS if run_generator(script, owner, strict)]
+	ran_dev = [script for script, owner in TEST_DEV_LEVELS if run_generator(script, owner, strict)]
 	metrics = collect_metrics()
 	metrics["generators"] = ran
 
@@ -168,8 +179,8 @@ def main() -> None:
 	for level, data in metrics["levels"].items():
 		if not data["validator_ok"]:
 			rb.fail(f"{level}: level validator failed")
-	rb.log(f"rb_make_all: {len(ran)} generator(s) {ran}; {len(metrics['meshes'])} meshes, {len(metrics['materials'])} materials, "
-		f"{len(metrics['levels'])} level(s) -> {METRICS}")
+	rb.log(f"rb_make_all: {len(ran)} generator(s) {ran}, test dev level(s) {ran_dev}; {len(metrics['meshes'])} meshes, "
+		f"{len(metrics['materials'])} materials, {len(metrics['levels'])} level(s) -> {METRICS}")
 	if previous is not None:
 		changes = diff(previous, metrics)
 		if changes:
