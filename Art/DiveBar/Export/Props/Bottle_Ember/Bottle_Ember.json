@@ -1,0 +1,84 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Bottle_Ember",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "body_diameter_m": 0.072,
+ "bounds_max_m": [
+  0.03628,
+  0.0364,
+  0.32764
+ ],
+ "bounds_min_m": [
+  -0.036,
+  -0.0364,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.03628,
+  0.0364,
+  0.32764
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.036,
+  -0.0364,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueProp",
+ "design": {
+  "H": 0.28,
+  "R": 0.036,
+  "closure": "pourer",
+  "fill": 0.25,
+  "glass": "Glass_Clear",
+  "hb": 0.16,
+  "hs": 0.055,
+  "kind": "spirit",
+  "label": "bottle_ember",
+  "label_z": 0.083,
+  "liquid": "Liquid_Red",
+  "rn": 0.0135,
+  "shoulder": "round"
+ },
+ "external_inputs": [],
+ "family": "Bottles",
+ "fbx": "SM_DB_Bottle_Ember.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "bf9a45c8ff81cd5ecc0f3fd7c305e7a580c82d518193f790a1363ab862e51597",
+ "glass_height_m": 0.28,
+ "ledger_asset_id": "SM_DB_Bottle_Ember",
+ "material_slots": [
+  "MI_DB_Glass_Clear",
+  "MI_DB_Liquid_Red",
+  "MI_DB_Label_Atlas",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Steel_Stainless"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "C02",
+ "target_dimensions_m": [
+  0.07228,
+  0.072,
+  0.32764
+ ],
+ "tolerance_m": 0.01,
+ "translucent": true,
+ "triangles": 2752,
+ "triangles_render": 2680,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Bottles",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Bottles/SM_DB_Bottle_Ember",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Bottle_Ember/T_DB_Bottle_Ember_WM.png"
+}

@@ -144,6 +144,73 @@ float3 RbBallAlbedo(float3 P, float BallNumber, float3 BaseColor, float3 White, 
 	return Albedo;
 }
 
+// ---- worn bar balls (M2-L; venue-dive-bar 3.2 / 6.4, plan 6.2 "worn bar balls") ----------------------------------------------
+
+// Smooth 3D value noise in [-1, 1] (trilinear quintic of lattice hashes).
+float RbValueNoise3(float3 P)
+{
+	const float3 I = floor(P);
+	const float3 F = P - I;
+	const float3 U = F * F * F * (F * (F * 6.0 - 15.0) + 10.0);
+	const int3 C = int3(I);
+	const float N000 = RbHash3(C);
+	const float N100 = RbHash3(C + int3(1, 0, 0));
+	const float N010 = RbHash3(C + int3(0, 1, 0));
+	const float N110 = RbHash3(C + int3(1, 1, 0));
+	const float N001 = RbHash3(C + int3(0, 0, 1));
+	const float N101 = RbHash3(C + int3(1, 0, 1));
+	const float N011 = RbHash3(C + int3(0, 1, 1));
+	const float N111 = RbHash3(C + int3(1, 1, 1));
+	const float X0 = lerp(lerp(N000, N100, U.x), lerp(N010, N110, U.x), U.y);
+	const float X1 = lerp(lerp(N001, N101, U.x), lerp(N011, N111, U.x), U.y);
+	return lerp(X0, X1, U.z) * 2.0 - 1.0;
+}
+
+// Per-ball wear on the unit sphere (P: ball-local position, any radius): grime (a greyish film, darker in patches), collision
+// scuffs (small dull, lighter rings where balls hit each other), blue chalk marks (mostly on the cue ball), and a per-ball
+// roughness from RoughnessMin .. RoughnessMax (seeded by the number; the 3 of a mismatched set too). Dirt / Chalk 0 = a clean set
+// (M1: nothing changes). Returns the albedo; Roughness in / out.
+float3 RbBallWear(float3 P, float BallNumber, float3 Albedo, float Dirt, float Chalk, float RoughnessMin, float RoughnessMax, inout float Roughness)
+{
+	const float3 N = normalize(P);
+	const int Number = clamp((int)round(BallNumber), 0, 15);
+	const float Seed = float(Number) * 7.31 + 1.7;
+	const float PerBall = RbHash2(int2(Number, 911));
+	Roughness = RoughnessMax > RoughnessMin ? lerp(RoughnessMin, RoughnessMax, PerBall) : Roughness;
+	if (Dirt <= 0.0 && Chalk <= 0.0)
+	{
+		return Albedo;
+	}
+	// Grime: two octaves on the sphere (~8 mm and ~3 mm on a 57 mm ball), pulling toward a grey-brown film.
+	const float G = 0.6 * RbValueNoise3(N * 4.0 + Seed) + 0.4 * RbValueNoise3(N * 11.0 - Seed);
+	const float Film = Dirt * saturate(0.45 + 0.8 * G);
+	const float3 Grime = float3(0.30, 0.27, 0.22) * (0.5 + 0.5 * RbLuminance(Albedo) / 0.5);
+	float3 Out = lerp(Albedo, min(Albedo, Grime) * 0.9 + Albedo * 0.1, 0.35 * Film);
+	Out *= 1.0 - 0.10 * Dirt * saturate(G);
+	Roughness = saturate(Roughness + 0.05 * Film);
+	// Collision scuffs: 10 seeded spots, each a thin ring ~3 mm across (1 unit = the ball radius, 28.6 mm).
+	float Scuff = 0.0;
+	for (int I = 0; I < 10; ++I)
+	{
+		const float3 H = float3(RbHash2(int2(Number, 31 * I + 1)), RbHash2(int2(Number, 31 * I + 2)), RbHash2(int2(Number, 31 * I + 3)));
+		const float Z = H.x * 2.0 - 1.0;
+		const float Phi = H.y * RB_TWO_PI;
+		const float3 C = float3(sqrt(saturate(1.0 - Z * Z)) * cos(Phi), sqrt(saturate(1.0 - Z * Z)) * sin(Phi), Z);
+		const float D = length(N - C);
+		const float R = 0.045 + 0.05 * H.z;
+		Scuff = max(Scuff, (1.0 - smoothstep(0.004, 0.012, abs(D - R))) * (0.5 + 0.5 * H.z) + 0.35 * (1.0 - smoothstep(0.0, R, D)));
+	}
+	Scuff *= Dirt;
+	Out = lerp(Out, Out + 0.035 * (1.0 - RbLuminance(Out)), Scuff);
+	Roughness = saturate(Roughness + 0.12 * Scuff);
+	// Chalk: blue smudges; the cue ball carries most of them (tip contacts).
+	const float ChalkShare = Chalk * (Number == 0 ? 1.0 : 0.25);
+	const float Blot = saturate(RbValueNoise3(N * 6.0 + Seed * 3.0) * 2.2 - 0.9) * saturate(RbValueNoise3(N * 25.0) + 0.6);
+	Out = lerp(Out, float3(0.20, 0.34, 0.60) * (0.4 + 0.6 * RbLuminance(Out) / 0.5), 0.6 * ChalkShare * Blot);
+	Roughness = saturate(Roughness + 0.3 * ChalkShare * Blot);
+	return Out;
+}
+
 // Mean free path of the resin [cm] for the slab's SSS (plan 6.2: 0.5-2 mm, light balls scatter further). MfpFraction is
 // the MFP of a white ball relative to the ball radius.
 float3 RbBallMfp(float3 Albedo, float BallRadiusCm, float MfpFraction)

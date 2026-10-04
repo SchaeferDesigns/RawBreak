@@ -1,0 +1,53 @@
+{
+ "acoustic_material": "glass",
+ "asset_id": "Neon_Hollenbeck",
+ "bounds_max_m": [
+  9.33403,
+  0.0825,
+  2.64404
+ ],
+ "bounds_min_m": [
+  7.66429,
+  0.0,
+  2.13
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 0,
+ "design": "Art/DiveBar/neon/N3.svg",
+ "electrodes": 4,
+ "external_inputs": [],
+ "family": "Neon",
+ "fbx": "SM_DB_Neon_Hollenbeck.fbx",
+ "frame": "venue",
+ "generator": "db_neon.py",
+ "material_slots": [
+  "MI_DB_Neon_StdBlue",
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Steel_Black",
+  "MI_DB_Neon_White",
+  "MI_DB_Neon_Dead",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Rubber_Black"
+ ],
+ "mesh": "SM_DB_Neon_Hollenbeck",
+ "min_bend_radius_m": 0.02,
+ "notes": "emissive tubes out of Lumen GI (the proxy rect light lights the room, 4.1); dead segments steady off (S8)",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "profile": "RbVenueProp",
+ "proxy_flux_lm": 662.2,
+ "sign": "N3",
+ "supports": 15,
+ "triangles": 8800,
+ "tube_diameter_m": 0.015,
+ "tube_flux_lm": {
+  "StdBlue": 910.4,
+  "White": 1170.1
+ },
+ "tube_flux_total_lm": 2080.5,
+ "tube_length_m": {
+  "StdBlue": 2.402,
+  "White": 1.215
+ },
+ "ue_folder": "Lighting/Neon"
+}

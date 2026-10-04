@@ -21,8 +21,8 @@
 
 #include "RbCameraModel.generated.h"
 
-// Procedural head motion (plan 4.8): physiology, the same for every preset (the preset scales the translation and decides
-// whether the rotation is gaze-stabilised). Peak-to-peak / amplitude values of the head, before HeadTranslationScale.
+// Procedural head motion (plan 4.8; FRbHumanMotion, M2-F): physiology, the same for every preset (the preset scales the translation
+// and decides whether the rotation is gaze-stabilised). Peak-to-peak / amplitude values of the head, before HeadTranslationScale.
 USTRUCT(BlueprintType)
 struct FRbHeadMotionParams
 {
@@ -42,6 +42,19 @@ struct FRbHeadMotionParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settle") double SettleSeconds = 1.5;          // ... over 1-2 s (HF-06)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Headcam") double HeadPitchPerCmBob = 0.12;    // [deg / cm] head nod with the bob (no VOR)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Headcam") double HeadRollPerCmSway = 0.25;    // [deg / cm] roll with the stride sway
+	// --- M2-F (P5): pressure, reactions, flinch --------------------------------------------------------------------------
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing") double BreathRateCalmFactor = 0.88;     // x BreathRateHz at pressure 0 (0.22 Hz)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing") double BreathRatePressureFactor = 1.20; // x BreathRateHz at pressure 1 (0.30 Hz)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sway") double PressureTremorMm = 0.15;              // head tremor share at full pressure
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction") double ReactionLatencySeconds = 0.17;    // smooth pursuit starts 150-200 ms late
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction") double ReactionFollowFraction = 0.3;     // the head turns this share, the eyes the rest
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction") double ReactionMaxYawDeg = 10.0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction") double ReactionMaxPitchDeg = 6.0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction") double ReactionPursuitHz = 0.8;         // critically damped head pursuit (slow lean / turn)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction") double ReactionLeanCmPerDeg = 0.08;      // the head leans toward the turn
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction") double FlinchBackMm = 4.0;              // at loudness 1, peak after 65 ms
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reaction") double FlinchPitchDeg = 0.3;
+
 };
 
 USTRUCT(BlueprintType)

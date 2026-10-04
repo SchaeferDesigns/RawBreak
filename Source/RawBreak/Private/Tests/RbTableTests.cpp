@@ -136,6 +136,53 @@ namespace RbTableTestsPrivate
 		return Best;
 	}
 
+	// True if the mesh vertices A and B are joined by a chain of mesh edges whose interior vertices all lie on the segment A-B (within
+	// Tol, strictly advancing from A to B): a straight physics segment reproduced exactly, possibly split by collinear vertices (M2-L:
+	// the nose roll's stations split the straight nose line; every vertex stays on it).
+	bool IsCollinearEdgeChain(const FDynamicMesh3& Mesh, int32 A, int32 B, double Tol)
+	{
+		if (A < 0 || B < 0)
+		{
+			return false;
+		}
+		const FVector3d PA = Mesh.GetVertex(A);
+		const FVector3d AB = Mesh.GetVertex(B) - PA;
+		const double Len2 = AB.SquaredLength();
+		if (Len2 < 1e-20)
+		{
+			return false;
+		}
+		int32 Cur = A;
+		double CurT = 0.0;
+		for (int32 Guard = 0; Guard < 4096 && Cur != B; ++Guard)
+		{
+			int32 Next = IndexConstants::InvalidID;
+			double NextT = TNumericLimits<double>::Max();
+			for (const int32 Nb : Mesh.VtxVerticesItr(Cur))
+			{
+				if (Nb == B)
+				{
+					Next = B;
+					break;
+				}
+				const FVector3d P = Mesh.GetVertex(Nb);
+				const double T = (P - PA).Dot(AB) / Len2;
+				if (T > CurT + 1e-12 && T < 1.0 && (PA + AB * T - P).Size() <= Tol && T < NextT)
+				{
+					Next = Nb;
+					NextT = T;
+				}
+			}
+			if (Next == IndexConstants::InvalidID)
+			{
+				return false;
+			}
+			Cur = Next;
+			CurT = NextT;
+		}
+		return Cur == B;
+	}
+
 	// Plan distance of P to the closed polyline Loop (UE cm).
 	double DistToLoop(const TArray<FVector2d>& Loop, const FVector2d& P)
 	{
@@ -204,6 +251,24 @@ namespace RbTableTestsPrivate
 		}
 	};
 
+	// M2-L: parts differ per base style (the coin-op parts are empty on a legs table).
+	ERbTableBaseStyle StyleOf(ERbTablePreset Preset)
+	{
+		return RbTableMeshBuilder::ResolveBaseStyle(rb::GetTableSpec(RbTypes::ToCore(Preset)), FRbTableMeshOptions());
+	}
+
+	bool Expected(ERbTablePreset Preset, ERbTablePart Part) { return RbTableMeshBuilder::PartExpected(StyleOf(Preset), Part); }
+
+	int32 ExpectedPartCount(ERbTablePreset Preset)
+	{
+		int32 Count = 0;
+		for (int32 PartIndex = 0; PartIndex < static_cast<int32>(ERbTablePart::Count); ++PartIndex)
+		{
+			Count += Expected(Preset, static_cast<ERbTablePart>(PartIndex)) ? 1 : 0;
+		}
+		return Count;
+	}
+
 	int32 CountPartComponents(const AActor* Actor)
 	{
 		TInlineComponentArray<UPrimitiveComponent*> Components(Actor);
@@ -234,6 +299,11 @@ bool FRbTableClosedBoundaries::RunTest(const FString& Parameters)
 			const ERbTablePart Part = static_cast<ERbTablePart>(PartIndex);
 			const FDynamicMesh3& Mesh = Built->Meshes.Get(Part);
 			const FString Name = Label(Preset, Part);
+			if (!Expected(Preset, Part))
+			{
+				TestEqual(Name + TEXT(" is empty in this base style"), Mesh.TriangleCount(), 0);
+				continue;
+			}
 			TestTrue(Name + TEXT(" has triangles"), Mesh.TriangleCount() > 0);
 			TestTrue(Name + TEXT(" is valid"), Mesh.CheckValidity(FDynamicMesh3::FValidityOptions(), EValidityCheckFailMode::ReturnOnly));
 			int32 BoundaryEdges = 0;
@@ -284,6 +354,10 @@ bool FRbTableOutwardNormals::RunTest(const FString& Parameters)
 			const ERbTablePart Part = static_cast<ERbTablePart>(PartIndex);
 			const FDynamicMesh3& Mesh = Built->Meshes.Get(Part);
 			const FString Name = Label(Preset, Part);
+			if (!Expected(Preset, Part))
+			{
+				continue;
+			}
 
 			FMeshConnectedComponents Components(&Mesh);
 			Components.FindConnectedTriangles();
@@ -294,7 +368,16 @@ bool FRbTableOutwardNormals::RunTest(const FString& Parameters)
 				if (!(Volume > 1e-3)) // cm^3; the smallest solid (a sight inlay) has ~0.4 cm^3
 				{
 					++Inverted;
-					AddError(FString::Printf(TEXT("%s: solid %d has volume %.6g cm^3 (inward or degenerate)"), *Name, c, Volume));
+					FAxisAlignedBox3d Box = FAxisAlignedBox3d::Empty();
+					for (const int32 Tid : Components[c].Indices)
+					{
+						const FIndex3i T = Mesh.GetTriangle(Tid);
+						Box.Contain(Mesh.GetVertex(T.A));
+						Box.Contain(Mesh.GetVertex(T.B));
+						Box.Contain(Mesh.GetVertex(T.C));
+					}
+					AddError(FString::Printf(TEXT("%s: solid %d has volume %.6g cm^3 (inward or degenerate), bounds %s .. %s"), *Name, c, Volume,
+						*FVector(Box.Min).ToString(), *FVector(Box.Max).ToString()));
 				}
 			}
 			TestEqual(Name + TEXT(" solids with outward orientation"), Components.Num() - Inverted, Components.Num());
@@ -317,7 +400,13 @@ bool FRbTableOutwardNormals::RunTest(const FString& Parameters)
 				FVector3f N1;
 				FVector3f N2;
 				Normals->GetTriElements(Tid, N0, N1, N2);
-				Disagree += FVector3d(N0 + N1 + N2).Dot(Face) > 0.0 ? 0 : 1;
+				const bool bAgree = FVector3d(N0 + N1 + N2).Dot(Face) > 0.0;
+				if (!bAgree && Disagree < 3)
+				{
+					AddError(FString::Printf(TEXT("%s: triangle %d (%s, %s, %s) face %s shading %s"), *Name, Tid, *FVector(A).ToString(), *FVector(B).ToString(),
+						*FVector(C).ToString(), *FVector(Face).ToString(), *FVector(N0 + N1 + N2).ToString()));
+				}
+				Disagree += bAgree ? 0 : 1;
 			}
 			TestEqual(Name + TEXT(" triangles whose shading normals oppose the face"), Disagree, 0);
 			TestTrue(Name + TEXT(" has UVs and tangents"), Mesh.Attributes()->NumUVLayers() > 0 && Mesh.Attributes()->HasTangentSpace());
@@ -411,7 +500,8 @@ bool FRbTableNoseLine::RunTest(const FString& Parameters)
 		for (int32 i = 0; i < Count; ++i)
 		{
 			const int32 j = (i + 1) % Count;
-			if (Vids[i] != IndexConstants::InvalidID && Vids[j] != IndexConstants::InvalidID && Mesh.FindEdge(Vids[i], Vids[j]) == IndexConstants::InvalidID)
+			if (Vids[i] != IndexConstants::InvalidID && Vids[j] != IndexConstants::InvalidID && Mesh.FindEdge(Vids[i], Vids[j]) == IndexConstants::InvalidID
+				&& !IsCollinearEdgeChain(Mesh, Vids[i], Vids[j], kTolCm))
 			{
 				++MissingEdges;
 			}
@@ -445,13 +535,14 @@ bool FRbTableNoseLine::RunTest(const FString& Parameters)
 		TestTrue(Name + TEXT(" has vertices at z = h"), AtH >= Count - 12);
 		TestEqual(Name + TEXT(" vertices at z = h off the outline"), OffLine, 0);
 
-		// (3) the nose segments themselves (NoseSegment::Start / End at h) are edges of the mesh, and the cushion never
-		// rises above the cushion-top plane / RailTopZ.
+		// (3) the nose segments themselves (NoseSegment::Start / End at h) are edges of the mesh (or a chain of collinear edges on
+		// the segment: M2-L's nose-roll stations), and the cushion never rises above the cushion-top plane / RailTopZ.
 		for (const rb::NoseSegment& Nose : G.Noses)
 		{
 			const int32 A = FindVertex(Mesh, ToUECm(Nose.Start, H), kTolCm);
 			const int32 B = FindVertex(Mesh, ToUECm(Nose.End, H), kTolCm);
-			TestTrue(Name + TEXT(" nose segment is a mesh edge"), A >= 0 && B >= 0 && Mesh.FindEdge(A, B) != IndexConstants::InvalidID);
+			TestTrue(Name + TEXT(" nose segment is a mesh edge chain"),
+				A >= 0 && B >= 0 && (Mesh.FindEdge(A, B) != IndexConstants::InvalidID || IsCollinearEdgeChain(Mesh, A, B, kTolCm)));
 		}
 		const FAxisAlignedBox3d Box = Bounds(Mesh);
 		TestNearlyEqual(Name + TEXT(" top = RailTopZ"), Box.Max.Z, FRbCoords::CmPerMeter * G.Spec.RailTopZ, 1e-6);
@@ -519,11 +610,19 @@ bool FRbTablePocketCuts::RunTest(const FString& Parameters)
 			TestNearlyEqual(PocketName + TEXT(" a_d = r_p + r_d"), Ad, Rp + Rd, 1e-9);
 
 			// Nothing of the table reaches inside the capture cylinder r_p (the hole through slate, cushions, collar and rails):
-			// the bed, the cushions and the liner collar are cut at r_p, the rails behind the collar at r_p + LinerThickness.
-			const double Rc = Rp + Built->Options.LinerThicknessCm;
-			for (const ERbTablePart Part : {ERbTablePart::Bed, ERbTablePart::CushionCloth, ERbTablePart::RailCaps, ERbTablePart::Apron, ERbTablePart::PocketLiners})
+			// the bed, the cushions and the liner collar are cut at r_p, the rails behind the collar at r_p + LinerThickness (M2-L:
+			// on the coin-op table the castings replace the rails around the pockets; the caps / rail body end before them).
+			const double Rc = Rp + RbTableMeshBuilder::ResolveLinerThicknessCm(G.Spec, Built->Options);
+			const bool bCabinet = StyleOf(Preset) == ERbTableBaseStyle::Cabinet;
+			for (const ERbTablePart Part : {ERbTablePart::Bed, ERbTablePart::CushionCloth, ERbTablePart::RailCaps, ERbTablePart::Apron, ERbTablePart::PocketLiners,
+					 ERbTablePart::Castings, ERbTablePart::RubberStrip})
 			{
-				const bool bRail = Part == ERbTablePart::RailCaps || Part == ERbTablePart::Apron;
+				if (!Expected(Preset, Part))
+				{
+					continue;
+				}
+				const bool bRail = Part == ERbTablePart::RailCaps || Part == ERbTablePart::Apron || Part == ERbTablePart::Castings;
+				const bool bMustBeCut = Part != ERbTablePart::CushionCloth && Part != ERbTablePart::RubberStrip && !(bCabinet && bRail && Part != ERbTablePart::Castings);
 				const double CutRadius = bRail ? Rc : Rp;
 				const FDynamicMesh3& Mesh = Built->Meshes.Get(Part);
 				double MinRho = TNumericLimits<double>::Max();
@@ -544,7 +643,7 @@ bool FRbTablePocketCuts::RunTest(const FString& Parameters)
 				}
 				const FString Name = PocketName + TEXT(" ") + RbTypes::ToString(Part);
 				TestTrue(Name + TEXT(" stays outside its cut cylinder"), MinRho > CutRadius - kTolCm);
-				if (Part != ERbTablePart::CushionCloth)
+				if (bMustBeCut)
 				{
 					TestTrue(Name + TEXT(" is cut by its cylinder"), OnCylinder >= 8);
 				}
@@ -632,7 +731,7 @@ bool FRbTablePocketCuts::RunTest(const FString& Parameters)
 				const double Dist = bOnX ? FMath::Abs(C.X - B.X) : FMath::Abs(C.Y - B.Y);
 				const double ToHole = FMath::Abs(((C - B).Dot(Along))) - FMath::Sqrt(FMath::Max(0.0, Rp * Rp - Dist * Dist));
 				int32 Exposed = 0;
-				for (const ERbTablePart Rail : {ERbTablePart::RailCaps, ERbTablePart::Apron})
+				for (const ERbTablePart Rail : {ERbTablePart::RailCaps, ERbTablePart::Apron, ERbTablePart::Castings})
 				{
 					const FDynamicMesh3& Mesh = Built->Meshes.Get(Rail);
 					for (const int32 Vid : Mesh.VertexIndicesItr())
@@ -646,23 +745,31 @@ bool FRbTablePocketCuts::RunTest(const FString& Parameters)
 				TestEqual(Name + TEXT(": rail vertices on the open cushion-back stretch"), Exposed, 0);
 			}
 
-			// Drop pocket: outer radius r_p, hanging from the slate bottom; collar outer radius r_p + LinerThickness.
-			const FDynamicMesh3& Liners = Built->Meshes.Get(ERbTablePart::PocketLiners);
+			// Drop pocket (M2-L: the PocketBuckets part): outer radius r_p, hanging from the slate bottom; liner collar (PocketLiners)
+			// outer radius r_p + LinerThickness up to the rail top.
 			double MaxRhoBelow = 0.0;
 			double MinZ = TNumericLimits<double>::Max();
 			double MaxZ = -TNumericLimits<double>::Max();
+			const FDynamicMesh3& Buckets = Built->Meshes.Get(ERbTablePart::PocketBuckets);
+			int32 BucketAbove = 0;
+			for (const int32 Vid : Buckets.VertexIndicesItr())
+			{
+				const FVector3d V = Buckets.GetVertex(Vid);
+				if (PlanDist(V, C) < Rc + 1.0)
+				{
+					MaxRhoBelow = FMath::Max(MaxRhoBelow, PlanDist(V, C));
+					MinZ = FMath::Min(MinZ, V.Z);
+					BucketAbove += V.Z > -T + 1e-6 ? 1 : 0;
+				}
+			}
+			TestEqual(PocketName + TEXT(" bucket vertices above the slate bottom"), BucketAbove, 0);
+			const FDynamicMesh3& Liners = Built->Meshes.Get(ERbTablePart::PocketLiners);
 			for (const int32 Vid : Liners.VertexIndicesItr())
 			{
 				const FVector3d V = Liners.GetVertex(Vid);
-				const double Rho = PlanDist(V, C);
-				if (Rho < Rc + 1.0)
+				if (PlanDist(V, C) < Rc + 1.0)
 				{
 					MaxZ = FMath::Max(MaxZ, V.Z);
-					if (V.Z < -T - 1e-6)
-					{
-						MaxRhoBelow = FMath::Max(MaxRhoBelow, Rho);
-						MinZ = FMath::Min(MinZ, V.Z);
-					}
 				}
 			}
 			TestNearlyEqual(PocketName + TEXT(" drop pocket outer radius r_p"), MaxRhoBelow, Rp, kTolCm);
@@ -812,29 +919,47 @@ bool FRbTableBedAndBounds::RunTest(const FString& Parameters)
 		const double OMaxX = FMath::Max(OuterLo.X, OuterHi.X);
 		const double OMinY = FMath::Min(OuterLo.Y, OuterHi.Y);
 		const double OMaxY = FMath::Max(OuterLo.Y, OuterHi.Y);
+		// (M2-L: the rail body of the legs style sits 1.5 mm behind the cap edge - the cap overhangs it.)
 		for (const TPair<const TCHAR*, FAxisAlignedBox3d>& Box : {TPair<const TCHAR*, FAxisAlignedBox3d>(TEXT("caps"), Caps),
 				 TPair<const TCHAR*, FAxisAlignedBox3d>(TEXT("apron"), Apron)})
 		{
 			const FString Name = PresetName + TEXT(" ") + Box.Key;
-			TestNearlyEqual(Name + TEXT(" min X = OuterBoundary"), Box.Value.Min.X, OMinX, 1e-6);
-			TestNearlyEqual(Name + TEXT(" max X = OuterBoundary"), Box.Value.Max.X, OMaxX, 1e-6);
-			TestNearlyEqual(Name + TEXT(" min Y = OuterBoundary"), Box.Value.Min.Y, OMinY, 1e-6);
-			TestNearlyEqual(Name + TEXT(" max Y = OuterBoundary"), Box.Value.Max.Y, OMaxY, 1e-6);
+			const double Tol = FCString::Strcmp(Box.Key, TEXT("caps")) == 0 ? 1e-6 : 0.2;
+			TestNearlyEqual(Name + TEXT(" min X = OuterBoundary"), Box.Value.Min.X, OMinX, Tol);
+			TestNearlyEqual(Name + TEXT(" max X = OuterBoundary"), Box.Value.Max.X, OMaxX, Tol);
+			TestNearlyEqual(Name + TEXT(" min Y = OuterBoundary"), Box.Value.Min.Y, OMinY, Tol);
+			TestNearlyEqual(Name + TEXT(" max Y = OuterBoundary"), Box.Value.Max.Y, OMaxY, Tol);
+			TestTrue(Name + TEXT(" not beyond OuterBoundary"), Box.Value.Min.X >= OMinX - 1e-6 && Box.Value.Max.X <= OMaxX + 1e-6 &&
+				Box.Value.Min.Y >= OMinY - 1e-6 && Box.Value.Max.Y <= OMaxY + 1e-6);
 		}
+		const bool bCabinet = StyleOf(Preset) == ERbTableBaseStyle::Cabinet;
 		TestNearlyEqual(PresetName + TEXT(" cap top = RailTopZ"), Caps.Max.Z, Cm * Spec.RailTopZ, 1e-9);
 		TestNearlyEqual(PresetName + TEXT(" cap slab thickness"), Caps.Min.Z, Cm * Spec.RailTopZ - Built->Options.CapThicknessCm, 1e-6);
 		TestNearlyEqual(PresetName + TEXT(" apron top meets the cap"), Apron.Max.Z, Cm * Spec.RailTopZ - Built->Options.CapThicknessCm, 1e-6);
-		TestNearlyEqual(PresetName + TEXT(" apron depth"), Apron.Min.Z, -Built->Options.ApronDepthCm, 1e-6);
+		// Legs style: the rail body and the apron skirt down to ApronDepth; coin-op: the rail body sits on the cabinet at the slate bottom.
+		TestNearlyEqual(PresetName + TEXT(" apron depth"), Apron.Min.Z, bCabinet ? -Cm * Spec.SlateThickness : -Built->Options.ApronDepthCm, 1e-6);
 
-		// Legs / cabinet stand on the floor (z = -BedHeight) under the apron; nothing of the table leaves OuterBoundary.
+		// Legs / pedestals stand on their levelers on the floor (z = -BedHeight) under the apron / cabinet; nothing of the table leaves
+		// OuterBoundary except the coin-op's foot-end hardware (coin slide, trap window frame, return ring) and the coin door on the
+		// wall side (venue-dive-bar 3.1: the slide protrudes 0.06 m).
 		const FAxisAlignedBox3d Legs = Bounds(Built->Meshes.Get(ERbTablePart::Legs));
-		TestNearlyEqual(PresetName + TEXT(" legs on the floor"), Legs.Min.Z, -Cm * Spec.BedHeight, 1e-6);
-		TestNearlyEqual(PresetName + TEXT(" legs meet the apron"), Legs.Max.Z, -Built->Options.ApronDepthCm, 1e-6);
+		const FAxisAlignedBox3d Hardware = Bounds(Built->Meshes.Get(ERbTablePart::Hardware));
+		TestNearlyEqual(PresetName + TEXT(" levelers on the floor"), FMath::Min(Legs.Min.Z, Hardware.Min.Z), -Cm * Spec.BedHeight, 1e-6);
+		TestTrue(PresetName + TEXT(" legs on their levelers"), Legs.Min.Z > -Cm * Spec.BedHeight + 0.5 && Legs.Min.Z < -Cm * Spec.BedHeight + 3.0);
+		TestNearlyEqual(PresetName + TEXT(" legs meet the apron / cabinet"), Legs.Max.Z, bCabinet ? -Cm * Spec.BedHeight + 30.0 : -Built->Options.ApronDepthCm, 1e-6);
 		for (int32 PartIndex = 0; PartIndex < static_cast<int32>(ERbTablePart::Count); ++PartIndex)
 		{
+			const ERbTablePart Part = static_cast<ERbTablePart>(PartIndex);
+			if (!Expected(Preset, Part))
+			{
+				continue;
+			}
 			const FAxisAlignedBox3d Box = Bounds(Built->Meshes.Parts[PartIndex]);
-			TestTrue(Label(Preset, static_cast<ERbTablePart>(PartIndex)) + TEXT(" inside OuterBoundary"),
-				Box.Min.X >= OMinX - 1e-6 && Box.Max.X <= OMaxX + 1e-6 && Box.Min.Y >= OMinY - 1e-6 && Box.Max.Y <= OMaxY + 1e-6 &&
+			const bool bHardware = bCabinet && (Part == ERbTablePart::Hardware || Part == ERbTablePart::Castings);
+			const double FootOut = bHardware ? 8.0 : 1e-6;  // cm beyond the foot end (+x): slide 6 cm + plate + knob
+			const double SideOut = bHardware ? 1.0 : 1e-6;  // cm beyond the wall side (core -y = UE +Y)
+			TestTrue(Label(Preset, Part) + TEXT(" inside OuterBoundary"),
+				Box.Min.X >= OMinX - 1e-6 && Box.Max.X <= OMaxX + FootOut && Box.Min.Y >= OMinY - 1e-6 && Box.Max.Y <= OMaxY + SideOut &&
 					Box.Max.Z <= Cm * Spec.RailTopZ + 1e-6 && Box.Min.Z >= -Cm * Spec.BedHeight - 1e-6);
 		}
 	}
@@ -858,9 +983,14 @@ bool FRbTablePhysicsSurfaces::RunTest(const FString& Parameters)
 		const rb::TableGeometry& G = Built->Geometry;
 		const FString PresetName = RbTableMeshBuilder::GetPresetName(Preset);
 		TArray<TUniquePtr<FDynamicMeshAABBTree3>> Trees;
-		for (const ERbTablePart Part : {ERbTablePart::Bed, ERbTablePart::CushionCloth, ERbTablePart::RailCaps, ERbTablePart::PocketLiners, ERbTablePart::Sights})
+		// (M2-L: the coin-op's castings are the rail top around its pockets.)
+		for (const ERbTablePart Part : {ERbTablePart::Bed, ERbTablePart::CushionCloth, ERbTablePart::RailCaps, ERbTablePart::PocketLiners, ERbTablePart::Sights,
+				 ERbTablePart::Castings})
 		{
-			Trees.Add(MakeUnique<FDynamicMeshAABBTree3>(&Built->Meshes.Get(Part), true));
+			if (Built->Meshes.Get(Part).TriangleCount() > 0)
+			{
+				Trees.Add(MakeUnique<FDynamicMeshAABBTree3>(&Built->Meshes.Get(Part), true));
+			}
 		}
 		// Height [cm] of the highest rendered surface over a plan point (core metres).
 		auto TopZ = [&Trees](const rb::Vec2& P, double& OutZ) {
@@ -975,6 +1105,12 @@ bool FRbTableBakedMatchesRuntime::RunTest(const FString& Parameters)
 			const ERbTablePart Part = static_cast<ERbTablePart>(PartIndex);
 			const FString Name = Label(Preset, Part);
 			const FString PackagePath = RbTableMeshBuilder::GetBakedMeshPackagePath(Preset, Part);
+			if (!Expected(Preset, Part))
+			{
+				// M2-L: parts of the other base style are not baked (rb_bake_table.py deletes stale ones).
+				TestFalse(Name + TEXT(" has no baked asset"), FPackageName::DoesPackageExist(PackagePath));
+				continue;
+			}
 			if (!FPackageName::DoesPackageExist(PackagePath))
 			{
 				if (bRequired)
@@ -1061,7 +1197,12 @@ bool FRbTableBakedMatchesRuntime::RunTest(const FString& Parameters)
 			}
 		}
 	}
-	TestTrue(TEXT("baked meshes checked"), Checked >= static_cast<int32>(ERbTablePart::Count) * static_cast<int32>(UE_ARRAY_COUNT(kBakedPresets)));
+	int32 ExpectedBaked = 0;
+	for (const ERbTablePreset Preset : kBakedPresets)
+	{
+		ExpectedBaked += ExpectedPartCount(Preset);
+	}
+	TestTrue(TEXT("baked meshes checked"), Checked >= ExpectedBaked);
 	return true;
 }
 
@@ -1221,6 +1362,11 @@ bool FRbTableCollision::RunTest(const FString& Parameters)
 				const ERbTablePart Part = static_cast<ERbTablePart>(PartIndex);
 				UPrimitiveComponent* Component = Table->GetPartComponent(Part);
 				const FString PartName = Name + TEXT(" ") + RbTypes::ToString(Part);
+				if (!Expected(Preset, Part))
+				{
+					TestNull(PartName + TEXT(" has no component in this base style"), Component);
+					continue;
+				}
 				if (!TestNotNull(PartName + TEXT(" component"), Component))
 				{
 					continue;
@@ -1325,7 +1471,13 @@ bool FRbTableCollision::RunTest(const FString& Parameters)
 			const double Hw = G.HalfWidth;
 			const double K = (Spec.RailTopZ - Spec.CushionNoseHeight) / Spec.CushionWidth;
 			const double Mid = 0.5 * (Spec.CushionWidth + Spec.RailWidthTotal); // rail cap, between the cushion back and the outer edge
-			const double OuterX = G.OuterBoundary.Hi.x;
+			// M2-L: the side faces below the rails are the apron skirt behind the rail outline (legs style) or the coin-op cabinet's
+			// boards 2 mm behind it; the probe at z = -8 cm hits them at y = 5 cm (clear of the foot end's coin mechanism).
+			RbTableMeshBuilder::FLookDevMetrics Metrics;
+			FString MetricsError;
+			RbTableMeshBuilder::ComputeLookDevMetrics(G, FRbTableMeshOptions(), Metrics, MetricsError);
+			const bool bCabinet = Metrics.Style == ERbTableBaseStyle::Cabinet;
+			const double OuterX = G.OuterBoundary.Hi.x - (bCabinet ? 0.002 : Metrics.SkirtInset);
 			const rb::Vec3 Sight = G.Sights[2].Position;
 			const FProbe Probes[] = {
 				{TEXT("bed centre"), rb::Vec3(0.0, 0.0, 0.5), rb::Vec3(0.0, 0.0, -0.5), 0.0, false, ERbTablePart::Bed},
@@ -1334,7 +1486,8 @@ bool FRbTableCollision::RunTest(const FString& Parameters)
 					Spec.CushionNoseHeight + K * 0.5 * Spec.CushionWidth, false, ERbTablePart::CushionCloth},
 				{TEXT("rail cap"), rb::Vec3(-0.3 * Hl, -Hw - Mid, 0.5), rb::Vec3(-0.3 * Hl, -Hw - Mid, -0.5), Spec.RailTopZ, false, ERbTablePart::RailCaps},
 				{TEXT("end rail cap"), rb::Vec3(Hl + Mid, 0.1 * Hw, 0.5), rb::Vec3(Hl + Mid, 0.1 * Hw, -0.5), Spec.RailTopZ, false, ERbTablePart::RailCaps},
-				{TEXT("apron from outside"), rb::Vec3(OuterX + 1.0, 0.05, -0.08), rb::Vec3(0.0, 0.05, -0.08), OuterX, true, ERbTablePart::Apron},
+				{TEXT("apron from outside"), rb::Vec3(OuterX + 1.0, bCabinet ? 0.3 : 0.05, -0.08), rb::Vec3(0.0, bCabinet ? 0.3 : 0.05, -0.08), OuterX, true,
+					bCabinet ? ERbTablePart::Cabinet : ERbTablePart::Apron},
 				{TEXT("sight (flush, the cap is drilled under it)"), rb::Vec3(Sight.x + 0.001, Sight.y + 0.0015, 0.5), rb::Vec3(Sight.x + 0.001, Sight.y + 0.0015, -0.5),
 					Spec.RailTopZ, false, ERbTablePart::Sights},
 			};
@@ -1367,11 +1520,15 @@ bool FRbTableTransientParts::RunTest(const FString& Parameters)
 		{
 			return false;
 		}
-		TestEqual(TEXT("tagged part components"), CountPartComponents(Table), static_cast<int32>(ERbTablePart::Count));
+		TestEqual(TEXT("tagged part components"), CountPartComponents(Table), ExpectedPartCount(Table->Preset));
 		for (int32 PartIndex = 0; PartIndex < static_cast<int32>(ERbTablePart::Count); ++PartIndex)
 		{
 			const ERbTablePart Part = static_cast<ERbTablePart>(PartIndex);
 			const UPrimitiveComponent* Component = Table->GetPartComponent(Part);
+			if (!Expected(Table->Preset, Part))
+			{
+				continue;
+			}
 			if (!TestNotNull(FString(TEXT("part component ")) + RbTypes::ToString(Part), Component))
 			{
 				continue;
@@ -1385,7 +1542,7 @@ bool FRbTableTransientParts::RunTest(const FString& Parameters)
 		const double NineFootX = Table->GetPartComponent(ERbTablePart::RailCaps)->Bounds.BoxExtent.X;
 		Table->Preset = ERbTablePreset::SevenFootBar;
 		Table->RebuildTable();
-		TestEqual(TEXT("tagged part components after a rebuild"), CountPartComponents(Table), static_cast<int32>(ERbTablePart::Count));
+		TestEqual(TEXT("tagged part components after a rebuild"), CountPartComponents(Table), ExpectedPartCount(ERbTablePreset::SevenFootBar));
 		TestEqual(TEXT("context follows the preset"), static_cast<int32>(Table->GetContext().Spec.Preset), static_cast<int32>(rb::TablePreset::SevenFootBar));
 		const double SevenFootX = Table->GetPartComponent(ERbTablePart::RailCaps)->Bounds.BoxExtent.X;
 		TestNearlyEqual(TEXT("rails follow the preset"), NineFootX - SevenFootX,
@@ -1406,7 +1563,7 @@ bool FRbTableTransientParts::RunTest(const FString& Parameters)
 			TestWorld.World->GetWorldSettings()->NotifyBeginPlay();
 			TestTrue(TEXT("BeginPlay dispatched"), Table->HasActorBegunPlay());
 			TestEqual(TEXT("context rebuilt at BeginPlay"), static_cast<int32>(Table->GetContext().Spec.Preset), static_cast<int32>(rb::TablePreset::SevenFootTrue));
-			TestEqual(TEXT("parts rebuilt at BeginPlay"), CountPartComponents(Table), static_cast<int32>(ERbTablePart::Count));
+			TestEqual(TEXT("parts rebuilt at BeginPlay"), CountPartComponents(Table), ExpectedPartCount(ERbTablePreset::SevenFootTrue));
 		}
 	}
 
@@ -1423,7 +1580,7 @@ bool FRbTableTransientParts::RunTest(const FString& Parameters)
 		UWorld* World = UWorld::CreateWorld(EWorldType::Inactive, false, FName(*FPackageName::GetShortName(SavedName)), Package);
 		World->SetFlags(RF_Public | RF_Standalone);
 		ARbTable* Table = World->SpawnActor<ARbTable>(FVector(10.0, 20.0, 0.0), FRotator(0.0, 90.0, 0.0));
-		TestTrue(TEXT("parts exist before saving"), Table && CountPartComponents(Table) == static_cast<int32>(ERbTablePart::Count));
+		TestTrue(TEXT("parts exist before saving"), Table && CountPartComponents(Table) == ExpectedPartCount(Table->Preset));
 		FSavePackageArgs SaveArgs;
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 		SaveArgs.SaveFlags = SAVE_NoError;
@@ -1482,7 +1639,7 @@ bool FRbTableTransientParts::RunTest(const FString& Parameters)
 				{
 					Table->RebuildTable();
 				}
-				TestEqual(TEXT("reloaded table has its parts"), CountPartComponents(Table), static_cast<int32>(ERbTablePart::Count));
+				TestEqual(TEXT("reloaded table has its parts"), CountPartComponents(Table), ExpectedPartCount(Table->Preset));
 				TestTrue(TEXT("reloaded placement kept"),
 					Table->GetBedCenterWorld().Equals(FVector(10.0, 20.0, FRbCoords::CmPerMeter * Table->GetContext().BedHeight()), 1e-9));
 			}

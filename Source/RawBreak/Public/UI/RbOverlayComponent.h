@@ -9,7 +9,17 @@
 //   Mandatory lines   shown in EVERY mode (rules obligations, review R-05): foul counter while > 0 incl. the two-foul warning,
 //                     pending decision + options, ball in hand; after each shot a 4 s auto-glance shows the result
 //                     (enforced foul + rule reference, rules.md 16 item 2)
-// Refreshes its model from URbMatchDirector on OnMatchChanged. Lives on ARbPlayerController. Owner: UE-7.
+// Refreshes its model from URbMatchDirector on OnMatchChanged. Lives on ARbPlayerController. Owner: UE-7; since M2 M2-D.
+//
+// M2-D additions:
+//  * The director is the PLAYER's match only (URbUiSubsystem::FindPlayerDirector = the player session's, UX-T25); a different
+//    player table rebinds within 0.1 s (the context tick: finding the player's session walks the level's tables, so it never
+//    runs per frame).
+//  * Key hints (SRbKeyHints, layer 15, lower left): rebuilt every 0.1 s from FRbKeyHintsModel::Build (the ticks between only run
+//    the fade: no per-frame allocation); shown for KeyHintHold
+//    (3 s) after every context change, then faded out; hidden while a menu is open, the world is paused or a replay runs, and
+//    when the setting is off. -RbUiScreen=KeyHints holds them (captures).
+//  * Text sizes follow the UI tokens (RbUi::EFont::Overlay*; UX-T05: >= 18 px body height at 1080p).
 //
 // Details (UE-7):
 //  * Mode: Pinned while pinned; else Glance while the glance key is held OR the post-shot auto-glance runs; else Hidden.
@@ -30,11 +40,13 @@
 #include "Components/ActorComponent.h"
 
 #include "Replay/RbReplaySubsystem.h"
+#include "UI/Live/SRbKeyHints.h"
 #include "UI/SRbInfoOverlay.h"
 
 #include "RbOverlayComponent.generated.h"
 
 class SRbInfoOverlay;
+class SRbKeyHints;
 class URbMatchDirector;
 class UGameViewportClient;
 
@@ -119,6 +131,13 @@ public:
 	UPROPERTY(EditAnywhere, Category = "RawBreak|UI")
 	float FadeOutSeconds = 0.35f;
 
+	// --- key hints (M2-D) ----------------------------------------------------------------------------------------------------
+	const FRbKeyHintsModel& GetKeyHints() const { return HintModel; }
+	float GetKeyHintOpacity() const { return HintOpacity; }
+	// Feeds a key-hint model and advances the hold / fade by DeltaSeconds (the tick does it from the controller; tests directly).
+	void AdvanceKeyHints(const FRbKeyHintsModel& Model, float DeltaSeconds);
+	TSharedPtr<SRbKeyHints> GetKeyHintsWidget() const { return HintsWidget; }
+
 protected:
 	URbMatchDirector* FindDirector() const;
 	void UpdateVisibility();
@@ -156,4 +175,16 @@ private:
 	FDelegateHandle ReplayChangedHandle;
 	TWeakObjectPtr<UGameViewportClient> WidgetViewport;
 	FDelegateHandle BeginDrawHandle;
+
+	// Key hints (M2-D). The hold / fade of the current model (no model copy, no string work: it runs every tick).
+	void TickKeyHintFade(float DeltaSeconds, bool bContextChanged);
+	TSharedPtr<SRbKeyHints> HintsWidget;
+	FRbKeyHintsModel HintModel;
+	FString HintKey;
+	float HintHold = 0.0f;
+	float HintOpacity = 0.0f;
+
+	// The context tick (the player's session binding, the key-hint model): ContextInterval seconds of real time, never per frame.
+	static constexpr float ContextInterval = 0.1f;
+	float ContextCountdown = 0.0f;
 };

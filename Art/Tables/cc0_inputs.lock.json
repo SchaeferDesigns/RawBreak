@@ -1,0 +1,25 @@
+{
+ "polyhaven/brown_leather": {
+  "files": {
+   "brown_leather_albedo_2k.png": "e3d2b4be0c73560e7ca061743a803531bff565a50ba6eee3ad77c6001d775feb",
+   "brown_leather_nor_dx_2k.png": "c76cba0a99c2828d5ff210363fb4838b9a348ebc0082e4c9b3bc95cd358ae47c",
+   "brown_leather_rough_2k.png": "f41d74519a09f24e5a58b0c3bd2f2439f292ab8c3553d6e88ed0cbca690c6e73"
+  },
+  "ref": "https://polyhaven.com/a/brown_leather"
+ },
+ "polyhaven/walnut_veneer": {
+  "files": {
+   "walnut_veneer_diff_2k.png": "5d6210f3e5a7aff03c79d43db874d06f71f6643bbd02a2c299850727b0ec0e15",
+   "walnut_veneer_nor_dx_2k.png": "3f9e93ae8ccb3a16d665334d2278470e5acb59c2f4b58e30a481bc0ff2e35327",
+   "walnut_veneer_rough_2k.png": "7d6f20c1f13e200cc3b7b5d8d9364784ea984de15f4834daf03fd7fb41040335"
+  },
+  "ref": "https://polyhaven.com/a/walnut_veneer"
+ },
+ "polyhaven/walnut_veneer_02": {
+  "files": {
+   "walnut_veneer_02_diff_2k.png": "5fb013815f24ac2f02cff134e1558eb8e91b8db76d73c7ac7d4a6d35a1a19382",
+   "walnut_veneer_02_rough_2k.png": "88e3c5bf5ee52bced728e5061d14609fb4abbf5989a7ec9e0e9ba7041142da1d"
+  },
+  "ref": "https://polyhaven.com/a/walnut_veneer_02"
+ }
+}

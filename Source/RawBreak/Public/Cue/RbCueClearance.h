@@ -23,8 +23,10 @@
 //    carry no rail;
 //  * minimum elevation: coarse sweep of theta in 0.25 deg steps from the requested elevation upward, then bisection to
 //    0.01 deg on the first clear interval (plan 5.5); the result is the clear end of the final bracket.
-//  * environment: capsule chain along the swept body (tip to butt incl. the backswing), overlap query on ECC_WorldDynamic
-//    against blocking geometry; ignores the table actor (its rails are analytic), pawns (no body in M1), balls and cues.
+//  * environment: capsule chain along the swept body (tip to butt incl. the backswing), overlap query on the RbCueSweep trace
+//    channel (RbAssetPaths::Collision::CueSweepChannel, M2-F; M1 used ECC_WorldDynamic) against blocking geometry: walls,
+//    columns and furniture (RbVenueBlock, BlockAll) block, venue clutter (RbVenueProp), loose balls and pawns ignore the channel;
+//    the table actor (its rails are analytic), pawns (no body in M1), balls and cues are skipped as before.
 
 #include "CoreMinimal.h"
 

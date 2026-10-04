@@ -6,6 +6,7 @@
 #include "Core/RbTypes.h"
 #include "Dev/RbLookDevCamera.h"
 #include "Game/RbGameMode.h"
+#include "Game/RbTableSubsystem.h"
 #include "Table/RbTable.h"
 
 #include "Components/LocalLightComponent.h"
@@ -25,11 +26,12 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/PackageName.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "UObject/SoftObjectPath.h"
 
 #include "rb/Equipment/TableSpec.h"
 
-// Owner: UE-8.
+// Owner: M2-L (UE-8 in M1).
 
 const FName ARbTestRoom::GeneratedComponentTag(TEXT("RbTestRoomPart"));
 
@@ -310,19 +312,9 @@ ARbTestRoom::ARbTestRoom()
 
 ARbTable* ARbTestRoom::FindTable() const
 {
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-	for (TActorIterator<ARbTable> It(World); It; ++It)
-	{
-		if (IsValid(*It))
-		{
-			return *It;
-		}
-	}
-	return nullptr;
+	// Multi-table rule (Docs/ue-architecture.md 18.6.2): the room is built around the player's table (the M1 room has one).
+	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	return Tables ? Tables->GetPlayerTable() : nullptr;
 }
 
 double ARbTestRoom::GetLampEmitterHeight() const
@@ -469,12 +461,21 @@ void ARbTestRoom::BuildShell()
 	const double W = WallThickness;
 	const FVector S = InnerSize;
 	const FTransform Frame(FRotator(0.0, GetActorRotation().Yaw, 0.0), GetActorLocation());
+	// Floor and walls are concrete for loose balls (bounce, friction) and the audio's surface type (18.6.1; integration round,
+	// M2-E request: the engine default made them bounce with 0.7 / 0.3 and report no surface).
+	UPhysicalMaterial* Concrete = RbTestRoomPrivate::LoadIfExists<UPhysicalMaterial>(*RbTestRoomPrivate::ObjectPathOf(RbAssetPaths::PhysMatConcrete));
 	auto Box = [&](const TCHAR* Name, const FVector& LocalCenter, const FVector& Size, UMaterialInterface* Material)
 	{
-		AddBox(Name, Frame.TransformPosition(LocalCenter), Size, Frame.Rotator(), Material, false);
+		UStaticMeshComponent* Part = AddBox(Name, Frame.TransformPosition(LocalCenter), Size, Frame.Rotator(), Material, false);
+		if (Part && Concrete)
+		{
+			Part->SetPhysMaterialOverride(Concrete);
+		}
 	};
-	UMaterialInterface* Wall = SurfaceMaterial(RbAssetPaths::MatRoomWall, WallAlbedo, 0.85f);
-	UMaterialInterface* Floor = SurfaceMaterial(RbAssetPaths::MatRoomFloor, FloorAlbedo, 0.55f);
+	UMaterialInterface* Wall = WallMaterialOverride.IsNull() ? nullptr : WallMaterialOverride.LoadSynchronous();
+	Wall = Wall ? Wall : SurfaceMaterial(RbAssetPaths::MatRoomWall, WallAlbedo, 0.85f);
+	UMaterialInterface* Floor = FloorMaterialOverride.IsNull() ? nullptr : FloorMaterialOverride.LoadSynchronous();
+	Floor = Floor ? Floor : SurfaceMaterial(RbAssetPaths::MatRoomFloor, FloorAlbedo, 0.55f);
 	UMaterialInterface* Ceiling = SurfaceMaterial(nullptr, CeilingAlbedo, 0.9f);
 	Box(TEXT("RoomFloor"), FVector(0.0, 0.0, -0.5 * W), FVector(S.X + 2.0 * W, S.Y + 2.0 * W, W), Floor);
 	Box(TEXT("RoomCeiling"), FVector(0.0, 0.0, S.Z + 0.5 * W), FVector(S.X + 2.0 * W, S.Y + 2.0 * W, W), Ceiling);
@@ -683,7 +684,7 @@ void ARbTestRoom::ApplyPostProcess()
 	S.LensFlareIntensity = 0.0f;
 	// The eye adapts to the illuminant: white balance close to the lamp's temperature (a small warm residue remains).
 	S.bOverride_WhiteTemp = true;
-	S.WhiteTemp = static_cast<float>(LampTemperatureK + 200.0);
+	S.WhiteTemp = static_cast<float>(WhiteBalanceTempK > 0.0 ? WhiteBalanceTempK : LampTemperatureK + 200.0);
 	PostProcess->bUnbound = true;
 	PostProcess->Priority = 0.0f;
 	PostProcess->BlendWeight = 1.0f;
@@ -832,11 +833,8 @@ FString ARbTestRoom::ValidateM1Level(const UObject* WorldContextObject, bool& bO
 	}
 
 	// Table: exactly one, at the origin, unrotated.
-	TArray<ARbTable*> Tables;
-	for (TActorIterator<ARbTable> It(World); It; ++It)
-	{
-		Tables.Add(*It);
-	}
+	const URbTableSubsystem* TableSubsystem = World->GetSubsystem<URbTableSubsystem>();
+	const TArray<ARbTable*> Tables = TableSubsystem ? TableSubsystem->GetTables() : TArray<ARbTable*>();
 	ARbTable* Table = Tables.Num() ? Tables[0] : nullptr;
 	AddLine(Report, bOutOk, Tables.Num() == 1, TEXT("table"), FString::Printf(TEXT("%d ARbTable actor(s)"), Tables.Num()));
 	if (Table)

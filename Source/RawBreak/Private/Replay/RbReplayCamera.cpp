@@ -4,6 +4,7 @@
 #include "Camera/RbCameraModel.h"
 #include "Camera/RbCameraRigComponent.h"
 #include "Core/RbCoords.h"
+#include "Game/RbTableSubsystem.h"
 #include "Table/RbTable.h"
 
 #include "CineCameraComponent.h"
@@ -239,9 +240,20 @@ FVector ARbReplayCamera::ClampToRoom(const FVector& LookAt, const FVector& Eye) 
 	{
 		Params.AddIgnoredActor(TableActor);
 	}
-	for (TActorIterator<ARbBallSet> It(World); It; ++It)
+	// Every table's balls (M2-E: through the table registry, never by iterating the world's ball sets). Called every tick of the
+	// Follow view: the registered sessions (no allocation), plus the viewed table's ball set on a dev map without a session.
+	if (const URbTableSubsystem* Tables = URbTableSubsystem::Get(World))
 	{
-		Params.AddIgnoredActor(*It);
+		bool bViewedTableHasSession = false;
+		for (const FRbTableSession& Session : Tables->GetSessions())
+		{
+			Params.AddIgnoredActor(Session.BallSet.Get());
+			bViewedTableHasSession |= Session.Table.Get() == Table.Get();
+		}
+		if (!bViewedTableHasSession && Table.IsValid())
+		{
+			Params.AddIgnoredActor(Tables->FindBallSet(Table.Get()));
+		}
 	}
 	const FVector Start = LookAt + FVector(0.0, 0.0, 10.0);
 	FHitResult Hit;

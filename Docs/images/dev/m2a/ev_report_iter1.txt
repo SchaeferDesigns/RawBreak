@@ -1,0 +1,7 @@
+VDB-T2 adapted EV100 per view (Eyes preset, 12 s warm-up, capture log 'RbVenue EV')
+V01   RbCam_DB_V01     EV100   3.58  band 3.0-4.0  ok
+V02   RbCam_DB_V02     EV100   2.63  band 4.5-5.5  OUT
+V05   RbCam_DB_V05     EV100   4.11  band 4.5-5.5  OUT
+V10   RbCam_DB_V10     EV100   1.75  (no band)
+V11   RbCam_DB_V11     EV100   4.07  (no band)
+V08   RbCam_DB_V08     EV100   3.89  band 4.0-5.0  OUT

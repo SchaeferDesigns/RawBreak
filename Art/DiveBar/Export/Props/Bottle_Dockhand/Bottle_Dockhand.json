@@ -1,0 +1,84 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Bottle_Dockhand",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "body_diameter_m": 0.082,
+ "bounds_max_m": [
+  0.0414,
+  0.04139,
+  0.34264
+ ],
+ "bounds_min_m": [
+  -0.041,
+  -0.04139,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.0414,
+  0.04139,
+  0.34264
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.041,
+  -0.04139,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueProp",
+ "design": {
+  "H": 0.295,
+  "R": 0.041,
+  "closure": "pourer",
+  "fill": 0.35,
+  "glass": "Glass_Clear",
+  "hb": 0.17,
+  "hs": 0.055,
+  "kind": "spirit",
+  "label": "bottle_dockhand",
+  "label_z": 0.09,
+  "liquid": "Liquid_Rum",
+  "rn": 0.0145,
+  "shoulder": "round"
+ },
+ "external_inputs": [],
+ "family": "Bottles",
+ "fbx": "SM_DB_Bottle_Dockhand.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "fbbe4c88f72e0c46debf11a3de6d09b3e4c7203e7b52dbe76d468f19b43438f4",
+ "glass_height_m": 0.295,
+ "ledger_asset_id": "SM_DB_Bottle_Dockhand",
+ "material_slots": [
+  "MI_DB_Glass_Clear",
+  "MI_DB_Liquid_Rum",
+  "MI_DB_Label_Atlas",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Steel_Stainless"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "C02",
+ "target_dimensions_m": [
+  0.0824,
+  0.082,
+  0.34264
+ ],
+ "tolerance_m": 0.01,
+ "translucent": true,
+ "triangles": 2772,
+ "triangles_render": 2700,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Bottles",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Bottles/SM_DB_Bottle_Dockhand",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Bottle_Dockhand/T_DB_Bottle_Dockhand_WM.png"
+}

@@ -1,0 +1,38 @@
+{
+ "acoustic_material": "none",
+ "asset_id": "ExitSign",
+ "bounds_max_m": [
+  0.0305,
+  0.165,
+  0.02
+ ],
+ "bounds_min_m": [
+  -0.0305,
+  -0.165,
+  -0.19
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Lighting",
+ "fbx": "SM_DB_ExitSign.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Paint_White",
+  "MI_DB_Emissive_Exit"
+ ],
+ "mesh": "SM_DB_ExitSign",
+ "notes": "double-faced LED EXIT sign (L25, 40 cd/m2 letters, 150 mm)",
+ "owner": "M2-A",
+ "pivot": "top_center",
+ "profile": "RbVenueProp",
+ "target_m": [
+  0.061,
+  0.33,
+  0.21
+ ],
+ "tolerance_m": 0.002,
+ "triangles": 240,
+ "ue_folder": "Lighting"
+}

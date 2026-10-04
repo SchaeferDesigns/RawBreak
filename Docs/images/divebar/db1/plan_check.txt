@@ -1,0 +1,96 @@
+DB-1 plan check: venue-dive-bar 2.4 (spec) vs the plan rendered from Art/DiveBar/layout.json (1 column = 0.25 m in X, 1 row = 0.20 m in Y)
+
+spec   -0.10 ###################################################################################
+layout -0.10 ###################################################################################
+spec    0.10 #       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb    LLLLLLLLLLLLLLLLLLLLL   ############### 
+layout  0.10 #       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb    LLLLLLLLLLLLLLLLLLLLL   ############### 
+spec    0.30 #       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb                            ==============# 
+layout  0.30 #       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb                            ==============# 
+spec    0.50 #       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb      oo    o    oo         ==============X 
+layout  0.50 #       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb      oo    o    oo         ==============X 
+spec    0.70 G                                            o     o               ==============X 
+layout  0.70 G                                            o     o               ==============X 
+spec    0.90 G                                                                  ==============X 
+layout  0.90 G                                                                  ==============X 
+spec    1.10 G                                                                  ==============X 
+layout  1.10 G                                                                  ==============X 
+spec    1.30 G                                                                  ==============# 
+layout  1.30 G                                                                  ==============# 
+spec    1.50 G                                                                  ##ddd####ddd### 
+layout  1.50 G                                                                  ##ddd####ddd### 
+spec    1.70 G       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                           #mmmmmm#wwwwww# 
+layout  1.70 G       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                           #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    1.90 G       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                           #mmmmmm#wwwwww# 
+layout  1.90 G       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                           #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    2.10 G       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                           #mmmmmm#wwwwww# 
+layout  2.10 G       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                           #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    2.30 G       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                           #mmmmmm#wwwwww# 
+layout  2.30 G       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                           #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    2.50 G         o oo o  o  o  o oo o  o  o                               #mmmmmm#wwwwww# 
+layout  2.50 G         o oo o  o  o  o oo o  o  o                               #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    2.70 G         o oo o  o  o  o oo o  o  o                               #mmmmmm#wwwwww# 
+layout  2.70 G         o oo o  o  o  o oo o  o  o                               #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    2.90 G                                                                  #mmmmmm#wwwwww# 
+layout  2.90 G                                                                  #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    3.10 G                                                                  #mmmmmm#wwwwww# 
+layout  3.10 G                                                                  #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    3.30 G                                                                  #mmmmmm#wwwwww# 
+layout  3.30 G                                                                  #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    3.50 G                                                      c           #mmmmmm#wwwwww# 
+layout  3.50 G                                                      c           #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    3.70 G                  C                 C                 Cc          #mmmmmm#wwwwww# 
+layout  3.70 G                  C                 C                 Cc          #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    3.90 G                                                                  #mmmmmm#wwwwww# 
+layout  3.90 G                                                                  #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    4.10 G                                                                  #mmmmmm#wwwwww# 
+layout  4.10 G                                                                  #mmmmmmwwwwwww# 
+                                                                                       ^       
+spec    4.30 G                                                                  ############### 
+layout  4.30 G                                                                  ############### 
+spec    4.50 G                                  ---                             #ggggggggggggg# 
+layout  4.50 G                                  ---                             #ggggggggggggg# 
+spec    4.70 G                                                                  sggggggggggggg# 
+layout  4.70 G                                                                  sggggggggggggg# 
+spec    4.90 #                                                  TTTTTTTTTT      sggggggggggggg# 
+layout  4.90 #                                                  TTTTTTTTTT      sggggggggggggg# 
+spec    5.10 #                                                  T........T      sggggggggggggg# 
+layout  5.10 #                                                  T........T      sggggggggggggg# 
+spec    5.30 #                                                  T........T      sggggggggggggg# 
+layout  5.30 #                                                  T........T      sggggggggggggg# 
+spec    5.50 #                                                  T........T      #ggggggggggggg# 
+layout  5.50 #                                                  T........T      #ggggggggggggg# 
+spec    5.70 E                                                  T........T     L#ggggggggggggg# 
+layout  5.70 E                                                  T........T     L#ggggggggggggg# 
+spec    5.90 E                                                  T........T     L#ggggggggggggg# 
+layout  5.90 E                                                  T........T     L#ggggggggggggg# 
+spec    6.10 E                                                  TTTTTTTTTT     L#ggggggggggggg# 
+layout  6.10 E                                                  TTTTTTTTTT     L#ggggggggggggg# 
+spec    6.30 E         HHtttHHHHHtttHHHHtttHHH                                 L#ggggggggggggg# 
+layout  6.30 E         HHtttHHHHHtttHHHHtttHHH                                 L#ggggggggggggg# 
+spec    6.50 E         HHtttHHHHHtttHHHHtttHHH                                 L#ggggggggggggg# 
+layout  6.50 E         HHtttHHHHHtttHHHHtttHHH                                 L#ggggggggggggg# 
+spec    6.70 #         HHtttHHHHHtttHHHHtttHHH  DDD       JJJ                  L#ggggggggggggg# 
+layout  6.70 #         HHtttHHHHHtttHHHHtttHHH  DDD       JJJ                  L#ggggggggggggg# 
+spec    6.90 #  AA     HHtttHHHHHtttHHHHtttHHH  DDD       JJJ                  L#ggggggggggggg# 
+layout  6.90 #  AA     HHtttHHHHHtttHHHHtttHHH  DDD       JJJ                  L#ggggggggggggg# 
+spec    7.10 #  AA     HHtttHHHHHtttHHHHtttHHH  DDD       JJJ  kkkkKKKK         #ggggggggggggg# 
+layout  7.10 #  AA     HHtttHHHHHtttHHHHtttHHH  DDD       JJJ                  L#ggggggggggggg# 
+                                                               ^^^^^^^^        ^               
+spec    7.30 #  AA     HHtttHHHHHtttHHHHtttHHH  DDD       JJJ  kkkkKKKK         ############### 
+layout  7.30 #  AA     HHtttHHHHHtttHHHHtttHHH  DDD       JJJ  kkkkKKKK         ############### 
+spec    7.50 ################################################################################## 
+layout  7.50 ################################################################################## 
+
+22 of 3199 cells differ (0.69 %)

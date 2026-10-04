@@ -1,0 +1,33 @@
+{
+ "acoustic_material": "none",
+ "asset_id": "GB_Pendant",
+ "bounds_max_m": [
+  0.0925,
+  0.0925,
+  0.12
+ ],
+ "bounds_min_m": [
+  -0.0925,
+  -0.0925,
+  -0.062
+ ],
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Greybox",
+ "fbx": "SM_DB_GB_Pendant.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Enamel_Black",
+  "MI_DB_Enamel_WhiteInt",
+  "MI_DB_Steel_Black",
+  "MI_DB_Plastic_Black"
+ ],
+ "mesh": "SM_DB_GB_Pendant",
+ "notes": "bar mini pendant shade (L5-L8): black enamel cone, white interior, socket; pivot at the bulb centre",
+ "owner": "M2-A",
+ "pivot": "center",
+ "profile": "RbVenueBlock",
+ "triangles": 728,
+ "ue_folder": "Arch/Greybox"
+}

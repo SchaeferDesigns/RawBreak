@@ -246,6 +246,18 @@ public:
 
 	FRbOnMatchChanged OnMatchChanged;
 
+	// --- additions (M2-E: several tables per level, Docs/ue-architecture.md 18.6.2) -----------------------------------------
+
+	// Committed shots go into URbReplaySubsystem's history (default on; ARbGameMode switches it off for every session but the
+	// player's: the replay history is the player's table only in M2).
+	void SetRecordsReplays(bool bRecord) { bRecordReplays = bRecord; }
+	bool RecordsReplays() const { return bRecordReplays; }
+
+	// The scene this director was initialised with (its table session).
+	ARbTable* GetTable() const { return Table.Get(); }
+	ARbBallSet* GetBallSet() const { return Balls.Get(); }
+	ARbCue* GetCue() const { return Cue.Get(); }
+
 	// UObject
 	virtual UWorld* GetWorld() const override;
 
@@ -335,6 +347,7 @@ private:
 	uint32 LocalShotId = 0;                        // ids of game-thread shots without a subsystem
 	int32 SelectedOption = 0;
 	bool bReplayActive = false;
+	bool bRecordReplays = true;
 	FString LastError;
 
 	// Lag

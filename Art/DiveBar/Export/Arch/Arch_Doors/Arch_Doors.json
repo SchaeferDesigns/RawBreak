@@ -1,0 +1,45 @@
+{
+ "acoustic_material": "steel",
+ "acoustic_surfaces": [
+  {
+   "area_m2": 3.88,
+   "material": "steel"
+  },
+  {
+   "area_m2": 5.23,
+   "material": "wood_panel"
+  }
+ ],
+ "asset_id": "Arch_Doors",
+ "bounds_max_m": [
+  20.32,
+  6.57,
+  2.46
+ ],
+ "bounds_min_m": [
+  -0.33,
+  0.23,
+  0.0
+ ],
+ "collision_hulls": 5,
+ "external_inputs": [],
+ "family": "Architecture",
+ "fbx": "SM_DB_Arch_Doors.fbx",
+ "frame": "venue",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Steel_Black",
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Glass_Clear",
+  "MI_DB_Steel_Stainless",
+  "MI_DB_Wood_Stained"
+ ],
+ "mesh": "SM_DB_Arch_Doors",
+ "notes": "doors: entrance (steel, vision panel, push bar, transom), storage, restrooms, back exit; cased corridor opening",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "priority": "mid",
+ "profile": "RbVenueBlock",
+ "triangles": 1198,
+ "ue_folder": "Arch"
+}

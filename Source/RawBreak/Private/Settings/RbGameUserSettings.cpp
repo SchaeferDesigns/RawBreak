@@ -8,7 +8,7 @@
 #include "Misc/ConfigUtilities.h"
 #include "Scalability.h"
 
-// Owner: UE-8.
+// Owner: UE-8; since M2 M2-D (Custom mix persistence, Reduced motion, validation of the M2 rows).
 
 namespace RbQualityPrivate
 {
@@ -240,20 +240,117 @@ void URbGameUserSettings::FillFromPresetLevel(int32 Level)
 	ScalabilityQuality.SetFromSingleQualityLevel(Level); // every group at the preset level (4 = Cine: "Epic + extras")
 	ScalabilityQuality.ResolutionQuality = PresetScreenPercentage(Level);
 	VolumetricFogQuality = Level;
+	SyncCustomLevels();
+}
+
+void URbGameUserSettings::SelectQualityPreset(ERbQualityPreset Preset)
+{
+	if (Preset == ERbQualityPreset::Custom)
+	{
+		BeginCustom(); // keeps the individual values; remembers what they were based on
+	}
+	QualityPreset = Preset;
+	if (Preset != ERbQualityPreset::Custom)
+	{
+		CustomBasePreset = Preset;
+		FillFromPresetLevel(PresetLevel(Preset));
+	}
+	SyncCustomLevels();
 }
 
 void URbGameUserSettings::ApplyQualityPreset(ERbQualityPreset Preset)
 {
-	QualityPreset = Preset;
-	if (Preset != ERbQualityPreset::Custom)
-	{
-		FillFromPresetLevel(PresetLevel(Preset));
-	}
+	SelectQualityPreset(Preset);
 	ApplyQualityRows();
+}
+
+void URbGameUserSettings::BeginCustom()
+{
+	if (QualityPreset != ERbQualityPreset::Custom)
+	{
+		CustomBasePreset = QualityPreset;
+	}
+}
+
+void URbGameUserSettings::SyncCustomLevels()
+{
+	const Scalability::FQualityLevels& Q = ScalabilityQuality;
+	CustomLevels.bValid = true;
+	CustomLevels.ViewDistance = Q.ViewDistanceQuality;
+	CustomLevels.AntiAliasing = Q.AntiAliasingQuality;
+	CustomLevels.Shadows = Q.ShadowQuality;
+	CustomLevels.GlobalIllumination = Q.GlobalIlluminationQuality;
+	CustomLevels.Reflections = Q.ReflectionQuality;
+	CustomLevels.PostProcess = Q.PostProcessQuality;
+	CustomLevels.Textures = Q.TextureQuality;
+	CustomLevels.Effects = Q.EffectsQuality;
+	CustomLevels.Foliage = Q.FoliageQuality;
+	CustomLevels.Shading = Q.ShadingQuality;
+	CustomLevels.ScreenPercentage = Q.ResolutionQuality;
+}
+
+void URbGameUserSettings::RestoreQualityAfterLoad()
+{
+	if (QualityPreset != ERbQualityPreset::Custom)
+	{
+		FillFromPresetLevel(PresetLevel(QualityPreset)); // a preset is authoritative for every option
+		return;
+	}
+	if (!CustomLevels.bValid)
+	{
+		SyncCustomLevels(); // an M1 Custom file: the engine's loaded group state stays
+		return;
+	}
+	using namespace RbQualityPrivate;
+	Scalability::FQualityLevels& Q = ScalabilityQuality;
+	Q.ViewDistanceQuality = ClampLevel(CustomLevels.ViewDistance);
+	Q.AntiAliasingQuality = ClampLevel(CustomLevels.AntiAliasing);
+	Q.ShadowQuality = ClampLevel(CustomLevels.Shadows);
+	Q.GlobalIlluminationQuality = ClampLevel(CustomLevels.GlobalIllumination);
+	Q.ReflectionQuality = ClampLevel(CustomLevels.Reflections);
+	Q.PostProcessQuality = ClampLevel(CustomLevels.PostProcess);
+	Q.TextureQuality = ClampLevel(CustomLevels.Textures);
+	Q.EffectsQuality = ClampLevel(CustomLevels.Effects);
+	Q.FoliageQuality = ClampLevel(CustomLevels.Foliage);
+	Q.ShadingQuality = ClampLevel(CustomLevels.Shading);
+	Q.ResolutionQuality = FMath::Clamp(CustomLevels.ScreenPercentage, 25.0f, 200.0f);
+}
+
+void URbGameUserSettings::SetReducedMotion(bool bOn)
+{
+	if (bOn == bReducedMotion)
+	{
+		return;
+	}
+	if (bOn)
+	{
+		ReducedMotionBackup.bValid = true;
+		ReducedMotionBackup.HeadBobScale = HeadBobScale;
+		ReducedMotionBackup.BodySwayScale = Camera.BodySwayScale;
+		ReducedMotionBackup.MountShakeScale = Camera.MountShakeScale;
+		ReducedMotionBackup.MotionBlurScale = MotionBlurScale;
+		ReducedMotionBackup.PostureTransition = Camera.PostureTransition;
+		HeadBobScale = 0.0f;
+		Camera.BodySwayScale = ReducedMotionBodySway;
+		Camera.MountShakeScale = 0.0f;
+		MotionBlurScale = 0.0f;
+		Camera.PostureTransition = ERbPostureTransition::Quick;
+	}
+	else if (ReducedMotionBackup.bValid)
+	{
+		HeadBobScale = ReducedMotionBackup.HeadBobScale;
+		Camera.BodySwayScale = ReducedMotionBackup.BodySwayScale;
+		Camera.MountShakeScale = ReducedMotionBackup.MountShakeScale;
+		MotionBlurScale = ReducedMotionBackup.MotionBlurScale;
+		Camera.PostureTransition = ReducedMotionBackup.PostureTransition;
+		ReducedMotionBackup.bValid = false;
+	}
+	bReducedMotion = bOn;
 }
 
 void URbGameUserSettings::SetQualityOption(ERbQualityOption Option, int32 Level)
 {
+	BeginCustom();
 	Level = RbQualityPrivate::ClampLevel(Level);
 	if (int32* Field = RbQualityPrivate::GroupField(ScalabilityQuality, Option))
 	{
@@ -264,6 +361,7 @@ void URbGameUserSettings::SetQualityOption(ERbQualityOption Option, int32 Level)
 		VolumetricFogQuality = Level;
 	}
 	QualityPreset = ERbQualityPreset::Custom;
+	SyncCustomLevels();
 }
 
 int32 URbGameUserSettings::GetQualityOption(ERbQualityOption Option) const
@@ -277,8 +375,10 @@ int32 URbGameUserSettings::GetQualityOption(ERbQualityOption Option) const
 
 void URbGameUserSettings::SetScreenPercentage(float Percent)
 {
+	BeginCustom();
 	ScalabilityQuality.ResolutionQuality = FMath::Clamp(Percent, 25.0f, 200.0f);
 	QualityPreset = ERbQualityPreset::Custom;
+	SyncCustomLevels();
 }
 
 float URbGameUserSettings::GetScreenPercentage() const
@@ -312,7 +412,9 @@ void URbGameUserSettings::SetToDefaults()
 {
 	Super::SetToDefaults();
 	QualityPreset = ERbQualityPreset::High; // the M1 default (decisions: High = RTX 3070 Ti test tier)
+	CustomBasePreset = ERbQualityPreset::High;
 	FillFromPresetLevel(PresetLevel(QualityPreset));
+	ReducedMotionBackup = FRbReducedMotionBackup();
 	CameraPreset = ERbCameraPreset::Eyes;
 	VerticalFovDeg = 50.0f;
 	MouseDpi = 800.0f;
@@ -331,10 +433,7 @@ void URbGameUserSettings::SetToDefaults()
 void URbGameUserSettings::LoadSettings(bool bForceReload)
 {
 	Super::LoadSettings(bForceReload); // ScalabilityQuality = the engine's loaded group state
-	if (QualityPreset != ERbQualityPreset::Custom)
-	{
-		FillFromPresetLevel(PresetLevel(QualityPreset)); // a preset is authoritative for every option
-	}
+	RestoreQualityAfterLoad();         // a named preset re-derives every option, a Custom mix restores its own levels
 }
 
 void URbGameUserSettings::ApplyNonResolutionSettings()
@@ -365,7 +464,15 @@ void URbGameUserSettings::ValidateSettings()
 	Super::ValidateSettings();
 	VolumetricFogQuality = RbQualityPrivate::ClampLevel(VolumetricFogQuality);
 	VerticalFovDeg = FMath::Clamp(VerticalFovDeg, 40.0f, 75.0f);
-	MouseDpi = FMath::Clamp(MouseDpi, 100.0f, 32000.0f);
+	MouseDpi = FMath::Clamp(MouseDpi, 200.0f, 6400.0f); // the settings row's range (18.4)
+	if (CustomBasePreset == ERbQualityPreset::Custom)
+	{
+		CustomBasePreset = ERbQualityPreset::High;
+	}
+	if (CameraPreset == ERbCameraPreset::Broadcast)
+	{
+		CameraPreset = ERbCameraPreset::Eyes; // Broadcast is a replay camera, never the player's look
+	}
 	HeadBobScale = FMath::Clamp(HeadBobScale, 0.0f, 1.0f);
 	MotionBlurScale = FMath::Clamp(MotionBlurScale, 0.0f, 1.0f);
 	GrainScale = FMath::Clamp(GrainScale, 0.0f, 1.0f);

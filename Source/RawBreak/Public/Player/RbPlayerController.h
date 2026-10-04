@@ -13,7 +13,9 @@
 //   Pause (Esc)           M2: stops a running replay, else URbUiSubsystem::TogglePauseMenu (M2-D). Replaces M1's legacy Esc key
 //                         binding (the Pause action of URbInputSetup triggers while the game is paused).
 //   CycleOption (Q / E)   the director's highlighted decision option -1 / +1
-// Mouse: captured, hidden, game-only input (the raw-input thread of the stroke needs the high-precision mouse mode).
+// Mouse: captured, hidden, game-only input (the raw-input thread of the stroke needs the high-precision mouse mode); the mouse axes
+// are neutral (M2-F, P3: raw counts in the Look action, NeutraliseMouseAxes). Pausing: the pause menu (M2-D) uses SetPause /
+// SetInputMode from its own code; the stroke component notices the paused world and drops a held stroke (18.2).
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
@@ -24,6 +26,7 @@ class URbInputSetup;
 class URbMatchDirector;
 class URbOverlayComponent;
 class URbReplaySubsystem;
+class UPlayerInput;
 struct FInputActionValue;
 
 UCLASS()
@@ -48,6 +51,10 @@ public:
 	bool HandleCycleOption(float Direction);
 	// Esc: replay back, else the pause menu (M2).
 	void HandlePause();
+
+	// M2-F (P3): sets the mouse axes of Input to neutral (sensitivity 1, no dead zone / exponent / invert), so the Look action carries
+	// raw counts. True if something changed. RegisterMappingContext calls it before the mapping context is added.
+	static bool NeutraliseMouseAxes(UPlayerInput* Input);
 
 	// APlayerController
 	virtual void BeginPlay() override;

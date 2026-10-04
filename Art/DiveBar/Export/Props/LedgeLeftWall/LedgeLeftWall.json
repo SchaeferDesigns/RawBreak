@@ -1,0 +1,85 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {},
+ "asset_id": "LedgeLeftWall",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "board_m": 0.038,
+ "bounds_max_m": [
+  0.25,
+  2.7,
+  1.07045
+ ],
+ "bounds_min_m": [
+  0.0,
+  -2.7,
+  0.852
+ ],
+ "bounds_with_hulls_max_m": [
+  0.25,
+  2.7,
+  1.07045
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -2.7,
+  0.852
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueBlock",
+ "element": "E17",
+ "external_inputs": [],
+ "family": "Ledges",
+ "fbx": "SM_DB_LedgeLeftWall.fbx",
+ "front": "+X",
+ "generator": "db_ledges.py",
+ "geometry_sha256": "f4ddce0f4d3aa756ae9f5b2f51518fb47510b896569747b62c49df206a11f1ac",
+ "ledger_asset_id": "SM_DB_LedgeLeftWall",
+ "material_slots": [
+  "MI_DB_Wood_Ledge",
+  "MI_DB_Paint_BlackSteel",
+  "MI_DB_Steel_Zinc"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "wall_plane_bottom_centre",
+ "placement_hint_ue_cm": {
+  "location": [
+   1310.0,
+   0.0,
+   0.0
+  ],
+  "note": "E17 X 10.40 - 15.80, Y 0 - 0.25 on the left wall; front faces +Y",
+  "yaw_deg": 90.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": 1.0704,
+   "spec_m": 1.07,
+   "tolerance_m": 0.004,
+   "what": "top z"
+  }
+ ],
+ "spec_id": "E17",
+ "target_dimensions_m": [
+  0.25,
+  5.4,
+  0.21845
+ ],
+ "tolerance_m": 0.01,
+ "top_z_m": 1.07,
+ "translucent": false,
+ "triangles": 2256,
+ "triangles_render": 2244,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Ledges",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Ledges/SM_DB_LedgeLeftWall",
+ "underside_z_m": 1.032,
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/LedgeLeftWall/T_DB_LedgeLeftWall_WM.png"
+}

@@ -1,0 +1,303 @@
+{
+ "Cardboard002": {
+  "maps": {
+   "BC": "T_DB_CC0_Cardboard002_BC.jpg",
+   "M": "T_DB_CC0_Cardboard002_M.jpg",
+   "N": "T_DB_CC0_Cardboard002_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Cardboard002",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "MI_DB_Cardboard (beer cases C11)"
+ },
+ "Fingerprints002": {
+  "maps": {
+   "BC": "T_DB_CC0_Fingerprints002_BC.jpg",
+   "M": "T_DB_CC0_Fingerprints002_M.jpg",
+   "N": "T_DB_CC0_Fingerprints002_N.jpg",
+   "O": "T_DB_CC0_Fingerprints002_O.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Fingerprints002",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "fingerprint / smear mask (glass, chrome, screens)"
+ },
+ "Foam002": {
+  "maps": {
+   "BC": "T_DB_CC0_Foam002_BC.jpg",
+   "M": "T_DB_CC0_Foam002_M.jpg",
+   "N": "T_DB_CC0_Foam002_N.jpg",
+   "O": "T_DB_CC0_Foam002_O.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Foam002",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "MI_DB_Foam_Exposed (stool tears)"
+ },
+ "Leaking003": {
+  "maps": {
+   "BC": "T_DB_CC0_Leaking003_BC.jpg",
+   "M": "T_DB_CC0_Leaking003_M.jpg",
+   "N": "T_DB_CC0_Leaking003_N.jpg",
+   "O": "T_DB_CC0_Leaking003_O.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Leaking003",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "water-stain decals (ceiling / wall leaks, decal set Water)"
+ },
+ "Metal009": {
+  "maps": {
+   "BC": "T_DB_CC0_Metal009_BC.jpg",
+   "M": "T_DB_CC0_Metal009_M.jpg",
+   "N": "T_DB_CC0_Metal009_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Metal009",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "MI_DB_Alu_Trim (brushed aluminium)"
+ },
+ "PaintedMetal009": {
+  "maps": {
+   "BC": "T_DB_CC0_PaintedMetal009_BC.jpg",
+   "M": "T_DB_CC0_PaintedMetal009_M.jpg",
+   "N": "T_DB_CC0_PaintedMetal009_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/PaintedMetal009",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "MI_DB_Paint_BlackSteel, MI_DB_Paint_Cabinet chips"
+ },
+ "Rubber004": {
+  "maps": {
+   "BC": "T_DB_CC0_Rubber004_BC.jpg",
+   "M": "T_DB_CC0_Rubber004_M.jpg",
+   "N": "T_DB_CC0_Rubber004_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Rubber004",
+  "size_m": [
+   0.75,
+   0.75
+  ],
+  "source": "ambientcg",
+  "use": "MI_DB_Rubber_Mat"
+ },
+ "Scratches002": {
+  "maps": {
+   "BC": "T_DB_CC0_Scratches002_BC.jpg",
+   "N": "T_DB_CC0_Scratches002_N.jpg",
+   "O": "T_DB_CC0_Scratches002_O.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Scratches002",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "scratch mask (plexi, chrome, lacquer)"
+ },
+ "Smear006": {
+  "maps": {
+   "BC": "T_DB_CC0_Smear006_BC.jpg",
+   "N": "T_DB_CC0_Smear006_N.jpg",
+   "O": "T_DB_CC0_Smear006_O.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Smear006",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "smear / sticky mask (floor, bar top)"
+ },
+ "SurfaceImperfections003": {
+  "maps": {
+   "BC": "T_DB_CC0_SurfaceImperfections003_BC.jpg",
+   "N": "T_DB_CC0_SurfaceImperfections003_N.jpg",
+   "O": "T_DB_CC0_SurfaceImperfections003_O.jpg"
+  },
+  "px": 2048,
+  "ref": "https://ambientcg.com/a/SurfaceImperfections003",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "grime / scuff break-up mask (N_grunge, every master)"
+ },
+ "Wood089": {
+  "maps": {
+   "BC": "T_DB_CC0_Wood089_BC.jpg",
+   "M": "T_DB_CC0_Wood089_M.jpg",
+   "N": "T_DB_CC0_Wood089_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://ambientcg.com/a/Wood089",
+  "size_m": null,
+  "source": "ambientcg",
+  "use": "MI_DB_Plywood_Painted (column shelf, backs)"
+ },
+ "concrete_block_wall": {
+  "maps": {
+   "BC": "T_DB_CC0_concrete_block_wall_BC.jpg",
+   "M": "T_DB_CC0_concrete_block_wall_M.jpg",
+   "N": "T_DB_CC0_concrete_block_wall_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://polyhaven.com/a/concrete_block_wall",
+  "size_m": [
+   2.0,
+   2.0
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Block_Painted (back wall, corridor)"
+ },
+ "fabric_leather_02": {
+  "maps": {
+   "BC": "T_DB_CC0_fabric_leather_02_BC.jpg",
+   "M": "T_DB_CC0_fabric_leather_02_M.jpg",
+   "N": "T_DB_CC0_fabric_leather_02_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://polyhaven.com/a/fabric_leather_02",
+  "size_m": [
+   0.5,
+   0.5
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Vinyl_* booth tufting / grain detail"
+ },
+ "fine_grained_wood": {
+  "maps": {
+   "BC": "T_DB_CC0_fine_grained_wood_BC.jpg",
+   "M": "T_DB_CC0_fine_grained_wood_M.jpg",
+   "N": "T_DB_CC0_fine_grained_wood_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://polyhaven.com/a/fine_grained_wood",
+  "size_m": [
+   0.6,
+   0.6
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Wood_Stained (cue rack, back bar, shelves)"
+ },
+ "lacquered_cherry_wood": {
+  "maps": {
+   "BC": "T_DB_CC0_lacquered_cherry_wood_BC.jpg",
+   "M": "T_DB_CC0_lacquered_cherry_wood_M.jpg",
+   "N": "T_DB_CC0_lacquered_cherry_wood_N.jpg"
+  },
+  "px": 2048,
+  "ref": "https://polyhaven.com/a/lacquered_cherry_wood",
+  "size_m": [
+   1.0,
+   1.0
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Wood_Lacquered_Bar (bar top, H08)"
+ },
+ "leather_red_02": {
+  "maps": {
+   "M": "T_DB_CC0_leather_red_02_M.jpg",
+   "N": "T_DB_CC0_leather_red_02_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://polyhaven.com/a/leather_red_02",
+  "size_m": [
+   0.6,
+   0.6
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Vinyl_* micro normal (stools, armrest)"
+ },
+ "old_linoleum_flooring_01": {
+  "maps": {
+   "M": "T_DB_CC0_old_linoleum_flooring_01_M.jpg",
+   "N": "T_DB_CC0_old_linoleum_flooring_01_N.jpg"
+  },
+  "px": 2048,
+  "ref": "https://polyhaven.com/a/old_linoleum_flooring_01",
+  "size_m": [
+   1.99,
+   1.99
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_VCT_* micro-surface (normal / roughness detail only; colours procedural)"
+ },
+ "painted_brick": {
+  "maps": {
+   "BC": "T_DB_CC0_painted_brick_BC.jpg",
+   "M": "T_DB_CC0_painted_brick_M.jpg",
+   "N": "T_DB_CC0_painted_brick_N.jpg"
+  },
+  "px": 2048,
+  "ref": "https://polyhaven.com/a/painted_brick",
+  "size_m": [
+   1.8,
+   1.8
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Brick_PaintedGreen (front room walls, M2-A architecture)"
+ },
+ "painted_plaster_wall": {
+  "maps": {
+   "BC": "T_DB_CC0_painted_plaster_wall_BC.jpg",
+   "M": "T_DB_CC0_painted_plaster_wall_M.jpg",
+   "N": "T_DB_CC0_painted_plaster_wall_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://polyhaven.com/a/painted_plaster_wall",
+  "size_m": [
+   2.0,
+   2.0
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Plaster_Cream / _Oxblood (upper walls)"
+ },
+ "rosewood_veneer1": {
+  "maps": {
+   "BC": "T_DB_CC0_rosewood_veneer1_BC.jpg",
+   "M": "T_DB_CC0_rosewood_veneer1_M.jpg",
+   "N": "T_DB_CC0_rosewood_veneer1_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://polyhaven.com/a/rosewood_veneer1",
+  "size_m": [
+   2.43,
+   2.43
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Laminate_Walnut (booth tables; printed grain, recoloured)"
+ },
+ "rusty_painted_metal": {
+  "maps": {
+   "BC": "T_DB_CC0_rusty_painted_metal_BC.jpg",
+   "M": "T_DB_CC0_rusty_painted_metal_M.jpg",
+   "N": "T_DB_CC0_rusty_painted_metal_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://polyhaven.com/a/rusty_painted_metal",
+  "size_m": [
+   2.2,
+   2.2
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Tin_Painted edges, MI_DB_Paint_BlackSteel chips, LOW CLEARANCE sign"
+ },
+ "wood_plank_wall": {
+  "maps": {
+   "BC": "T_DB_CC0_wood_plank_wall_BC.jpg",
+   "M": "T_DB_CC0_wood_plank_wall_M.jpg",
+   "N": "T_DB_CC0_wood_plank_wall_N.jpg"
+  },
+  "px": 1024,
+  "ref": "https://polyhaven.com/a/wood_plank_wall",
+  "size_m": [
+   1.0,
+   1.0
+  ],
+  "source": "polyhaven",
+  "use": "MI_DB_Wood_PlankWall (bar die, H08)"
+ }
+}

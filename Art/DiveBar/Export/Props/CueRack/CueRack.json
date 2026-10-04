@@ -1,0 +1,138 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {
+  "slot_empty_3": [
+   0.07,
+   0.13667,
+   0.25
+  ],
+  "slot_empty_9": [
+   0.07,
+   -0.41,
+   0.25
+  ]
+ },
+ "asset_id": "CueRack",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.12,
+  0.5,
+  1.81099
+ ],
+ "bounds_min_m": [
+  0.0,
+  -0.5,
+  0.2
+ ],
+ "bounds_with_hulls_max_m": [
+  0.12,
+  0.5,
+  1.81099
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.5,
+  0.2
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueBlock",
+ "cues_in": [
+  57,
+  57,
+  57,
+  57,
+  52,
+  52,
+  48,
+  36
+ ],
+ "cup_z_m": 0.25,
+ "element": "E12",
+ "external_inputs": [],
+ "family": "CueRack",
+ "fbx": "SM_DB_CueRack.fbx",
+ "frame_z_m": [
+  0.2,
+  1.6
+ ],
+ "front": "+X",
+ "generator": "db_cue_rack.py",
+ "geometry_sha256": "483c40f8714a8b6ca83ea069a4492bc87af19e37631fb6e57263e97e3fb4d603",
+ "ledger_asset_id": "SM_DB_CueRack",
+ "material_slots": [
+  "MI_DB_Wood_Stained",
+  "MI_DB_Felt_Green",
+  "MI_DB_Chrome",
+  "MI_DB_CueShaft_Maple",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Plastic_White",
+  "MI_DB_Chalk_Blue",
+  "MI_DB_Tape_Electrical"
+ ],
+ "nanite": true,
+ "notes": "prop cues; TS-2: the level may tag the component for the cue-sweep clatter",
+ "owner": "M2-B",
+ "pivot": "wall_plane_bottom_centre",
+ "placement_hint_ue_cm": {
+  "location": [
+   1380.0,
+   732.0,
+   0.0
+  ],
+  "note": "E12 X 13.30 - 14.30 on the right wall (Y 7.32); front faces -Y",
+  "yaw_deg": -90.0
+ },
+ "priority": "hero",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.12,
+    1.0
+   ],
+   "spec_m": [
+    null,
+    1.0
+   ],
+   "tolerance_m": 0.002,
+   "what": "frame width",
+   "z_range_m": [
+    0.21000000000000002,
+    1.5950000000000002
+   ]
+  },
+  {
+   "measured_m": [
+    0.2,
+    1.6,
+    0.12
+   ],
+   "spec_m": [
+    0.2,
+    1.6,
+    0.12
+   ],
+   "tolerance_m": 0.002,
+   "what": "frame z range / depth"
+  }
+ ],
+ "spec_id": "H05",
+ "target_dimensions_m": [
+  0.12,
+  1.0,
+  1.61099
+ ],
+ "tolerance_m": 0.002,
+ "translucent": false,
+ "triangles": 12512,
+ "triangles_render": 12500,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/CueRack",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/CueRack/SM_DB_CueRack",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/CueRack/T_DB_CueRack_WM.png"
+}

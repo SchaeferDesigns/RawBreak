@@ -1,0 +1,34 @@
+{
+ "acoustic_material": "steel",
+ "asset_id": "HvacDiffuser",
+ "bounds_max_m": [
+  0.298,
+  0.298,
+  0.085
+ ],
+ "bounds_min_m": [
+  -0.298,
+  -0.298,
+  0.0
+ ],
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Lighting",
+ "fbx": "SM_DB_HvacDiffuser.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Paint_White",
+  "MI_DB_Steel_Black"
+ ],
+ "mesh": "SM_DB_HvacDiffuser",
+ "notes": "2 x 2 ft louvered supply diffuser (M16), nicotine and dust by the material",
+ "owner": "M2-A",
+ "pivot": "ceiling_center",
+ "profile": "RbVenueProp",
+ "tags": [
+  "RbDB_Ceiling"
+ ],
+ "triangles": 226,
+ "ue_folder": "Arch"
+}

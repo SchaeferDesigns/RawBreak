@@ -1,0 +1,83 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Bottle_Hollenbeck",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "body_diameter_m": 0.061,
+ "bounds_max_m": [
+  0.03075,
+  0.0307,
+  0.2375
+ ],
+ "bounds_min_m": [
+  -0.0305,
+  -0.0307,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.03075,
+  0.0307,
+  0.2375
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.0305,
+  -0.0307,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueProp",
+ "design": {
+  "H": 0.235,
+  "R": 0.0305,
+  "closure": "crown",
+  "fill": 0.92,
+  "glass": "Glass_Amber",
+  "hb": 0.105,
+  "hs": 0.06,
+  "kind": "beer",
+  "label": "bottle_hollenbeck",
+  "label_z": 0.052,
+  "liquid": "Liquid_Beer",
+  "rn": 0.0125,
+  "shoulder": "beer"
+ },
+ "external_inputs": [],
+ "family": "Bottles",
+ "fbx": "SM_DB_Bottle_Hollenbeck.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "630d415d42e9716592649e45936891850562beacf99e21b05b65b1b0bfc086a5",
+ "glass_height_m": 0.235,
+ "ledger_asset_id": "SM_DB_Bottle_Hollenbeck",
+ "material_slots": [
+  "MI_DB_Glass_Amber",
+  "MI_DB_Liquid_Beer",
+  "MI_DB_Label_Atlas",
+  "MI_DB_Paint_Cabinet"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "H14",
+ "target_dimensions_m": [
+  0.06125,
+  0.061,
+  0.2375
+ ],
+ "tolerance_m": 0.01,
+ "translucent": true,
+ "triangles": 3186,
+ "triangles_render": 3114,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Bottles",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Bottles/SM_DB_Bottle_Hollenbeck",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Bottle_Hollenbeck/T_DB_Bottle_Hollenbeck_WM.png"
+}

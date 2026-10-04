@@ -1,0 +1,41 @@
+{
+ "acoustic_material": "vct_on_concrete",
+ "acoustic_surfaces": [
+  {
+   "area_m2": 144.08,
+   "material": "vct_on_concrete",
+   "zone": "all"
+  }
+ ],
+ "asset_id": "Arch_Floor",
+ "bounds_max_m": [
+  20.32,
+  7.65,
+  0.006
+ ],
+ "bounds_min_m": [
+  -0.33,
+  -0.33,
+  -0.1
+ ],
+ "collision_hulls": 1,
+ "external_inputs": [],
+ "family": "Architecture",
+ "fbx": "SM_DB_Arch_Floor.fbx",
+ "frame": "venue",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_VCT_Oxblood",
+  "MI_DB_Alu_Trim",
+  "MI_DB_VCT_Beige"
+ ],
+ "mesh": "SM_DB_Arch_Floor",
+ "notes": "floor slab: VCT on concrete (main room), beige VCT (rear addition)",
+ "owner": "M2-A",
+ "phys_material": "PM_RbSurface_Vct",
+ "pivot": "venue origin",
+ "priority": "mid",
+ "profile": "RbVenueBlock",
+ "triangles": 198,
+ "ue_folder": "Arch"
+}

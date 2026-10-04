@@ -1,0 +1,64 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Mug_B",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.043,
+  0.08635,
+  0.134
+ ],
+ "bounds_min_m": [
+  -0.043,
+  -0.043,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.043,
+  0.08635,
+  0.134
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.043,
+  -0.043,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueProp",
+ "external_inputs": [],
+ "family": "Mugs",
+ "fbx": "SM_DB_Mug_B.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "758c3b2766bbf02d941d32f008e3d3eadec5d5d6cb61fbe598d15d2fe683540d",
+ "ledger_asset_id": "SM_DB_Mug_B",
+ "material_slots": [
+  "MI_DB_Ceramic_Glazed"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec": "stoneware beer mug, 0.4-0.5 l",
+ "spec_id": "M11",
+ "target_dimensions_m": [
+  0.086,
+  0.12935,
+  0.134
+ ],
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 964,
+ "triangles_render": 908,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Mugs",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Mugs/SM_DB_Mug_B",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Mug_B/T_DB_Mug_B_WM.png"
+}

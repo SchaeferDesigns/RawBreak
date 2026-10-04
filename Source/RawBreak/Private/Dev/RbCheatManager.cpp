@@ -1,8 +1,11 @@
 #include "Dev/RbCheatManager.h"
 
 #include "RawBreak.h"
+#include "Balls/RbLooseBall.h"
+#include "Balls/RbLooseBallSubsystem.h"
 #include "Game/RbGameMode.h"
 #include "Game/RbMatchDirector.h"
+#include "Game/RbTableSubsystem.h"
 #include "Player/RbPlayerController.h"
 #include "Player/RbStrokeComponent.h"
 #include "Replay/RbReplaySubsystem.h"
@@ -154,6 +157,14 @@ namespace RbCheatUtil
 
 URbMatchDirector* URbCheatManager::GetDirector() const
 {
+	// The PLAYER's table session (M2-E, 18.6.2); the game mode's accessor is the same director.
+	if (const URbTableSubsystem* Tables = URbTableSubsystem::Get(this))
+	{
+		if (URbMatchDirector* Director = Tables->GetPlayerDirector())
+		{
+			return Director;
+		}
+	}
 	const ARbGameMode* GameMode = ARbGameMode::Get(this);
 	return GameMode ? GameMode->GetDirector() : nullptr;
 }
@@ -285,8 +296,7 @@ bool URbCheatManager::StartScriptedStroke(float SpeedMps, float AzimuthDeg)
 	using namespace RbCheatUtil;
 	URbMatchDirector* Director = GetDirector();
 	URbStrokeComponent* Stroke = Director ? Director->GetStrokeComponent() : nullptr;
-	const ARbGameMode* GameMode = ARbGameMode::Get(this);
-	const ARbTable* Table = GameMode ? GameMode->GetTable() : nullptr;
+	const ARbTable* Table = Director ? Director->GetTable() : nullptr;
 	const auto Refuse = [SpeedMps, AzimuthDeg](const TCHAR* Why) {
 		UE_LOG(LogRawBreak, Warning, TEXT("RbCheat: RbStroke %.3f m/s phi %.3f refused: %s"), SpeedMps, AzimuthDeg, Why);
 		return false;
@@ -440,8 +450,8 @@ void URbCheatManager::RbNewMatch(int32 Mode)
 	Enqueue(TEXT("RbNewMatch"), [this, Mode]() {
 		StopReplayForMatchCommand();
 		const ARbGameMode* GameMode = ARbGameMode::Get(this);
-		URbMatchDirector* Director = GameMode ? GameMode->GetDirector() : nullptr;
-		if (!Director)
+		URbMatchDirector* Director = GetDirector();
+		if (!Director || !GameMode)
 		{
 			UE_LOG(LogRawBreak, Warning, TEXT("RbCheat: RbNewMatch: no director"));
 			return;
@@ -530,6 +540,34 @@ void URbCheatManager::RbWait(float Seconds)
 void URbCheatManager::RbDumpState()
 {
 	Enqueue(TEXT("RbDumpState"), [this]() { UE_LOG(LogRawBreak, Display, TEXT("%s"), *MakeStateLine()); });
+}
+
+void URbCheatManager::RbLooseBalls()
+{
+	Enqueue(TEXT("RbLooseBalls"), [this]() {
+		URbLooseBallSubsystem* LooseBalls = URbLooseBallSubsystem::Get(this);
+		if (!LooseBalls)
+		{
+			return;
+		}
+		for (ARbLooseBall* Ball : LooseBalls->GetLooseBalls())
+		{
+			const FVector P = Ball->GetActorLocation();
+			UE_LOG(LogRawBreak, Display, TEXT("RbLooseBall: table=%d ball=%d at (%.1f, %.1f, %.1f) resting=%d impacts=%d floor=%d unreachable=%.1f s"),
+				Ball->GetTableIndex(), Ball->GetBallId(), P.X, P.Y, P.Z, Ball->IsResting() ? 1 : 0, Ball->GetImpactCount(), Ball->GetFloorImpactCount(),
+				LooseBalls->GetUnreachableSeconds(*Ball));
+		}
+		UE_LOG(LogRawBreak, Display, TEXT("RbCheat: RbLooseBalls: %d"), LooseBalls->GetNumLooseBalls());
+	});
+}
+
+void URbCheatManager::RbReturnBalls()
+{
+	Enqueue(TEXT("RbReturnBalls"), [this]() {
+		URbLooseBallSubsystem* LooseBalls = URbLooseBallSubsystem::Get(this);
+		const int32 Count = LooseBalls ? LooseBalls->ReturnAll(INDEX_NONE, ERbLooseBallReturn::Manual) : 0;
+		UE_LOG(LogRawBreak, Display, TEXT("RbCheat: RbReturnBalls: %d returned"), Count);
+	});
 }
 
 FString URbCheatManager::MakeStateLine() const

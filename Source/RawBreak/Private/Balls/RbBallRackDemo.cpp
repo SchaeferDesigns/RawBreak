@@ -3,10 +3,10 @@
 #include "RawBreak.h"
 #include "Balls/RbBallSet.h"
 #include "Balls/RbShotPlaybackComponent.h"
+#include "Game/RbTableSubsystem.h"
 #include "Table/RbTable.h"
 
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Math/RandomStream.h"
 
@@ -122,11 +122,9 @@ void ARbBallRackDemo::BeginPlay()
 	ARbTable* UseTable = Table;
 	if (!UseTable)
 	{
-		for (TActorIterator<ARbTable> It(World); It; ++It)
-		{
-			UseTable = *It;
-			break;
-		}
+		// The player's (tagged or lowest-index) table of the level (M2-E: never "the first table found").
+		const URbTableSubsystem* Tables = URbTableSubsystem::Get(World);
+		UseTable = Tables ? Tables->GetPlayerTable() : nullptr;
 	}
 	if (!UseTable)
 	{

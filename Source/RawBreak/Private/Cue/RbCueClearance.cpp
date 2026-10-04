@@ -1,6 +1,7 @@
 #include "Cue/RbCueClearance.h"
 
 #include "Balls/RbBallSet.h"
+#include "Core/RbAssetPaths.h"
 #include "Cue/RbCue.h"
 #include "Table/RbTable.h"
 
@@ -725,7 +726,7 @@ namespace
 			const FCollisionShape Shape = FCollisionShape::MakeCapsule(static_cast<float>(Radius), static_cast<float>(0.5 * Length + Radius));
 			const FQuat Rotation = FQuat::FindBetweenNormals(FVector::UpVector, Axis / Length);
 			Overlaps.Reset();
-			World->OverlapMultiByChannel(Overlaps, 0.5 * (A + B), Rotation, ECC_WorldDynamic, Shape, Params, Response);
+			World->OverlapMultiByChannel(Overlaps, 0.5 * (A + B), Rotation, RbAssetPaths::Collision::CueSweepChannel, Shape, Params, Response);
 			for (const FOverlapResult& Overlap : Overlaps)
 			{
 				if (!Overlap.bBlockingHit)

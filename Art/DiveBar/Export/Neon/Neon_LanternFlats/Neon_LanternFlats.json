@@ -1,0 +1,52 @@
+{
+ "acoustic_material": "glass",
+ "asset_id": "Neon_LanternFlats",
+ "bounds_max_m": [
+  16.46,
+  3.38404,
+  1.88403
+ ],
+ "bounds_min_m": [
+  16.3775,
+  2.41429,
+  1.34
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 0,
+ "design": "Art/DiveBar/neon/N5.svg",
+ "electrodes": 6,
+ "external_inputs": [],
+ "family": "Neon",
+ "fbx": "SM_DB_Neon_LanternFlats.fbx",
+ "frame": "venue",
+ "generator": "db_neon.py",
+ "material_slots": [
+  "MI_DB_Neon_CobaltBlue",
+  "MI_DB_Steel_Black",
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Neon_RubyRed",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Rubber_Black"
+ ],
+ "mesh": "SM_DB_Neon_LanternFlats",
+ "min_bend_radius_m": 0.02,
+ "notes": "emissive tubes out of Lumen GI (the proxy rect light lights the room, 4.1); dead segments steady off (S8)",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "profile": "RbVenueProp",
+ "proxy_flux_lm": 189.9,
+ "sign": "N5",
+ "supports": 10,
+ "triangles": 8636,
+ "tube_diameter_m": 0.015,
+ "tube_flux_lm": {
+  "CobaltBlue": 484.0,
+  "RubyRed": 112.6
+ },
+ "tube_flux_total_lm": 596.6,
+ "tube_length_m": {
+  "CobaltBlue": 2.042,
+  "RubyRed": 0.954
+ },
+ "ue_folder": "Lighting/Neon"
+}

@@ -1,0 +1,40 @@
+{
+ "acoustic_material": "steel",
+ "asset_id": "Troffer",
+ "bounds_max_m": [
+  0.605,
+  0.3,
+  0.11
+ ],
+ "bounds_min_m": [
+  -0.605,
+  -0.3,
+  0.0
+ ],
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Lighting",
+ "fbx": "SM_DB_Troffer.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Paint_White",
+  "MI_DB_Troffer_Lens"
+ ],
+ "mesh": "SM_DB_Troffer",
+ "notes": "2 x 4 ft troffer (Lights-Up state, E23); lens emissive follows the light's state ramp",
+ "owner": "M2-A",
+ "pivot": "ceiling_center",
+ "profile": "RbVenueProp",
+ "tags": [
+  "RbDB_Ceiling"
+ ],
+ "target_m": [
+  1.21,
+  0.6,
+  0.11
+ ],
+ "tolerance_m": 0.002,
+ "triangles": 62,
+ "ue_folder": "Lighting"
+}

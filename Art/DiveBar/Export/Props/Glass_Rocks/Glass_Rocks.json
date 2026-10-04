@@ -1,0 +1,63 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Glass_Rocks",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.042,
+  0.042,
+  0.09
+ ],
+ "bounds_min_m": [
+  -0.042,
+  -0.042,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.042,
+  0.042,
+  0.09
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.042,
+  -0.042,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "external_inputs": [],
+ "family": "Glasses",
+ "fbx": "SM_DB_Glass_Rocks.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "c3594bf90ab6ee6c59cd169d630b9e9344781ad6b577431d9ff01dc475557cf0",
+ "ledger_asset_id": "SM_DB_Glass_Rocks",
+ "material_slots": [
+  "MI_DB_Glass_Clear"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "C02",
+ "target_dimensions_m": [
+  0.084,
+  0.084,
+  0.09
+ ],
+ "tolerance_m": 0.01,
+ "translucent": true,
+ "triangles": 716,
+ "triangles_render": 672,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Glasses",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Glasses/SM_DB_Glass_Rocks",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Glass_Rocks/T_DB_Glass_Rocks_WM.png"
+}

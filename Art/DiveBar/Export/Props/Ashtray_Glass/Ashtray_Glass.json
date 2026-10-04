@@ -1,0 +1,63 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Ashtray_Glass",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.0525,
+  0.0525,
+  0.032
+ ],
+ "bounds_min_m": [
+  -0.0525,
+  -0.0525,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.0525,
+  0.0525,
+  0.032
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.0525,
+  -0.0525,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "external_inputs": [],
+ "family": "Clutter",
+ "fbx": "SM_DB_Ashtray_Glass.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "d917f16736b7a224fe27fb72560e3011d5542c393f61f55781f72d1ad3417c11",
+ "ledger_asset_id": "SM_DB_Ashtray_Glass",
+ "material_slots": [
+  "MI_DB_Glass_Ashtray"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "C08",
+ "target_dimensions_m": [
+  0.105,
+  0.105,
+  0.032
+ ],
+ "tolerance_m": 0.01,
+ "translucent": true,
+ "triangles": 1340,
+ "triangles_render": 1296,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Clutter",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Clutter/SM_DB_Ashtray_Glass",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Ashtray_Glass/T_DB_Ashtray_Glass_WM.png"
+}

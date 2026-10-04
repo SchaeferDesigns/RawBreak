@@ -93,7 +93,15 @@ enum class ERbTablePart : uint8
 	Apron,        // outer rail faces and the table body skirt
 	PocketLiners, // hole walls / leather pockets from PocketGeometry (liner material)
 	Sights,       // 18 diamonds / dots on the rail caps (sight material)
-	Legs,         // legs / base (M1: simple blocks)
+	Legs,         // legs / base (M1: simple blocks; M2: 9-ft legs + plinths, 7-ft pedestal legs)
+	// --- M2-L (Docs/ue-architecture.md 18.7; append-only block owned by M2-L) ---
+	RubberStrip,   // the cushion rubber's black lip along the bottom of each cushion face (below the nose line)
+	PocketBuckets, // 9-ft leather drop pockets / 7-ft coin-op gully throats under the pocket holes
+	Castings,      // 7-ft coin-op black ABS: corner and side pocket castings, trap window frame, ball tray, return cup (empty on 9-ft)
+	Cabinet,       // 7-ft coin-op cabinet boards in woodgrain laminate (empty on 9-ft)
+	Trim,          // 7-ft aluminium trim bands and corner angles (empty on 9-ft)
+	Hardware,      // levelers (both), 7-ft coin mechanism, coin door + lock, cue-ball return ring (chrome / steel)
+	Window,        // 7-ft ball trap window (scratched plexiglass; empty on 9-ft)
 	Count UMETA(Hidden)
 };
 

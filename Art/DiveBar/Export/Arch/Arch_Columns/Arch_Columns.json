@@ -1,0 +1,31 @@
+{
+ "acoustic_material": "steel",
+ "asset_id": "Arch_Columns",
+ "bounds_max_m": [
+  13.85,
+  3.79,
+  2.44
+ ],
+ "bounds_min_m": [
+  4.44,
+  3.53,
+  0.0
+ ],
+ "collision_hulls": 3,
+ "external_inputs": [],
+ "family": "Architecture",
+ "fbx": "SM_DB_Arch_Columns.fbx",
+ "frame": "venue",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Paint_BlackSteel"
+ ],
+ "mesh": "SM_DB_Arch_Columns",
+ "notes": "steel lally columns C1-C3 (114 mm), base and cap plates",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "priority": "mid",
+ "profile": "RbVenueBlock",
+ "triangles": 720,
+ "ue_folder": "Arch"
+}

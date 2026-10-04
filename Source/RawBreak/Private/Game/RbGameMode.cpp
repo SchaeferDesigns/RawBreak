@@ -4,6 +4,7 @@
 #include "Balls/RbBallSet.h"
 #include "Balls/RbShotPlaybackComponent.h"
 #include "Cue/RbCue.h"
+#include "Game/RbTableSubsystem.h"
 #include "Player/RbPlayerCharacter.h"
 #include "Player/RbPlayerController.h"
 #include "Player/RbStrokeComponent.h"
@@ -12,7 +13,6 @@
 
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -20,9 +20,10 @@
 #include "rb/Human/CueState.h"
 #include "rb/Rules/Evaluate.h"
 
-// Owner: UE-6b. Option parsing, scene setup (find / spawn table, ball set, cue; wire the pawn's stroke component, the
-// playback cue and the director), match start, dev tools (rb.Match.*); tests RawBreak.Unit.Match.Options and
-// RawBreak.Functional.MatchFlow. The M1 flow test RawBreak.Functional.M1Flow belongs to UE-8.
+// Owner: UE-6b, M2-E (sessions). Option parsing, scene setup (one session per table of the level: ball set, cue, director,
+// registered with URbTableSubsystem; the player's session wires the pawn's stroke component), match start, dev tools
+// (rb.Match.*, the player's director); tests RawBreak.Unit.Match.Options, RawBreak.Functional.MatchFlow and
+// RawBreak.Functional.MultiTable.
 
 namespace
 {
@@ -303,6 +304,12 @@ namespace
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&DumpCommand), ECVF_Cheat);
 }
 
+namespace RbGameModeDebug
+{
+	// Debug lines of one session's table state (rb.Match.DrawTableState).
+	void DrawSessionState(UWorld* World, const ARbTable* Table, const URbMatchDirector* Director);
+}
+
 ARbGameMode::ARbGameMode()
 {
 	DefaultPawnClass = ARbPlayerCharacter::StaticClass();
@@ -476,21 +483,37 @@ void ARbGameMode::StartPlay()
 {
 	Super::StartPlay();
 	SetupScene();
-	if (Director)
+	for (const FRbGameModeSession& Session : Sessions)
 	{
-		Director->SetLivePlaybackRate(PlaybackRate);
-		if (!Director->StartMatch(Setup))
+		URbMatchDirector* SessionDirector = Session.Director;
+		if (!SessionDirector)
 		{
-			UE_LOG(LogRawBreak, Error, TEXT("ARbGameMode: the match could not start: %s"), *Director->GetLastError());
+			continue;
+		}
+		const bool bPlayer = SessionDirector == Director;
+		const FRbMatchSetup SessionSetup = bPlayer ? Setup : MakeIdleSetup(Session.Table ? Session.Table->TableIndex : 0);
+		SessionDirector->SetLivePlaybackRate(PlaybackRate);
+		if (!SessionDirector->StartMatch(SessionSetup))
+		{
+			UE_LOG(LogRawBreak, Error, TEXT("ARbGameMode: the match of table %d could not start: %s"), Session.Table ? Session.Table->TableIndex : -1,
+				*SessionDirector->GetLastError());
 		}
 	}
 }
 
 void ARbGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (Director)
+	URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	for (const FRbGameModeSession& Session : Sessions)
 	{
-		Director->Shutdown();
+		if (Session.Director)
+		{
+			Session.Director->Shutdown();
+		}
+		if (Tables && Session.Table)
+		{
+			Tables->UnregisterSession(Session.Table->TableIndex);
+		}
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -498,84 +521,45 @@ void ARbGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ARbGameMode::SetupScene()
 {
 	UWorld* World = GetWorld();
-	if (!World)
+	URbTableSubsystem* Tables = URbTableSubsystem::Get(World);
+	if (!World || !Tables)
 	{
 		return;
 	}
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-	if (!Table)
+	// Every table of the level (18.6.2); a level without one gets a table at the origin (engine maps in the M1 tests).
+	TArray<ARbTable*> LevelTables = Tables->GetTables();
+	if (LevelTables.IsEmpty())
 	{
-		for (TActorIterator<ARbTable> It(World); It; ++It)
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		if (ARbTable* Spawned = World->SpawnActor<ARbTable>(ARbTable::StaticClass(), FTransform::Identity, Params))
 		{
-			Table = *It;
-			break;
+			LevelTables.Add(Spawned);
 		}
 	}
-	if (!Table)
+	FString Report;
+	if (!Tables->ValidateTables(Report))
 	{
-		Table = World->SpawnActor<ARbTable>(ARbTable::StaticClass(), FTransform::Identity, Params);
+		UE_LOG(LogRawBreak, Error, TEXT("ARbGameMode: the level's tables are invalid (sessions are keyed by TableIndex):\n%s"), *Report);
 	}
-	if (Table && !Table->HasContext())
+	ARbTable* PlayerTable = Tables->GetPlayerTable();
+	if (!PlayerTable && LevelTables.Num() > 0)
 	{
-		Table->RebuildTable();
-	}
-
-	if (!BallSet)
-	{
-		for (TActorIterator<ARbBallSet> It(World); It; ++It)
-		{
-			BallSet = *It;
-			break;
-		}
-	}
-	if (!BallSet)
-	{
-		BallSet = World->SpawnActor<ARbBallSet>(ARbBallSet::StaticClass(), FTransform::Identity, Params);
-	}
-	if (!Cue)
-	{
-		for (TActorIterator<ARbCue> It(World); It; ++It)
-		{
-			Cue = *It;
-			break;
-		}
-	}
-	if (!Cue)
-	{
-		Cue = World->SpawnActor<ARbCue>(ARbCue::StaticClass(), FTransform::Identity, Params);
-	}
-	if (Table && Table->HasContext())
-	{
-		if (BallSet)
-		{
-			BallSet->InitForTable(Table);
-		}
-		if (Cue)
-		{
-			const FRbShooterState DefaultShooter; // M1: both shooters play the same house cue
-			Cue->InitForTable(Table, DefaultShooter.Cue, DefaultShooter.CueBody);
-			Cue->SetDrive(ERbCueDrive::Hidden);
-		}
-	}
-	else
-	{
-		UE_LOG(LogRawBreak, Error, TEXT("ARbGameMode: no valid table context"));
-	}
-	if (BallSet && Cue)
-	{
-		if (URbShotPlaybackComponent* Playback = BallSet->GetPlayback())
-		{
-			Playback->SetCue(Cue);
-		}
+		PlayerTable = LevelTables[0];
 	}
 
-	if (!Director)
+	for (ARbTable* SessionTable : LevelTables)
 	{
-		Director = NewObject<URbMatchDirector>(this, TEXT("MatchDirector"));
+		const bool bPlayer = SessionTable == PlayerTable;
+		const FRbGameModeSession Session = MakeSession(SessionTable, bPlayer);
+		if (bPlayer)
+		{
+			Table = Session.Table;
+			BallSet = Session.BallSet;
+			Cue = Session.Cue;
+			Director = Session.Director;
+		}
 	}
-	Director->Initialize(Table, BallSet, Cue, World->GetSubsystem<URbSimulationSubsystem>());
 
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -584,6 +568,93 @@ void ARbGameMode::SetupScene()
 			WirePawn(PC->GetPawn());
 		}
 	}
+}
+
+FRbGameModeSession ARbGameMode::MakeSession(ARbTable* SessionTable, bool bPlayer)
+{
+	FRbGameModeSession Session;
+	UWorld* World = GetWorld();
+	URbTableSubsystem* Tables = URbTableSubsystem::Get(World);
+	if (!World || !Tables || !SessionTable)
+	{
+		return Session;
+	}
+	if (FRbGameModeSession* Existing = Sessions.FindByPredicate([SessionTable](const FRbGameModeSession& S) { return S.Table == SessionTable; }))
+	{
+		return *Existing; // SetupScene again (idempotent)
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Session.Table = SessionTable;
+	if (!SessionTable->HasContext())
+	{
+		SessionTable->RebuildTable();
+	}
+	// A ball set already initialised for this table (placed and bound by another system), else one placed in the level without a
+	// table (dev maps, M1 behaviour), else a new one; one cue per table.
+	Session.BallSet = Tables->FindBallSet(SessionTable);
+	if (!Session.BallSet)
+	{
+		Session.BallSet = Tables->FindUnassignedBallSet();
+	}
+	if (!Session.BallSet)
+	{
+		Session.BallSet = World->SpawnActor<ARbBallSet>(ARbBallSet::StaticClass(), FTransform::Identity, Params);
+	}
+	Session.Cue = World->SpawnActor<ARbCue>(ARbCue::StaticClass(), FTransform::Identity, Params);
+	if (Session.BallSet)
+	{
+		// MPC_RbBalls is one world-wide collection: only the player's balls write it (an idle table racking after the player's
+		// would otherwise overwrite the entries of the player's balls; M2-E review).
+		Session.BallSet->SetDrivesOcclusion(bPlayer);
+	}
+	if (SessionTable->HasContext())
+	{
+		if (Session.BallSet)
+		{
+			Session.BallSet->InitForTable(SessionTable);
+		}
+		if (Session.Cue)
+		{
+			const FRbShooterState DefaultShooter; // M1: both shooters play the same house cue
+			Session.Cue->InitForTable(SessionTable, DefaultShooter.Cue, DefaultShooter.CueBody);
+			Session.Cue->SetDrive(ERbCueDrive::Hidden);
+		}
+	}
+	else
+	{
+		UE_LOG(LogRawBreak, Error, TEXT("ARbGameMode: table %s (TableIndex %d) has no valid table context"), *SessionTable->GetName(), SessionTable->TableIndex);
+	}
+	if (Session.BallSet && Session.Cue)
+	{
+		if (URbShotPlaybackComponent* Playback = Session.BallSet->GetPlayback())
+		{
+			Playback->SetCue(Session.Cue);
+		}
+	}
+	const FName DirectorName = bPlayer ? FName(TEXT("MatchDirector")) : FName(*FString::Printf(TEXT("MatchDirector_Table%d"), SessionTable->TableIndex));
+	Session.Director = NewObject<URbMatchDirector>(this, MakeUniqueObjectName(this, URbMatchDirector::StaticClass(), DirectorName));
+	Session.Director->Initialize(SessionTable, Session.BallSet, Session.Cue, World->GetSubsystem<URbSimulationSubsystem>());
+	Session.Director->SetRecordsReplays(bPlayer); // the replay history is the player's table only (M2)
+	Sessions.Add(Session);
+
+	FRbTableSession Registered;
+	Registered.TableIndex = SessionTable->TableIndex;
+	Registered.Table = SessionTable;
+	Registered.BallSet = Session.BallSet.Get();
+	Registered.Cue = Session.Cue.Get();
+	Registered.Director = Session.Director.Get();
+	Tables->RegisterSession(Registered);
+	return Session;
+}
+
+FRbMatchSetup ARbGameMode::MakeIdleSetup(int32 TableIndex) const
+{
+	FRbMatchSetup Idle;
+	Idle.Mode = ERbMatchMode::Practice;
+	Idle.Discipline = ERbDiscipline::NineBall;
+	Idle.Seed = Setup.Seed != 0 ? static_cast<int64>(HashCombineFast(GetTypeHash(Setup.Seed), GetTypeHash(TableIndex + 1)) | 1u) : 0;
+	return Idle;
 }
 
 void ARbGameMode::WirePawn(APawn* Pawn)
@@ -616,14 +687,21 @@ void ARbGameMode::Tick(float DeltaSeconds)
 
 void ARbGameMode::DrawTableStateDebug() const
 {
+	for (const FRbGameModeSession& Session : Sessions)
+	{
+		RbGameModeDebug::DrawSessionState(GetWorld(), Session.Table, Session.Director);
+	}
+}
+
+void RbGameModeDebug::DrawSessionState(UWorld* World, const ARbTable* Table, const URbMatchDirector* Director)
+{
 #if ENABLE_DRAW_DEBUG
-	UWorld* World = GetWorld();
 	if (!World || !Director || !Table || !Table->HasContext())
 	{
 		return;
 	}
 	const rb::rules::RulesTable& Rules = Table->GetContext().RulesTable;
-	const auto At = [this](double X, double Y, double Z = 0.0) { return Table->CoreToWorld(rb::Vec3(X, Y, Z)); };
+	const auto At = [Table](double X, double Y, double Z = 0.0) { return Table->CoreToWorld(rb::Vec3(X, Y, Z)); };
 	const FVector AxisX = Table->CoreDirectionToWorld(rb::Vec3(1.0, 0.0, 0.0));
 	const FVector AxisY = Table->CoreDirectionToWorld(rb::Vec3(0.0, 1.0, 0.0));
 	const uint8 Depth = SDPG_Foreground;

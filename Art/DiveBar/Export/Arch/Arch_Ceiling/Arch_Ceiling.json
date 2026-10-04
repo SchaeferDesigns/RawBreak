@@ -1,0 +1,154 @@
+{
+ "acoustic_material": "ceiling_tile_mineral",
+ "acoustic_surfaces": [
+  {
+   "area_m2": 114.56,
+   "material": "ceiling_tile_mineral"
+  },
+  {
+   "area_m2": 15.8,
+   "material": "gypsum"
+  }
+ ],
+ "asset_id": "Arch_Ceiling",
+ "bounds_max_m": [
+  20.12,
+  7.32,
+  2.79
+ ],
+ "bounds_min_m": [
+  0.0,
+  0.0,
+  2.44
+ ],
+ "cast_shadow": true,
+ "ceiling_cells": [
+  [
+   1.22,
+   1.83,
+   4.27,
+   4.88,
+   "half"
+  ],
+  [
+   1.83,
+   2.44,
+   4.27,
+   4.88,
+   "diffuser"
+  ],
+  [
+   2.44,
+   3.66,
+   1.22,
+   1.83,
+   "troffer"
+  ],
+  [
+   6.1,
+   7.32,
+   1.22,
+   1.83,
+   "missing"
+  ],
+  [
+   6.1,
+   7.32,
+   5.49,
+   6.1,
+   "troffer"
+  ],
+  [
+   8.54,
+   9.15,
+   2.44,
+   3.05,
+   "diffuser"
+  ],
+  [
+   9.15,
+   9.76,
+   2.44,
+   3.05,
+   "half"
+  ],
+  [
+   8.54,
+   9.15,
+   6.1,
+   6.71,
+   "diffuser"
+  ],
+  [
+   9.15,
+   9.76,
+   6.1,
+   6.71,
+   "half"
+  ],
+  [
+   10.98,
+   12.2,
+   1.22,
+   1.83,
+   "troffer"
+  ],
+  [
+   12.2,
+   12.81,
+   1.22,
+   1.83,
+   "diffuser"
+  ],
+  [
+   12.81,
+   13.42,
+   1.22,
+   1.83,
+   "half"
+  ],
+  [
+   14.64,
+   15.25,
+   2.44,
+   3.05,
+   "half"
+  ],
+  [
+   15.25,
+   15.86,
+   2.44,
+   3.05,
+   "diffuser"
+  ],
+  [
+   14.64,
+   15.86,
+   5.49,
+   6.1,
+   "troffer"
+  ]
+ ],
+ "collision_hulls": 2,
+ "external_inputs": [],
+ "family": "Architecture",
+ "fbx": "SM_DB_Arch_Ceiling.fbx",
+ "frame": "venue",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_CeilingTile",
+  "MI_DB_Paint_White",
+  "MI_DB_Plaster_Cream"
+ ],
+ "mesh": "SM_DB_Arch_Ceiling",
+ "notes": "suspended ceiling: 163 lay-in tiles (14 lifted), grid, soffit, corridor ceiling",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "priority": "mid",
+ "profile": "RbVenueBlock",
+ "tags": [
+  "RbDB_Ceiling"
+ ],
+ "triangles": 3156,
+ "ue_folder": "Arch"
+}

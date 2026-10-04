@@ -1,0 +1,83 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Bottle_Wexmoor",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "body_diameter_m": 0.08,
+ "bounds_max_m": [
+  0.0404,
+  0.04035,
+  0.2965
+ ],
+ "bounds_min_m": [
+  -0.04,
+  -0.04035,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.0404,
+  0.04035,
+  0.2965
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.04,
+  -0.04035,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueProp",
+ "design": {
+  "H": 0.295,
+  "R": 0.04,
+  "closure": "screw",
+  "fill": 0.78,
+  "glass": "Glass_Green",
+  "hb": 0.18,
+  "hs": 0.045,
+  "kind": "spirit",
+  "label": "bottle_wexmoor",
+  "label_z": 0.095,
+  "liquid": "Liquid_Clear",
+  "rn": 0.0145,
+  "shoulder": "square"
+ },
+ "external_inputs": [],
+ "family": "Bottles",
+ "fbx": "SM_DB_Bottle_Wexmoor.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "43b1f6b57549b0c0be7f14243bb500e48698e2ef2bb8ee23b33d85a7ee5255ac",
+ "glass_height_m": 0.295,
+ "ledger_asset_id": "SM_DB_Bottle_Wexmoor",
+ "material_slots": [
+  "MI_DB_Glass_Green",
+  "MI_DB_Liquid_Clear",
+  "MI_DB_Label_Atlas",
+  "MI_DB_Aluminium"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "C02",
+ "target_dimensions_m": [
+  0.0804,
+  0.08,
+  0.2965
+ ],
+ "tolerance_m": 0.01,
+ "translucent": true,
+ "triangles": 2816,
+ "triangles_render": 2744,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Bottles",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Bottles/SM_DB_Bottle_Wexmoor",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Bottle_Wexmoor/T_DB_Bottle_Wexmoor_WM.png"
+}

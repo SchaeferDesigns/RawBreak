@@ -600,6 +600,10 @@ namespace RbTableMeshBuilderPrivate
 		TArray<FV3> Band;
 		TArray<FV3> Bottom;
 		TArray<FV3> RulingNormal;
+		// M2-L nose roll per top sample (nose -> facing): profile points from the nose (k = 0, exactly Top[i]) back onto the
+		// cushion-top plane (k = last), with their normals. The width tapers to zero at the facing (the physics plane stays).
+		TArray<TArray<FV3>> Roll;
+		TArray<TArray<FV3>> RollNormal;
 		FV2 ArcCenter;
 		double JawRadius = 0.0;
 		// facing top edge, cut through the cushion
@@ -715,6 +719,50 @@ namespace RbTableMeshBuilderPrivate
 		TArray<bool> EdgeSmooth;
 	};
 
+	// --- M2-L: plan chains of the rail outline and rail zones ---------------------------------------------------------------
+
+	// A chain of plan points with an inset direction O (P - O d is the point inset by d) and an outward shading normal N. Smooth
+	// points have O = N; a sharp corner is two points at the same position with the mitre O and the two edge normals (the
+	// zero-length edge between them produces no triangles).
+	struct FPlanChain
+	{
+		TArray<FV2> P;
+		TArray<FV2> O;
+		TArray<FV2> N;
+
+		void Add(const FV2& Point, const FV2& Offset, const FV2& Normal)
+		{
+			P.Add(Point);
+			O.Add(Offset);
+			N.Add(Normal);
+		}
+		int32 Num() const { return P.Num(); }
+		FPlanChain Translated(const FV2& D) const
+		{
+			FPlanChain C = *this;
+			for (FV2& Q : C.P)
+			{
+				Q += D;
+			}
+			return C;
+		}
+	};
+
+	// A rail zone between two cuts (inner point on the cap / body inner boundary, outer point on the outline), CCW around the table.
+	struct FRailCut
+	{
+		FV2 Inner;
+		FV2 Outer;
+	};
+
+	struct FRailZone
+	{
+		FRailCut From;
+		FRailCut To;
+		EUVMode TopUV = EUVMode::Box;
+		int32 Rail = -1; // 0..3 for caps (grain along the rail), -1 for castings
+	};
+
 	struct FLayout
 	{
 		const rb::TableGeometry* G = nullptr;
@@ -736,6 +784,23 @@ namespace RbTableMeshBuilderPrivate
 		// cap / body inner boundary (rectangle with the collars' outer paths) and the four mitre indices
 		FWallLoop Union;
 		int32 Mitre[4] = {-1, -1, -1, -1};
+
+		// --- M2-L look-dev ---
+		ERbTableBaseStyle Style = ERbTableBaseStyle::Legs;
+		double OuterR = 0.0;      // plan-corner radius of the rail outline
+		double CapEdge = 0.0;     // quarter round of the outer rail-cap edge
+		double SkirtInset = 0.0;  // apron skirt face behind the rail outline (legs style)
+		double BodyInset = 0.0;   // rail body face behind the cap edge (legs style: the cap overhangs it)
+		int32 EdgeSegs = 8;
+		int32 CornerSegs = 12;
+		double RollWidth = 0.0;   // nose roll width on the straight nose (jaws taper it)
+		double RollTaper = 0.0;   // length over which the straight roll widens from the jaw width
+		FPlanChain Outline;       // the rail outline with the zone cut points
+		FWallLoop UnionCut;       // Union with the zone cut points
+		TArray<FRailZone> CapZones;
+		TArray<FRailZone> CastingZones;
+		double CornerCutX = 0.0, CornerCutY = 0.0, SideCutHalf = 0.0;
+		double RollMaxSagitta = 0.0;
 
 		FV2 CirclePoint(int32 Pocket, double Phi, double R) const { return Pockets[Pocket].C + Dir(Pockets[Pocket].ThetaRef + Phi) * R; }
 		FV2 InwardFromCircle(int32 Pocket, double Phi) const { return -Dir(Pockets[Pocket].ThetaRef + Phi); } // toward C
@@ -766,6 +831,65 @@ namespace RbTableMeshBuilderPrivate
 		R.bRubberBinding = Rub > FMath::Max(0.0, R.FaceZ);
 		R.bInside = R.Behind >= 0.0 && R.Behind <= Fr.Cw && R.High - R.Low > 0.0;
 		return R;
+	}
+
+	// Max of sqrt(v) (1 - v)^2 on [0, 1] (at v = 1/5): the bulge term of the nose roll is normalised by it.
+	constexpr double kRollBulgeNorm = 0.28621670111997307;
+
+	// Nose roll profile (M2-L) at a nose-outline point P (z = h) toward B (unit, plan, into the cushion) over Width: the cloth rolls
+	// over the rubber nose onto the cushion-top plane. z(v) = h + (z_end - h) v + c sqrt(v) (1 - v)^2 with u = Width v: vertical
+	// tangent at the nose line (the physics' contact line, exactly P at h), a convex bulge of BulgeFrac * Width at most, tangent
+	// onto the top plane at the end (z_end = the plane's height there). Samples v_k = (k / K)^2 (dense where it curves most).
+	void RollProfile(const FCushionFrame& Fr, const FV2& P, const FV2& B, double Width, double BulgeFrac, int32 K, TArray<FV3>& OutPoints,
+		TArray<FV3>& OutNormals)
+	{
+		OutPoints.Reset();
+		OutNormals.Reset();
+		const FV2 End = P + B * Width;
+		const double ZEnd = Width > 0.0 ? Fr.TopZ(End) : Fr.H;
+		const double C = BulgeFrac * Width / kRollBulgeNorm;
+		for (int32 k = 0; k <= K; ++k)
+		{
+			const double V = FMath::Square(static_cast<double>(k) / K);
+			const double S = FMath::Sqrt(V);
+			const double Z = Fr.H + (ZEnd - Fr.H) * V + C * S * FMath::Square(1.0 - V);
+			OutPoints.Add(k == 0 ? At(P, Fr.H) : (k == K ? At(End, ZEnd) : At(P + B * (Width * V), Z)));
+			if (Width <= 0.0 || k == 0)
+			{
+				OutNormals.Add(At(-B, 0.0));
+				continue;
+			}
+			const double DzDv = (ZEnd - Fr.H) + C * (FMath::Square(1.0 - V) / (2.0 * S) - 2.0 * S * (1.0 - V));
+			const double Slope = DzDv / Width;
+			OutNormals.Add(FV3(-B.X * Slope, -B.Y * Slope, 1.0).GetSafeNormal());
+		}
+	}
+
+	// Worst chord sagitta [m] of the tessellated roll profile (Width, BulgeFrac, K) against the analytic curve, in the profile
+	// plane (u, z) for a plane slope Slope (RawBreak.Unit.Table.Look: < 0.05 mm).
+	double RollSagitta(double Width, double BulgeFrac, int32 K, double Slope)
+	{
+		if (Width <= 0.0)
+		{
+			return 0.0;
+		}
+		const double C = BulgeFrac * Width / kRollBulgeNorm;
+		auto Curve = [&](double V) { return FV2(Width * V, Slope * Width * V + C * FMath::Sqrt(V) * FMath::Square(1.0 - V)); };
+		double Worst = 0.0;
+		for (int32 k = 0; k < K; ++k)
+		{
+			const double V0 = FMath::Square(static_cast<double>(k) / K);
+			const double V1 = FMath::Square(static_cast<double>(k + 1) / K);
+			const FV2 A = Curve(V0);
+			const FV2 B = Curve(V1);
+			const FV2 D = Norm2(B - A);
+			for (int32 s = 1; s < 64; ++s)
+			{
+				const FV2 Q = Curve(V0 + (V1 - V0) * s / 64.0);
+				Worst = FMath::Max(Worst, FMath::Abs(Cross2(D, Q - A)));
+			}
+		}
+		return Worst;
 	}
 
 	bool BuildJawEnd(const FLayout& L, const FCushionFrame& Fr, int32 JawIndex, const TArray<FV2>& TopArc, FJawEnd& J, FString& Err)
@@ -828,6 +952,22 @@ namespace RbTableMeshBuilderPrivate
 				}
 			}
 			J.RulingNormal.Add(N);
+		}
+
+		// Nose roll (M2-L): per top sample the plan direction into the cushion (the nose line's back normal at the tangent point,
+		// then toward the jaw arc's centre) and a width that tapers to zero at the facing, whose plane stays exact.
+		{
+			const int32 K = FMath::Max(2, L.O.NoseRollSegments);
+			const double A0 = (Num > 1 && J.JawRadius > 0.0) ? FMath::Min(L.RollWidth, 0.6 * J.JawRadius) : 0.0;
+			J.Roll.SetNum(Num);
+			J.RollNormal.SetNum(Num);
+			for (int32 i = 0; i < Num; ++i)
+			{
+				const double F = Num > 1 ? static_cast<double>(i) / (Num - 1) : 1.0;
+				const double Width = A0 * (1.0 - F * F);
+				const FV2 B = i == 0 ? -Fr.N : Norm2(J.ArcCenter - TopArc[i]);
+				RollProfile(Fr, TopArc[i], B, Width, L.O.NoseRollBulge, K, J.Roll[i], J.RollNormal[i]);
+			}
 		}
 
 		// Side of this end about the pocket centre (the facing end lies on it).
@@ -1667,6 +1807,230 @@ namespace RbTableMeshBuilderPrivate
 		return true;
 	}
 
+	// --- M2-L: rail outline, cut points, zones --------------------------------------------------------------------------------
+
+	// Rounded rectangle |x| <= Hx, |y| <= Hy with plan-corner radius R, CCW from corner 0 (-, -); R = 0 gives sharp corners (two
+	// points per corner with the mitre inset direction). Corner c's arc has Segs + 1 samples (sample Segs / 2 at 45 deg).
+	FPlanChain RoundedRect(double Hx, double Hy, double R, int32 Segs)
+	{
+		FPlanChain C;
+		const double Sx[4] = {-1.0, 1.0, 1.0, -1.0};
+		const double Sy[4] = {-1.0, -1.0, 1.0, 1.0};
+		const double Start[4] = {kPi, 1.5 * kPi, 0.0, 0.5 * kPi};
+		for (int32 c = 0; c < 4; ++c)
+		{
+			const FV2 Centre(Sx[c] * (Hx - R), Sy[c] * (Hy - R));
+			if (R > 0.0)
+			{
+				for (int32 s = 0; s <= Segs; ++s)
+				{
+					const FV2 D = Dir(Start[c] + 0.5 * kPi * s / Segs);
+					C.Add(Centre + D * R, D, D);
+				}
+				continue;
+			}
+			const FV2 NIn = Dir(Start[c]);
+			const FV2 NOut = Dir(Start[c] + 0.5 * kPi);
+			C.Add(Centre, NIn + NOut, NIn);
+			C.Add(Centre, NIn + NOut, NOut);
+		}
+		return C;
+	}
+
+	// Index of Q on a closed chain (existing point, or inserted on the edge it lies on); INDEX_NONE if Q is not on the chain.
+	int32 InsertChainPoint(FPlanChain& C, const FV2& Q)
+	{
+		constexpr double Tol = 1e-9;
+		for (int32 i = 0; i < C.Num(); ++i)
+		{
+			if (FV2::DistSquared(C.P[i], Q) < Tol * Tol)
+			{
+				return i;
+			}
+		}
+		for (int32 i = 0; i < C.Num(); ++i)
+		{
+			const FV2 A = C.P[i];
+			const FV2 AB = C.P[(i + 1) % C.Num()] - A;
+			const double L2 = Dot2(AB, AB);
+			const double T = L2 > 1e-24 ? Dot2(Q - A, AB) / L2 : -1.0;
+			if (T > 0.0 && T < 1.0 && Len2(A + AB * T - Q) < Tol)
+			{
+				const int32 j = (i + 1) % C.Num();
+				C.P.Insert(Q, i + 1);
+				C.O.Insert(Norm2(C.O[i] * (1.0 - T) + C.O[j] * T) * FMath::Lerp(Len2(C.O[i]), Len2(C.O[j]), T), i + 1);
+				C.N.Insert(Norm2(C.N[i] * (1.0 - T) + C.N[j] * T), i + 1);
+				return i + 1;
+			}
+		}
+		return INDEX_NONE;
+	}
+
+	// Sub-chain From .. To (inclusive), walking forward around the closed chain.
+	FPlanChain SubChain(const FPlanChain& C, int32 From, int32 To)
+	{
+		FPlanChain Out;
+		for (int32 i = From, Guard = 0; Guard <= C.Num(); i = (i + 1) % C.Num(), ++Guard)
+		{
+			Out.Add(C.P[i], C.O[i], C.N[i]);
+			if (i == To)
+			{
+				break;
+			}
+		}
+		return Out;
+	}
+
+	// Index of Q on a closed wall loop, inserted on a STRAIGHT (non-smooth) edge if needed; INDEX_NONE if Q is not on such an edge.
+	int32 InsertWallPoint(FWallLoop& L, const FV2& Q)
+	{
+		constexpr double Tol = 1e-9;
+		for (int32 i = 0; i < L.P.Num(); ++i)
+		{
+			if (FV2::DistSquared(L.P[i], Q) < Tol * Tol)
+			{
+				return i;
+			}
+		}
+		for (int32 i = 0; i < L.P.Num(); ++i)
+		{
+			if (L.EdgeSmooth[i])
+			{
+				continue;
+			}
+			const FV2 A = L.P[i];
+			const FV2 AB = L.P[(i + 1) % L.P.Num()] - A;
+			const double L2 = Dot2(AB, AB);
+			const double T = L2 > 1e-24 ? Dot2(Q - A, AB) / L2 : -1.0;
+			if (T > 0.0 && T < 1.0 && Len2(A + AB * T - Q) < Tol)
+			{
+				L.P.Insert(Q, i + 1);
+				L.PointNormal.Insert(FV2::ZeroVector, i + 1);
+				L.EdgeSmooth.Insert(false, i + 1);
+				return i + 1;
+			}
+		}
+		return INDEX_NONE;
+	}
+
+	int32 FindWallPoint(const FWallLoop& L, const FV2& Q)
+	{
+		for (int32 i = 0; i < L.P.Num(); ++i)
+		{
+			if (FV2::DistSquared(L.P[i], Q) < 1e-18)
+			{
+				return i;
+			}
+		}
+		return INDEX_NONE;
+	}
+
+	int32 FindChainPoint(const FPlanChain& C, const FV2& Q)
+	{
+		for (int32 i = 0; i < C.Num(); ++i)
+		{
+			if (FV2::DistSquared(C.P[i], Q) < 1e-18)
+			{
+				return i;
+			}
+		}
+		return INDEX_NONE;
+	}
+
+	// Open sub-loop From .. To of a closed wall loop (forward).
+	FWallLoop SubWall(const FWallLoop& L, int32 From, int32 To)
+	{
+		FWallLoop Out;
+		const int32 N = L.P.Num();
+		for (int32 i = From, Guard = 0; Guard <= N; i = (i + 1) % N, ++Guard)
+		{
+			Out.Add(L.P[i], L.EdgeSmooth[i], L.PointNormal[i]);
+			if (i == To)
+			{
+				break;
+			}
+		}
+		return Out;
+	}
+
+	// The rails as zones between cuts. Legs style: four mitred rails (rail c from the 45 deg mitre of corner c to that of c + 1).
+	// Cabinet style (coin-op): corner castings CornerCastingLengthCm along each rail from the outer corner and side castings
+	// SideCastingLengthCm long around the side pockets replace the rail; the caps (and the rail body under them) lie between.
+	bool BuildRailZones(FLayout& L, FString& Err)
+	{
+		L.Outline = RoundedRect(L.HlR, L.HwR, L.OuterR, L.CornerSegs);
+		L.UnionCut = L.Union;
+		if (!L.bCabinet)
+		{
+			FRailCut Mitre[4];
+			for (int32 c = 0; c < 4; ++c)
+			{
+				Mitre[c].Inner = L.Union.P[L.Mitre[c]];
+				Mitre[c].Outer = L.Outline.P[c * (L.CornerSegs + 1) + L.CornerSegs / 2];
+			}
+			for (int32 c = 0; c < 4; ++c)
+			{
+				FRailZone Z;
+				Z.From = Mitre[c];
+				Z.To = Mitre[(c + 1) % 4];
+				Z.TopUV = (c % 2) == 0 ? EUVMode::PlanarXY : EUVMode::PlanarYX;
+				Z.Rail = c;
+				L.CapZones.Add(Z);
+			}
+			return true;
+		}
+		const double Xc = L.HlR - L.O.CornerCastingLengthCm / FRbCoords::CmPerMeter;
+		const double Yc = L.HwR - L.O.CornerCastingLengthCm / FRbCoords::CmPerMeter;
+		const double Xs = 0.5 * L.O.SideCastingLengthCm / FRbCoords::CmPerMeter;
+		L.CornerCutX = Xc;
+		L.CornerCutY = Yc;
+		L.SideCutHalf = Xs;
+		if (!(Xc < L.HlR - L.OuterR) || !(Yc < L.HwR - L.OuterR) || !(Xc > Xs + 0.05) || !(Yc > 0.05))
+		{
+			Err = TEXT("coin-op casting lengths do not fit the rails");
+			return false;
+		}
+		// Cut on long rail Side (y = Side HwR) at x = X, or on end rail Side (x = Side HlR) at y = Y.
+		auto Cut = [&](bool bLong, double Side, double Coord, FRailCut& Out) {
+			Out.Inner = bLong ? FV2(Coord, Side * L.HwC) : FV2(Side * L.HlC, Coord);
+			Out.Outer = bLong ? FV2(Coord, Side * L.HwR) : FV2(Side * L.HlR, Coord);
+			if (InsertWallPoint(L.UnionCut, Out.Inner) == INDEX_NONE || InsertChainPoint(L.Outline, Out.Outer) == INDEX_NONE)
+			{
+				Err = FString::Printf(TEXT("coin-op casting cut at %s %.4f m does not lie on a straight cushion-back / outline edge (inside a pocket collar?)"),
+					bLong ? TEXT("x") : TEXT("y"), Coord);
+				return false;
+			}
+			return true;
+		};
+		// Rail 0 (y < 0, CCW +x), rail 1 (x > 0, +y), rail 2 (y > 0, -x), rail 3 (x < 0, -y).
+		FRailCut R0[4], R1[2], R2[4], R3[2];
+		const double X0[4] = {-Xc, -Xs, Xs, Xc};
+		for (int32 i = 0; i < 4; ++i)
+		{
+			if (!Cut(true, -1.0, X0[i], R0[i]) || !Cut(true, 1.0, -X0[i], R2[i]))
+			{
+				return false;
+			}
+		}
+		if (!Cut(false, 1.0, -Yc, R1[0]) || !Cut(false, 1.0, Yc, R1[1]) || !Cut(false, -1.0, Yc, R3[0]) || !Cut(false, -1.0, -Yc, R3[1]))
+		{
+			return false;
+		}
+		auto Zone = [](const FRailCut& A, const FRailCut& B, EUVMode UV, int32 Rail) {
+			FRailZone Z;
+			Z.From = A;
+			Z.To = B;
+			Z.TopUV = UV;
+			Z.Rail = Rail;
+			return Z;
+		};
+		L.CapZones = {Zone(R0[0], R0[1], EUVMode::PlanarXY, 0), Zone(R0[2], R0[3], EUVMode::PlanarXY, 0), Zone(R1[0], R1[1], EUVMode::PlanarYX, 1),
+			Zone(R2[0], R2[1], EUVMode::PlanarXY, 2), Zone(R2[2], R2[3], EUVMode::PlanarXY, 2), Zone(R3[0], R3[1], EUVMode::PlanarYX, 3)};
+		L.CastingZones = {Zone(R0[3], R1[0], EUVMode::Box, -1), Zone(R1[1], R2[0], EUVMode::Box, -1), Zone(R2[3], R3[0], EUVMode::Box, -1),
+			Zone(R3[1], R0[0], EUVMode::Box, -1), Zone(R0[1], R0[2], EUVMode::Box, -1), Zone(R2[1], R2[2], EUVMode::Box, -1)};
+		return true;
+	}
+
 	bool BuildLayout(const rb::TableGeometry& G, const FRbTableMeshOptions& Options, FLayout& L, FString& Err)
 	{
 		if (G.Noses.Size() != rb::kCushionCount)
@@ -1701,10 +2065,25 @@ namespace RbTableMeshBuilderPrivate
 		L.ApronDepth = Options.ApronDepthCm / FRbCoords::CmPerMeter;
 		L.CapT = Options.CapThicknessCm / FRbCoords::CmPerMeter;
 		L.SightDepth = Options.SightDepthCm / FRbCoords::CmPerMeter;
-		L.LinerT = Options.LinerThicknessCm / FRbCoords::CmPerMeter;
+		L.LinerT = RbTableMeshBuilder::ResolveLinerThicknessCm(Spec, Options) / FRbCoords::CmPerMeter;
 		L.CapBand = Options.CapEdgeRoundingCm / FRbCoords::CmPerMeter;
 		L.bCabinet = Options.BaseStyle == ERbTableBaseStyle::Cabinet ||
 			(Options.BaseStyle == ERbTableBaseStyle::Auto && Spec.Cloth == rb::ClothPreset::NappedBar);
+		// M2-L look-dev parameters (defaults per base style).
+		L.Style = L.bCabinet ? ERbTableBaseStyle::Cabinet : ERbTableBaseStyle::Legs;
+		L.OuterR = RbTableMeshBuilder::ResolveOuterCornerRadiusCm(Spec, Options) / FRbCoords::CmPerMeter;
+		L.CapEdge = (Options.CapEdgeRadiusCm > 0.0 ? Options.CapEdgeRadiusCm : (L.bCabinet ? 0.5 : 0.8)) / FRbCoords::CmPerMeter;
+		L.SkirtInset = L.bCabinet ? 0.0 : 0.010;
+		L.BodyInset = L.bCabinet ? 0.0 : 0.0015;
+		L.EdgeSegs = FMath::Max(2, Options.EdgeSegments);
+		L.CornerSegs = FMath::Max(2, Options.CornerSegments + (Options.CornerSegments & 1));
+		L.RollWidth = FMath::Max(0.0, Options.NoseRollWidthCm) / FRbCoords::CmPerMeter;
+		L.RollTaper = FMath::Max(0.0, Options.NoseRollTaperCm) / FRbCoords::CmPerMeter;
+		if (!(L.OuterR > L.CapEdge + L.BodyInset + 0.003) || !(L.CapEdge < L.CapT) || !(L.OuterR < 0.5 * (Spec.RailWidthTotal - Spec.CushionWidth)))
+		{
+			Err = TEXT("invalid rail outline options (corner radius / cap edge)");
+			return false;
+		}
 		if (G.Profile.Points.Size() < 3 || G.Profile.NoseIndex != 1 || G.Profile.CushionBackIndex != 2)
 		{
 			Err = TEXT("unexpected cushion profile");
@@ -1741,7 +2120,7 @@ namespace RbTableMeshBuilderPrivate
 		{
 			Clearance = FMath::Min(Clearance, FMath::Min(L.HlR - (FMath::Abs(Pk.C.X) + Pk.Rp), L.HwR - (FMath::Abs(Pk.C.Y) + Pk.Rp)));
 		}
-		L.SkirtT = FMath::Min(Options.SkirtThicknessCm / FRbCoords::CmPerMeter, Clearance - 0.005);
+		L.SkirtT = FMath::Min(Options.SkirtThicknessCm / FRbCoords::CmPerMeter, Clearance - L.SkirtInset - 0.005);
 		if (L.SkirtT < 0.005)
 		{
 			Err = TEXT("pocket circles leave no room for the apron skirt");
@@ -1813,7 +2192,9 @@ namespace RbTableMeshBuilderPrivate
 		{
 			L.Hole.Radius[p] = L.Pockets[p].Rp;
 		}
-		return BuildArrangement(L, L.Hole, Err) && BuildFronts(L, Err) && BuildCollarLayout(L, Err) && BuildUnionLoop(L, Err);
+		L.RollMaxSagitta = RollSagitta(L.RollWidth, Options.NoseRollBulge, FMath::Max(2, Options.NoseRollSegments), (L.Zc - L.H) / L.Cw);
+		return BuildArrangement(L, L.Hole, Err) && BuildFronts(L, Err) && BuildCollarLayout(L, Err) && BuildUnionLoop(L, Err) &&
+			BuildRailZones(L, Err);
 	}
 
 	// ============================================================================================================
@@ -1837,6 +2218,287 @@ namespace RbTableMeshBuilderPrivate
 		}
 	}
 
+	// ============================================================================================================
+	// M2-L geometry helpers: profile sweeps, boards, revolves, hexahedra (every solid closed; normals decide the winding)
+	// ============================================================================================================
+
+	// A point of a swept profile: inset D from the chain (along -O), height Z, normal (ND along the chain's outward normal, NZ up).
+	struct FProfilePoint
+	{
+		double D = 0.0;
+		double Z = 0.0;
+		double ND = 1.0;
+		double NZ = 0.0;
+	};
+	using FProfileStrip = TArray<FProfilePoint>;
+
+	// Outer edge profile from Z1 (top) down to Z0: the top edge rounded with RTop, the bottom edge with RBot (0 = sharp), the
+	// vertical face at inset D0. One smooth strip; its first point's D is the inset of the top face, its last one's of the bottom.
+	FProfileStrip EdgeProfile(double Z0, double Z1, double RTop, double RBot, double D0, int32 Segs)
+	{
+		FProfileStrip S;
+		if (RTop > 0.0)
+		{
+			for (int32 k = 0; k <= Segs; ++k)
+			{
+				const double A = 0.5 * kPi * k / Segs;
+				S.Add({D0 + RTop - RTop * FMath::Sin(A), Z1 - RTop + RTop * FMath::Cos(A), FMath::Sin(A), FMath::Cos(A)});
+			}
+		}
+		else
+		{
+			S.Add({D0, Z1, 1.0, 0.0});
+		}
+		if (RBot > 0.0)
+		{
+			for (int32 k = 0; k <= Segs; ++k)
+			{
+				const double A = 0.5 * kPi * k / Segs;
+				S.Add({D0 + RBot - RBot * FMath::Cos(A), Z0 + RBot - RBot * FMath::Sin(A), FMath::Cos(A), -FMath::Sin(A)});
+			}
+		}
+		else
+		{
+			S.Add({D0, Z0, 1.0, 0.0});
+		}
+		return S;
+	}
+
+	FV3 ProfilePos(const FPlanChain& C, int32 i, const FProfilePoint& Q) { return At(C.P[i] - C.O[i] * Q.D, Q.Z); }
+	FV3 ProfileNormal(const FPlanChain& C, int32 i, const FProfilePoint& Q) { return At(C.N[i] * Q.ND, Q.NZ).GetSafeNormal(); }
+
+	// Sweeps profile strips along a chain (closed: back to the first point).
+	void SweepProfile(FMeshWriter& W, const FPlanChain& C, bool bClosed, const TArray<FProfileStrip>& Strips)
+	{
+		const int32 N = C.Num();
+		const int32 Edges = bClosed ? N : N - 1;
+		for (const FProfileStrip& S : Strips)
+		{
+			for (int32 i = 0; i < Edges; ++i)
+			{
+				const int32 j = (i + 1) % N;
+				for (int32 k = 0; k + 1 < S.Num(); ++k)
+				{
+					W.Quad(ProfilePos(C, i, S[k]), ProfilePos(C, j, S[k]), ProfilePos(C, j, S[k + 1]), ProfilePos(C, i, S[k + 1]), ProfileNormal(C, i, S[k]),
+						ProfileNormal(C, j, S[k]), ProfileNormal(C, j, S[k + 1]), ProfileNormal(C, i, S[k + 1]));
+				}
+			}
+		}
+	}
+
+	// The chain inset by D, without the duplicated positions of sharp corners.
+	TArray<FV2> InsetLoop(const FPlanChain& C, double D)
+	{
+		TArray<FV2> Out;
+		for (int32 i = 0; i < C.Num(); ++i)
+		{
+			const FV2 Q = C.P[i] - C.O[i] * D;
+			if (Out.Num() == 0 || FV2::DistSquared(Out.Last(), Q) > 1e-20)
+			{
+				Out.Add(Q);
+			}
+		}
+		if (Out.Num() > 1 && FV2::DistSquared(Out[0], Out.Last()) < 1e-20)
+		{
+			Out.Pop();
+		}
+		return Out;
+	}
+
+	// Vertical walls along a closed chain from Z0 to Z1, facing along Sign * N (+1 = the chain's outward side).
+	void ChainWalls(FMeshWriter& W, const FPlanChain& C, double Z0, double Z1, double Sign)
+	{
+		const int32 N = C.Num();
+		for (int32 i = 0; i < N; ++i)
+		{
+			const int32 j = (i + 1) % N;
+			const FV3 Ni = At(C.N[i] * Sign, 0.0);
+			const FV3 Nj = At(C.N[j] * Sign, 0.0);
+			W.Quad(At(C.P[i], Z0), At(C.P[j], Z0), At(C.P[j], Z1), At(C.P[i], Z1), Ni, Nj, Nj, Ni);
+		}
+	}
+
+	// Closed vertical block: plan chain (closed) swept with an edge profile, flat top and bottom.
+	void AddProfiledBlock(FMeshWriter& W, const FPlanChain& C, const FProfileStrip& Profile)
+	{
+		W.BeginSolid();
+		AddFlat(W, InsetLoop(C, Profile[0].D), {}, Profile[0].Z, true);
+		AddFlat(W, InsetLoop(C, Profile.Last().D), {}, Profile.Last().Z, false);
+		SweepProfile(W, C, true, {Profile});
+	}
+
+	// Closed vertical ring: an outer chain swept with a profile, an inner chain as plain walls, flat top and bottom rings.
+	void AddProfiledRing(FMeshWriter& W, const FPlanChain& Outer, const FProfileStrip& Profile, const FPlanChain& Inner)
+	{
+		W.BeginSolid();
+		const TArray<FV2> Hole = InsetLoop(Inner, 0.0);
+		AddFlat(W, InsetLoop(Outer, Profile[0].D), {Hole}, Profile[0].Z, true);
+		AddFlat(W, InsetLoop(Outer, Profile.Last().D), {Hole}, Profile.Last().Z, false);
+		SweepProfile(W, Outer, true, {Profile});
+		ChainWalls(W, Inner, Profile.Last().Z, Profile[0].Z, -1.0);
+	}
+
+	// Closed convex hexahedron from its back quad C[0..3] and front quad C[4..7] (C[i + 4] opposite C[i]); flat faces.
+	void AddHexahedron(FMeshWriter& W, const FV3 C[8])
+	{
+		W.BeginSolid();
+		FV3 Centre = FV3::ZeroVector;
+		for (int32 i = 0; i < 8; ++i)
+		{
+			Centre += C[i] / 8.0;
+		}
+		const int32 Faces[6][4] = {{0, 1, 2, 3}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+		for (const auto& F : Faces)
+		{
+			FV3 N = (C[F[1]] - C[F[0]]).Cross(C[F[3]] - C[F[0]]) + (C[F[3]] - C[F[2]]).Cross(C[F[1]] - C[F[2]]);
+			// Faces are millimetres in metres: GetSafeNormal's squared-length tolerance (1e-8) would zero them.
+			const double Len = N.Size();
+			N = Len > 1e-30 ? N / Len : FV3::ZeroVector;
+			const FV3 Mid = (C[F[0]] + C[F[1]] + C[F[2]] + C[F[3]]) / 4.0;
+			if (N.Dot(Mid - Centre) < 0.0)
+			{
+				N = -N;
+			}
+			W.Quad(C[F[0]], C[F[1]], C[F[2]], C[F[3]], N, N, N, N);
+		}
+	}
+
+	// Axis-aligned box [Lo, Hi] (core metres).
+	void AddAxisBox(FMeshWriter& W, const FV3& Lo, const FV3& Hi)
+	{
+		const FV3 C[8] = {FV3(Lo.X, Lo.Y, Lo.Z), FV3(Hi.X, Lo.Y, Lo.Z), FV3(Hi.X, Hi.Y, Lo.Z), FV3(Lo.X, Hi.Y, Lo.Z), FV3(Lo.X, Lo.Y, Hi.Z),
+			FV3(Hi.X, Lo.Y, Hi.Z), FV3(Hi.X, Hi.Y, Hi.Z), FV3(Lo.X, Hi.Y, Hi.Z)};
+		AddHexahedron(W, C);
+	}
+
+	// A board: planar outer loop with holes in the plane (Origin, U, V), extruded by Thickness along U x V. Hard edges; walls of a
+	// loop flagged smooth (circles) get averaged normals.
+	struct FBoardLoop
+	{
+		TArray<FV2> P;
+		bool bSmooth = false;
+	};
+
+	void AddBoard(FMeshWriter& W, const FBoardLoop& Outer, const TArray<FBoardLoop>& Holes, const FV3& Origin, const FV3& U, const FV3& V, double Thickness)
+	{
+		const FV3 Wd = U.Cross(V).GetSafeNormal();
+		auto P3 = [&](const FV2& Q, double T) { return Origin + U * Q.X + V * Q.Y + Wd * T; };
+		const double Sgn = Thickness >= 0.0 ? 1.0 : -1.0;
+		W.BeginSolid();
+		for (const bool bFar : {false, true})
+		{
+			const double T = bFar ? Thickness : 0.0;
+			TArray<TArray<FV3>> Loops;
+			for (int32 l = -1; l < Holes.Num(); ++l)
+			{
+				const FBoardLoop& Loop = l < 0 ? Outer : Holes[l];
+				TArray<FV3>& Out = Loops.AddDefaulted_GetRef();
+				for (const FV2& Q : Loop.P)
+				{
+					Out.Add(P3(Q, T));
+				}
+			}
+			W.Polygon(Loops, (bFar ? Wd : -Wd) * Sgn);
+		}
+		for (int32 l = -1; l < Holes.Num(); ++l)
+		{
+			const FBoardLoop& Loop = l < 0 ? Outer : Holes[l];
+			const int32 N = Loop.P.Num();
+			// Outward from the solid: away from the outer loop's inside, into a hole's inside.
+			const double Orient = (SignedArea(Loop.P) > 0.0 ? 1.0 : -1.0) * (l < 0 ? 1.0 : -1.0);
+			auto EdgeN = [&](int32 i) {
+				const FV2 D = Norm2(Loop.P[(i + 1) % N] - Loop.P[i]);
+				const FV2 R = RightOf(D) * Orient;
+				return (U * R.X + V * R.Y).GetSafeNormal();
+			};
+			for (int32 i = 0; i < N; ++i)
+			{
+				const int32 j = (i + 1) % N;
+				FV3 Ni = EdgeN(i);
+				FV3 Nj = Ni;
+				if (Loop.bSmooth)
+				{
+					Ni = (EdgeN((i + N - 1) % N) + EdgeN(i)).GetSafeNormal();
+					Nj = (EdgeN(i) + EdgeN(j)).GetSafeNormal();
+				}
+				W.Quad(P3(Loop.P[i], 0.0), P3(Loop.P[j], 0.0), P3(Loop.P[j], Thickness), P3(Loop.P[i], Thickness), Ni, Nj, Nj, Ni);
+			}
+		}
+	}
+
+	FBoardLoop RectLoop(double U0, double V0, double U1, double V1)
+	{
+		FBoardLoop L;
+		L.P = {FV2(U0, V0), FV2(U1, V0), FV2(U1, V1), FV2(U0, V1)};
+		return L;
+	}
+
+	FBoardLoop CircleLoop(const FV2& C, double R, int32 Segs)
+	{
+		FBoardLoop L;
+		L.bSmooth = true;
+		for (int32 i = 0; i < Segs; ++i)
+		{
+			L.P.Add(C + Dir(kTwoPi * i / Segs) * R);
+		}
+		return L;
+	}
+
+	// Surface of revolution about the axis through Centre along Axis: profile strips of (D = radius, Z = along the axis) with
+	// normals (ND radial, NZ axial). A strip starting / ending on the axis closes the solid there.
+	void AddRevolve(FMeshWriter& W, const FV3& Centre, const FV3& Axis, const TArray<FProfileStrip>& Strips, int32 Segs)
+	{
+		const FV3 A = Axis.GetSafeNormal();
+		const FV3 E1 = (FMath::Abs(A.Z) < 0.9 ? FV3(0.0, 0.0, 1.0) : FV3(1.0, 0.0, 0.0)).Cross(A).GetSafeNormal();
+		const FV3 E2 = A.Cross(E1);
+		for (const FProfileStrip& S : Strips)
+		{
+			for (int32 j = 0; j < Segs; ++j)
+			{
+				const double T0 = kTwoPi * j / Segs;
+				const double T1 = kTwoPi * (j + 1) / Segs;
+				const FV3 R0 = E1 * FMath::Cos(T0) + E2 * FMath::Sin(T0);
+				const FV3 R1 = E1 * FMath::Cos(T1) + E2 * FMath::Sin(T1);
+				for (int32 k = 0; k + 1 < S.Num(); ++k)
+				{
+					auto Pos = [&](const FV3& R, const FProfilePoint& Q) { return Centre + R * Q.D + A * Q.Z; };
+					auto Nrm = [&](const FV3& R, const FProfilePoint& Q) { return (R * Q.ND + A * Q.NZ).GetSafeNormal(); };
+					W.Quad(Pos(R0, S[k]), Pos(R1, S[k]), Pos(R1, S[k + 1]), Pos(R0, S[k + 1]), Nrm(R0, S[k]), Nrm(R1, S[k]), Nrm(R1, S[k + 1]), Nrm(R0, S[k + 1]));
+				}
+			}
+		}
+	}
+
+	// Closed cylinder (disc) of radius R from Z0 to Z1 along Axis through Centre, with rounded top edge RTop.
+	void AddCylinder(FMeshWriter& W, const FV3& Centre, const FV3& Axis, double R, double Z0, double Z1, double RTop, int32 Segs, int32 EdgeSegs)
+	{
+		W.BeginSolid();
+		FProfileStrip Top;
+		Top.Add({0.0, Z1, 0.0, 1.0});
+		FProfileStrip Side;
+		if (RTop > 0.0)
+		{
+			for (int32 k = 0; k <= EdgeSegs; ++k)
+			{
+				const double A = 0.5 * kPi * k / EdgeSegs;
+				const FProfilePoint Q{R - RTop + RTop * FMath::Sin(A), Z1 - RTop + RTop * FMath::Cos(A), FMath::Sin(A), FMath::Cos(A)};
+				(k == 0 ? Top : Side).Add(Q);
+				if (k == 0)
+				{
+					Side.Add(Q);
+				}
+			}
+		}
+		else
+		{
+			Top.Add({R, Z1, 0.0, 1.0});
+			Side.Add({R, Z1, 1.0, 0.0});
+		}
+		Side.Add({R, Z0, 1.0, 0.0});
+		const FProfileStrip Bottom = {{R, Z0, 0.0, -1.0}, {0.0, Z0, 0.0, -1.0}};
+		AddRevolve(W, Centre, Axis, {Top, Side, Bottom}, Segs);
+	}
+
 	void BuildCushion(FMeshWriter& W, const FLayout& L, const FCushion& Cu)
 	{
 		const FCushionFrame& Fr = Cu.Frame;
@@ -1845,14 +2507,87 @@ namespace RbTableMeshBuilderPrivate
 		W.BeginSolid();
 		W.SetUVMode(EUVMode::Box);
 
-		// Top (sloped plane through the nose line at h and the cushion back at RailTopZ).
+		// Straight-nose stations (M2-L): the roll widens from the jaws' end widths (limited by the jaw radius) to the straight nose's
+		// RollWidth over RollTaper from each end; station 0 / last are the jaws' own first samples (shared vertices).
+		struct FStation
+		{
+			double T = 0.0;
+			TArray<FV3> P;
+			TArray<FV3> N;
+		};
+		TArray<FStation> Stations;
+		{
+			const FV2 PA = Flat(A.Top[0]);
+			const FV2 PB = Flat(B.Top[0]);
+			const double Len = Len2(PB - PA);
+			const double WA = Len2(Flat(A.Roll[0].Last()) - PA);
+			const double WB = Len2(Flat(B.Roll[0].Last()) - PB);
+			const double Taper = FMath::Min(L.RollTaper, Len / 3.0);
+			const int32 K = FMath::Max(2, L.O.NoseRollSegments);
+			Stations.Add({0.0, A.Roll[0], A.RollNormal[0]});
+			if (Taper > 1e-4 && L.RollWidth > 0.0)
+			{
+				TArray<TPair<double, double>> Interior; // (distance from A, width)
+				for (const double F : {0.25, 0.5, 1.0})
+				{
+					const double S = FMath::SmoothStep(0.0, 1.0, F);
+					Interior.Add({F * Taper, WA + (L.RollWidth - WA) * S});
+					Interior.Add({Len - F * Taper, WB + (L.RollWidth - WB) * S});
+				}
+				Interior.Sort([](const TPair<double, double>& X, const TPair<double, double>& Y) { return X.Key < Y.Key; });
+				for (const TPair<double, double>& I : Interior)
+				{
+					if (I.Key <= 1e-6 || I.Key >= Len - 1e-6 || (Stations.Num() > 1 && FMath::Abs(I.Key / Len - Stations.Last().T) < 1e-9))
+					{
+						continue;
+					}
+					FStation S;
+					S.T = I.Key / Len;
+					RollProfile(Fr, PA + (PB - PA) * S.T, -Fr.N, I.Value, L.O.NoseRollBulge, K, S.P, S.N);
+					Stations.Add(MoveTemp(S));
+				}
+			}
+			Stations.Add({1.0, B.Roll[0], B.RollNormal[0]});
+		}
+
+		// Top (sloped plane through the nose line at h and the cushion back at RailTopZ), behind the nose roll (M2-L).
+		auto RollEnds = [](const FJawEnd& J) {
+			TArray<FV3> Out;
+			for (const TArray<FV3>& R : J.Roll)
+			{
+				Out.Add(R.Last());
+			}
+			return Out;
+		};
 		{
 			TArray<FV3> Loop;
 			AppendUnique(Loop, Reversed(A.TopBackChain));
-			AppendUnique(Loop, Reversed(A.Top));
-			AppendUnique(Loop, B.Top);
+			AppendUnique(Loop, Reversed(RollEnds(A)));
+			for (int32 s = 1; s + 1 < Stations.Num(); ++s)
+			{
+				AppendUnique(Loop, {Stations[s].P.Last()});
+			}
+			AppendUnique(Loop, RollEnds(B));
 			AppendUnique(Loop, B.TopBackChain);
 			W.Polygon({Loop}, Fr.TopNormal);
+		}
+		// Nose roll strips: over the straight nose (between the stations) and along each jaw arc.
+		auto RollStrip = [&W](const TArray<FV3>& P0, const TArray<FV3>& N0, const TArray<FV3>& P1, const TArray<FV3>& N1) {
+			for (int32 k = 0; k + 1 < P0.Num() && k + 1 < P1.Num(); ++k)
+			{
+				W.Quad(P0[k], P1[k], P1[k + 1], P0[k + 1], N0[k], N1[k], N1[k + 1], N0[k + 1]);
+			}
+		};
+		for (int32 s = 0; s + 1 < Stations.Num(); ++s)
+		{
+			RollStrip(Stations[s].P, Stations[s].N, Stations[s + 1].P, Stations[s + 1].N);
+		}
+		for (const FJawEnd* J : {&A, &B})
+		{
+			for (int32 i = 0; i + 1 < J->Roll.Num(); ++i)
+			{
+				RollStrip(J->Roll[i], J->RollNormal[i], J->Roll[i + 1], J->RollNormal[i + 1]);
+			}
 		}
 		// Bottom (z = 0).
 		{
@@ -1870,9 +2605,24 @@ namespace RbTableMeshBuilderPrivate
 			AppendUnique(Loop, Reversed(B.BackSide));
 			W.Polygon({Loop}, Fr.BackNormal);
 		}
-		// Rubber face with the nose band (rounded-nose shading, exact geometry).
-		W.Quad(A.Top[0], B.Top[0], B.Band[0], A.Band[0], Fr.TopNormal, Fr.TopNormal, Fr.FaceNormal, Fr.FaceNormal);
-		W.Quad(A.Band[0], B.Band[0], B.Bottom[0], A.Bottom[0], Fr.FaceNormal, Fr.FaceNormal, Fr.FaceNormal, Fr.FaceNormal);
+		// Rubber face with the nose band: the roll's horizontal normal at the nose line blends into the face below (M2-L; M1 had
+		// the top normal here, the rounding is real geometry now). The band is split at the stations (their nose-line vertices), the
+		// face below it is one planar polygon down to the bottom line.
+		{
+			TArray<FV3> BandLine;
+			for (int32 s = 0; s < Stations.Num(); ++s)
+			{
+				BandLine.Add(FMath::Lerp(A.Band[0], B.Band[0], Stations[s].T));
+			}
+			for (int32 s = 0; s + 1 < Stations.Num(); ++s)
+			{
+				W.Quad(Stations[s].P[0], Stations[s + 1].P[0], BandLine[s + 1], BandLine[s], Stations[s].N[0], Stations[s + 1].N[0], Fr.FaceNormal, Fr.FaceNormal);
+			}
+			TArray<FV3> Face = BandLine;
+			Face.Add(B.Bottom[0]);
+			Face.Add(A.Bottom[0]);
+			W.Polygon({Face}, Fr.FaceNormal);
+		}
 
 		for (const FJawEnd* J : {&A, &B})
 		{
@@ -1881,7 +2631,7 @@ namespace RbTableMeshBuilderPrivate
 			{
 				const FV3& N0 = J->RulingNormal[i];
 				const FV3& N1 = J->RulingNormal[i + 1];
-				W.Quad(J->Top[i], J->Top[i + 1], J->Band[i + 1], J->Band[i], Fr.TopNormal, Fr.TopNormal, N1, N0);
+				W.Quad(J->Top[i], J->Top[i + 1], J->Band[i + 1], J->Band[i], J->RollNormal[i][0], J->RollNormal[i + 1][0], N1, N0);
 				W.Quad(J->Band[i], J->Band[i + 1], J->Bottom[i + 1], J->Bottom[i], N0, N1, N1, N0);
 			}
 			// Facing (undercut plane).
@@ -2203,26 +2953,6 @@ namespace RbTableMeshBuilderPrivate
 		}
 	}
 
-	// Cap / body pieces between the mitres (piece c runs along the rail from outer corner c to c + 1).
-	TArray<FV2> RailPiece(const FLayout& L, int32 c, const FV2 Outer[4])
-	{
-		const int32 N = L.Union.P.Num();
-		TArray<FV2> Poly = {Outer[c], Outer[(c + 1) % 4]};
-		const int32 From = L.Mitre[(c + 1) % 4];
-		const int32 To = L.Mitre[c];
-		int32 i = From;
-		for (int32 Guard = 0; Guard <= N; ++Guard)
-		{
-			Poly.Add(L.Union.P[i]);
-			if (i == To)
-			{
-				break;
-			}
-			i = (i - 1 + N) % N;
-		}
-		return Poly;
-	}
-
 	TArray<FV2> SightLoop(const FLayout& L, const rb::Sight& S)
 	{
 		TArray<FV2> Loop;
@@ -2243,49 +2973,153 @@ namespace RbTableMeshBuilderPrivate
 		return S.Position.x > 0.0 ? 1 : 3;
 	}
 
-	void BuildRailRing(FMeshWriter& W, const FLayout& L, double Z0, double Z1, bool bSights, double TopBand)
+	// One rail zone (M2-L) as a closed solid from Z0 to Z1: top / bottom faces between the outline (inset by the profile) and the
+	// inner boundary, the outer edge swept with Profile, the inner walls (cushion back / liner collars), flat end faces at the two
+	// cuts (mitres or perpendicular cuts; neighbouring zones' end faces are coplanar back to back) and, for caps, the flush sight
+	// holes of the sights whose centre lies in the zone.
+	bool BuildRailZone(FMeshWriter& W, const FLayout& L, const FRailZone& Z, double Z0, double Z1, const FProfileStrip& Profile, bool bSights)
 	{
-		const FV2 Outer[4] = {FV2(-L.HlR, -L.HwR), FV2(L.HlR, -L.HwR), FV2(L.HlR, L.HwR), FV2(-L.HlR, L.HwR)};
-		W.BeginSolid();
-		for (int32 c = 0; c < 4; ++c)
+		const int32 OF = FindChainPoint(L.Outline, Z.From.Outer);
+		const int32 OT = FindChainPoint(L.Outline, Z.To.Outer);
+		const int32 IF = FindWallPoint(L.UnionCut, Z.From.Inner);
+		const int32 IT = FindWallPoint(L.UnionCut, Z.To.Inner);
+		if (OF == INDEX_NONE || OT == INDEX_NONE || IF == INDEX_NONE || IT == INDEX_NONE)
 		{
-			const TArray<FV2> Piece = RailPiece(L, c, Outer);
-			TArray<TArray<FV2>> Holes;
-			if (bSights)
+			W.Fail(TEXT("rail zone cut not on the outline / inner boundary"));
+			return false;
+		}
+		const FPlanChain Out = SubChain(L.Outline, OF, OT);
+		const FWallLoop In = SubWall(L.UnionCut, IF, IT);
+		// Top / bottom: the outer chain inset by the profile, then the inner chain backwards.
+		auto Face = [&](double D) {
+			TArray<FV2> Loop;
+			for (int32 i = 0; i < Out.Num(); ++i)
 			{
-				for (const rb::Sight& S : L.G->Sights)
+				Loop.Add(Out.P[i] - Out.O[i] * D);
+			}
+			for (int32 i = In.P.Num() - 1; i >= 0; --i)
+			{
+				if (FV2::DistSquared(Loop.Last(), In.P[i]) > 1e-20)
 				{
-					if (SightRail(L, S) == c)
-					{
-						Holes.Add(SightLoop(L, S));
-					}
+					Loop.Add(In.P[i]);
 				}
 			}
-			W.SetUVMode((c % 2) == 0 ? EUVMode::PlanarXY : EUVMode::PlanarYX);
-			AddFlat(W, Piece, Holes, Z1, true);
-			AddFlat(W, Piece, Holes, Z0, false);
-		}
-		W.SetUVMode(EUVMode::Box);
-		FWallLoop OuterLoop;
-		for (const FV2& P : Outer)
-		{
-			OuterLoop.Add(P);
-		}
-		AddWalls(W, OuterLoop, true, Z0, Z1, TopBand);
-		// The union loop runs CCW around the table: the rail solid lies to its right.
-		AddWalls(W, L.Union, false, Z0, Z1);
+			return Loop;
+		};
+		const TArray<FV2> Top = Face(Profile[0].D);
+		const TArray<FV2> Bottom = Face(Profile.Last().D);
+		TArray<TArray<FV2>> Holes;
+		TArray<const rb::Sight*> Sights;
 		if (bSights)
 		{
 			for (const rb::Sight& S : L.G->Sights)
 			{
-				FWallLoop Hole;
-				const FV2 Centre(S.Position.x, S.Position.y);
-				for (const FV2& P : SightLoop(L, S))
+				if (PointInPolygon(Top, FV2(S.Position.x, S.Position.y)))
 				{
-					Hole.Add(P, true, Norm2(Centre - P));
+					Holes.Add(SightLoop(L, S));
+					Sights.Add(&S);
 				}
-				AddWalls(W, Hole, false, Z0, Z1); // CCW loop, solid outside (to its right)
 			}
+		}
+		W.BeginSolid();
+		W.SetUVMode(Z.TopUV);
+		AddFlat(W, Top, Holes, Z1, true);
+		AddFlat(W, Bottom, Holes, Z0, false);
+		W.SetUVMode(EUVMode::Box);
+		SweepProfile(W, Out, false, {Profile});
+		// The inner boundary runs CCW around the table: the rail solid lies to its right.
+		const int32 NIn = In.P.Num();
+		for (int32 i = 0; i + 1 < NIn; ++i)
+		{
+			const FV2& A = In.P[i];
+			const FV2& B = In.P[i + 1];
+			FV3 NA;
+			FV3 NB;
+			if (In.EdgeSmooth[i])
+			{
+				NA = At(In.PointNormal[i], 0.0);
+				NB = At(In.PointNormal[i + 1], 0.0);
+			}
+			else
+			{
+				NA = NB = At(-RightOf(Norm2(B - A)), 0.0);
+			}
+			W.Quad(At(A, Z0), At(B, Z0), At(B, Z1), At(A, Z1), NA, NB, NB, NA);
+		}
+		for (const rb::Sight* S : Sights)
+		{
+			FWallLoop Hole;
+			const FV2 Centre(S->Position.x, S->Position.y);
+			for (const FV2& P : SightLoop(L, *S))
+			{
+				Hole.Add(P, true, Norm2(Centre - P));
+			}
+			AddWalls(W, Hole, false, Z0, Z1); // CCW loop, solid outside (to its right)
+		}
+		// End faces: the cut's vertical plane, facing away from the zone.
+		for (const bool bStart : {true, false})
+		{
+			const int32 o = bStart ? 0 : Out.Num() - 1;
+			const FV2 InnerP = bStart ? In.P[0] : In.P.Last();
+			const FV2 Along = bStart ? Out.P[1] - Out.P[0] : Out.P[Out.Num() - 2] - Out.P.Last(); // into the zone
+			FV2 N = Norm2(PerpCcw(Out.P[o] - InnerP));
+			if (Dot2(N, Along) > 0.0)
+			{
+				N = -N;
+			}
+			TArray<FV3> Loop = {At(InnerP, Z0), At(InnerP, Z1)};
+			for (const FProfilePoint& Q : Profile)
+			{
+				const FV3 P = ProfilePos(Out, o, Q);
+				if (FV3::DistSquared(Loop.Last(), P) > 1e-20)
+				{
+					Loop.Add(P);
+				}
+			}
+			W.Polygon({Loop}, At(N, 0.0));
+		}
+		return W.Ok();
+	}
+
+	// Rail caps (M2-L): every cap zone, the outer top edge a real quarter round, drilled for the flush sights.
+	void BuildRailCaps(FMeshWriter& W, const FLayout& L)
+	{
+		const FProfileStrip Profile = EdgeProfile(L.Zc - L.CapT, L.Zc, L.CapEdge, 0.0, 0.0, L.EdgeSegs);
+		for (const FRailZone& Z : L.CapZones)
+		{
+			BuildRailZone(W, L, Z, L.Zc - L.CapT, L.Zc, Profile, true);
+		}
+	}
+
+	// Rail body under the caps (legs style: 1.5 mm behind the cap edge with a rounded bottom edge; coin-op: flush) and, legs
+	// style, the apron skirt: a closed ring behind the rail outline (SkirtInset) down to ApronDepth with rounded edges, clear of
+	// the pocket circles.
+	void BuildApron(FMeshWriter& W, const FLayout& L)
+	{
+		const double Z1 = L.Zc - L.CapT;
+		const FProfileStrip Body = EdgeProfile(-L.T, Z1, 0.0, L.bCabinet ? 0.0 : 0.003, L.BodyInset, L.EdgeSegs);
+		for (const FRailZone& Z : L.CapZones)
+		{
+			BuildRailZone(W, L, Z, -L.T, Z1, Body, false);
+		}
+		if (L.bCabinet)
+		{
+			return;
+		}
+		const double Inner = L.SkirtInset + L.SkirtT;
+		const FPlanChain InnerChain = RoundedRect(L.HlR - Inner, L.HwR - Inner, FMath::Max(0.0, L.OuterR - Inner), L.CornerSegs);
+		const FProfileStrip Skirt = EdgeProfile(-L.ApronDepth, -L.T, 0.003, FMath::Min(0.008, L.OuterR - L.SkirtInset - 0.002), L.SkirtInset, L.EdgeSegs);
+		AddProfiledRing(W, L.Outline, Skirt, InnerChain);
+	}
+
+	// Coin-op castings (black ABS): corner and side castings over the full rail height, their tops flush with the rail top, the
+	// outer top edge rounded; the openings are the liner collars' outer paths (r_p + LinerThickness).
+	void BuildCastingZones(FMeshWriter& W, const FLayout& L)
+	{
+		const FProfileStrip Profile = EdgeProfile(-L.T, L.Zc, 0.006, 0.0025, 0.0, L.EdgeSegs);
+		for (const FRailZone& Z : L.CastingZones)
+		{
+			BuildRailZone(W, L, Z, -L.T, L.Zc, Profile, false);
 		}
 	}
 
@@ -2368,34 +3202,6 @@ namespace RbTableMeshBuilderPrivate
 		}
 	}
 
-	void BuildSkirt(FMeshWriter& W, const FLayout& L)
-	{
-		const FV2 Outer[4] = {FV2(-L.HlR, -L.HwR), FV2(L.HlR, -L.HwR), FV2(L.HlR, L.HwR), FV2(-L.HlR, L.HwR)};
-		const double Hi = L.HlR - L.SkirtT;
-		const double Wi = L.HwR - L.SkirtT;
-		const FV2 Inner[4] = {FV2(-Hi, -Wi), FV2(Hi, -Wi), FV2(Hi, Wi), FV2(-Hi, Wi)};
-		const double Z0 = -L.ApronDepth;
-		const double Z1 = -L.T;
-		W.BeginSolid();
-		for (int32 c = 0; c < 4; ++c)
-		{
-			const TArray<FV2> Piece = {Outer[c], Outer[(c + 1) % 4], Inner[(c + 1) % 4], Inner[c]};
-			W.SetUVMode((c % 2) == 0 ? EUVMode::PlanarXY : EUVMode::PlanarYX);
-			AddFlat(W, Piece, {}, Z1, true);
-			AddFlat(W, Piece, {}, Z0, false);
-		}
-		W.SetUVMode(EUVMode::Box);
-		FWallLoop O;
-		FWallLoop I;
-		for (int32 c = 0; c < 4; ++c)
-		{
-			O.Add(Outer[c]);
-			I.Add(Inner[c]);
-		}
-		AddWalls(W, O, true, Z0, Z1);
-		AddWalls(W, I, false, Z0, Z1);
-	}
-
 	void BuildSights(FMeshWriter& W, const FLayout& L)
 	{
 		W.SetUVMode(EUVMode::Box);
@@ -2422,8 +3228,9 @@ namespace RbTableMeshBuilderPrivate
 		}
 	}
 
-	// Drop pocket / cup: a revolved closed profile (outer r_p, wall LinerT) hanging from the slate bottom.
-	void BuildLiners(FMeshWriter& W, const FLayout& L)
+	// Drop pocket (legs style: leather bucket) / gully throat (coin-op): a revolved closed profile (outer r_p, wall LinerT) hanging
+	// from the slate bottom (M2-L: the PocketBuckets part; M1 had it in PocketLiners).
+	void BuildBuckets(FMeshWriter& W, const FLayout& L)
 	{
 		W.SetUVMode(EUVMode::Box);
 		const int32 BowlSegs = 6;
@@ -2487,38 +3294,334 @@ namespace RbTableMeshBuilderPrivate
 		}
 	}
 
+	// ------------------------------------------------------------------------------------------------------------------------
+	// M2-L body: legs, levelers, the coin-op cabinet with its hardware (venue-dive-bar 3.1, "HALVERSON Stallion 7")
+	// ------------------------------------------------------------------------------------------------------------------------
+
+	// Body dimensions [m] (ESTIMATE unless venue-dive-bar 3.1 gives them; z in the cloth frame: floor = -BedHeight).
+	namespace Body
+	{
+		// Legs style (9-ft pro): leveler disc + stem, plinth, leg.
+		constexpr double LevelerDiscH = 0.008, LevelerStemH = 0.008, LevelerR = 0.03, LevelerStemR = 0.008;
+		constexpr double PlinthH = 0.05, PlinthExtra = 0.01, PlinthPlanR = 0.015, PlinthTopR = 0.006;
+		constexpr double LegPlanR = 0.012;
+		// Coin-op (7-ft bar box, venue-dive-bar 3.1).
+		constexpr double CabBottomAboveFloor = 0.30; // box from Z 0.30 to the rail underside
+		constexpr double CabInset = 0.002;           // boards behind the trim / rail outline
+		constexpr double Board = 0.019;              // board thickness
+		constexpr double PedestalSize = 0.20, PedestalInset = 0.10, PedestalPlanR = 0.01;
+		constexpr double ScrewLevelerR = 0.025, ScrewDiscH = 0.008, ScrewStemR = 0.006, ScrewStemH = 0.004;
+		// Trim band heights: the top band ends above the coin plate (its top at CoinCentreZ + CoinPlateH / 2 = 0.68 m, the rail
+		// underside of the 7-ft bar box at 0.7176 m), the bottom band below the ball tray opening (TrayZ0 0.33 m); M2-L review: 4.5 / 3.5
+		// cm bands ran over the plate's top and the tray opening's bottom (RawBreak.Unit.Table.Look.FootEndFit).
+		constexpr double TopTrimH = 0.035, BottomTrimH = 0.025;
+		// Foot-end face (core +x), heights above the floor.
+		constexpr double CoinCentreZ = 0.62, CoinPlateW = 0.20, CoinPlateH = 0.12, CoinPlateT = 0.004;
+		constexpr double SlideW = 0.16, SlideH = 0.036, SlideOut = 0.06, QuarterR = 0.01213; // 24.26 mm quarters, 6 slots
+		constexpr double WindowY0 = -0.443, WindowY1 = 0.437, WindowZ0 = 0.44, WindowZ1 = 0.51, WindowFrame = 0.012;
+		constexpr double TrayY0 = -0.30, TrayY1 = 0.30, TrayZ0 = 0.33, TrayZ1 = 0.42, TrayDepth = 0.10;
+		constexpr double ReturnY = -0.553, ReturnFloorZ = 0.38, ReturnR = 0.0375, ReturnDepth = 0.08;
+		// Wall-side face (core -y): locked coin door near the foot end.
+		constexpr double DoorX0 = 0.441, DoorX1 = 0.691, DoorZ0 = 0.40, DoorZ1 = 0.60, DoorT = 0.003, LockR = 0.011, LockOut = 0.006;
+	}
+
+	// Legs style: four legs flush with the apron skirt's face at the corners, on plinths; coin-op: four 0.20 m pedestal legs inset
+	// 0.10 m under the cabinet.
 	void BuildLegs(FMeshWriter& W, const FLayout& L)
 	{
 		W.SetUVMode(EUVMode::Box);
 		const double Floor = -L.BedHeight;
-		const double Top = -L.ApronDepth;
-		const double Inset = L.SkirtT;
-		if (L.bCabinet)
-		{
-			// Coin-op cabinet (recessed behind the skirt) on four leveller feet.
-			const double FootH = 0.03;
-			const double X = L.HlR - Inset;
-			const double Y = L.HwR - Inset;
-			AddBox(W, FV2(-X, -Y), FV2(X, Y), Floor + FootH, Top);
-			const double F = 0.08;
-			const double Fi = 0.04;
-			for (int32 c = 0; c < 4; ++c)
-			{
-				const double Sx = (c == 1 || c == 2) ? 1.0 : -1.0;
-				const double Sy = c >= 2 ? 1.0 : -1.0;
-				const FV2 Centre(Sx * (X - Fi - 0.5 * F), Sy * (Y - Fi - 0.5 * F));
-				AddBox(W, Centre - FV2(0.5 * F, 0.5 * F), Centre + FV2(0.5 * F, 0.5 * F), Floor, Floor + FootH);
-			}
-			return;
-		}
-		const double S = L.O.LegSizeCm / FRbCoords::CmPerMeter;
-		const double LegInset = Inset + 0.01;
 		for (int32 c = 0; c < 4; ++c)
 		{
 			const double Sx = (c == 1 || c == 2) ? 1.0 : -1.0;
 			const double Sy = c >= 2 ? 1.0 : -1.0;
-			const FV2 Centre(Sx * (L.HlR - LegInset - 0.5 * S), Sy * (L.HwR - LegInset - 0.5 * S));
-			AddBox(W, Centre - FV2(0.5 * S, 0.5 * S), Centre + FV2(0.5 * S, 0.5 * S), Floor, Top);
+			if (L.bCabinet)
+			{
+				const double H = 0.5 * Body::PedestalSize;
+				const FV2 Centre(Sx * (L.HlR - Body::PedestalInset - H), Sy * (L.HwR - Body::PedestalInset - H));
+				const FPlanChain C = RoundedRect(H, H, Body::PedestalPlanR, L.CornerSegs).Translated(Centre);
+				AddProfiledBlock(W, C, EdgeProfile(Floor + Body::ScrewDiscH + Body::ScrewStemH, Floor + Body::CabBottomAboveFloor, 0.0, 0.004, 0.0, L.EdgeSegs));
+				continue;
+			}
+			const double S = L.O.LegSizeCm / FRbCoords::CmPerMeter;
+			const FV2 Centre(Sx * (L.HlR - L.SkirtInset - 0.5 * S), Sy * (L.HwR - L.SkirtInset - 0.5 * S));
+			const double PlinthZ0 = Floor + Body::LevelerDiscH + Body::LevelerStemH;
+			const double PlinthZ1 = PlinthZ0 + Body::PlinthH;
+			const double P = 0.5 * S + Body::PlinthExtra;
+			AddProfiledBlock(W, RoundedRect(P, P, Body::PlinthPlanR, L.CornerSegs).Translated(Centre),
+				EdgeProfile(PlinthZ0, PlinthZ1, Body::PlinthTopR, 0.002, 0.0, L.EdgeSegs));
+			AddProfiledBlock(W, RoundedRect(0.5 * S, 0.5 * S, Body::LegPlanR, L.CornerSegs).Translated(Centre),
+				EdgeProfile(PlinthZ1, -L.ApronDepth, 0.0, 0.0, 0.0, L.EdgeSegs));
+		}
+	}
+
+	// Leg / pedestal centres (plan) of a style.
+	TArray<FV2> LegCentres(const FLayout& L)
+	{
+		TArray<FV2> Out;
+		for (int32 c = 0; c < 4; ++c)
+		{
+			const double Sx = (c == 1 || c == 2) ? 1.0 : -1.0;
+			const double Sy = c >= 2 ? 1.0 : -1.0;
+			const double H = L.bCabinet ? 0.5 * Body::PedestalSize + Body::PedestalInset : L.SkirtInset + 0.5 * L.O.LegSizeCm / FRbCoords::CmPerMeter;
+			Out.Add(FV2(Sx * (L.HlR - H), Sy * (L.HwR - H)));
+		}
+		return Out;
+	}
+
+	// Coin-op cabinet: four rounded corner posts and four boards (the foot board with the trap window, ball tray and cue-ball
+	// return openings) from Z 0.30 m to the rail underside, 2 mm behind the rail outline, and the bottom board.
+	void BuildCabinet(FMeshWriter& W, const FLayout& L)
+	{
+		W.SetUVMode(EUVMode::Box);
+		const double Floor = -L.BedHeight;
+		const double Z0 = Floor + Body::CabBottomAboveFloor;
+		const double Z1 = -L.T;
+		const double E = Body::CabInset;
+		const double R = L.OuterR - E;         // outer corner radius of the box
+		const double Ri = R - Body::Board;     // inner corner radius
+		const double Xs = L.HlR - L.OuterR;    // straight part of the long sides: |x| <= Xs
+		const double Ys = L.HwR - L.OuterR;
+		// Corner posts: quarter annuli about the outline's corner centres.
+		for (int32 c = 0; c < 4; ++c)
+		{
+			const double Sx = (c == 1 || c == 2) ? 1.0 : -1.0;
+			const double Sy = c >= 2 ? 1.0 : -1.0;
+			const FV2 Centre(Sx * Xs, Sy * Ys);
+			const double Start[4] = {kPi, 1.5 * kPi, 0.0, 0.5 * kPi};
+			TArray<FV2> Loop;
+			for (int32 s = 0; s <= L.CornerSegs; ++s)
+			{
+				Loop.Add(Centre + Dir(Start[c] + 0.5 * kPi * s / L.CornerSegs) * R);
+			}
+			for (int32 s = L.CornerSegs; s >= 0; --s)
+			{
+				Loop.Add(Centre + Dir(Start[c] + 0.5 * kPi * s / L.CornerSegs) * Ri);
+			}
+			W.BeginSolid();
+			AddFlat(W, Loop, {}, Z1, true);
+			AddFlat(W, Loop, {}, Z0, false);
+			FWallLoop Walls;
+			for (int32 s = 0; s < Loop.Num(); ++s)
+			{
+				const bool bOuterArc = s < L.CornerSegs;
+				const bool bInnerArc = s > L.CornerSegs && s < Loop.Num() - 1;
+				const FV2 Radial = Norm2(Loop[s] - Centre);
+				Walls.Add(Loop[s], bOuterArc || bInnerArc, s <= L.CornerSegs ? Radial : -Radial);
+			}
+			AddWalls(W, Walls, SignedArea(Loop) > 0.0, Z0, Z1);
+		}
+		// Long side boards (y = +-(HwR - E)), |x| <= Xs.
+		for (const double Sy : {-1.0, 1.0})
+		{
+			const double Y0 = Sy * (L.HwR - E);
+			AddBoard(W, RectLoop(-Xs, Z0, Xs, Z1), {}, FV3(0.0, Y0, 0.0), FV3(1.0, 0.0, 0.0), FV3(0.0, 0.0, 1.0), Sy > 0.0 ? Body::Board : -Body::Board);
+		}
+		// End boards (x = +-(HlR - E)), |y| <= Ys; the foot board (core +x) has the three openings.
+		const double ZF = Floor; // heights above the floor -> cloth frame
+		TArray<FBoardLoop> FootHoles = {RectLoop(Body::WindowY0, ZF + Body::WindowZ0, Body::WindowY1, ZF + Body::WindowZ1),
+			RectLoop(Body::TrayY0, ZF + Body::TrayZ0, Body::TrayY1, ZF + Body::TrayZ1),
+			CircleLoop(FV2(Body::ReturnY, ZF + Body::ReturnFloorZ + Body::ReturnR), Body::ReturnR + 0.002, 48)}; // the cup's tube fits in it
+		for (const double Sx : {-1.0, 1.0})
+		{
+			const double X0 = Sx * (L.HlR - E);
+			AddBoard(W, RectLoop(-Ys, Z0, Ys, Z1), Sx > 0.0 ? FootHoles : TArray<FBoardLoop>(), FV3(X0, 0.0, 0.0), FV3(0.0, 1.0, 0.0), FV3(0.0, 0.0, 1.0),
+				Sx > 0.0 ? -Body::Board : Body::Board);
+		}
+		// Bottom board.
+		W.BeginSolid();
+		const FPlanChain Plate = RoundedRect(L.HlR - E, L.HwR - E, R, L.CornerSegs);
+		AddFlat(W, InsetLoop(Plate, 0.0), {}, Z0 + Body::Board, true);
+		AddFlat(W, InsetLoop(Plate, 0.0), {}, Z0, false);
+		ChainWalls(W, Plate, Z0, Z0 + Body::Board, 1.0);
+	}
+
+	// Aluminium trim bands at the top and bottom of the cabinet: 2 mm proud of the boards (flush with the rail outline), three
+	// shallow grooves each (venue-dive-bar 3.1 "3-groove aluminium trim bands").
+	void BuildTrim(FMeshWriter& W, const FLayout& L)
+	{
+		W.SetUVMode(EUVMode::Box);
+		const double Floor = -L.BedHeight;
+		const double E = Body::CabInset;
+		const FPlanChain Inner = RoundedRect(L.HlR - E, L.HwR - E, L.OuterR - E, L.CornerSegs);
+		auto Band = [&](double Z0, double Z1) {
+			// Face profile top -> bottom (inset D, z): small top chamfer, three V grooves 0.7 mm deep, small bottom chamfer; every
+			// segment flat-shaded (brushed aluminium with crisp grooves). Outward normal of a segment going (dD, dZ): (-dZ, -dD).
+			TArray<FV2> P; // (D, Z)
+			const double H = Z1 - Z0;
+			const double G = 0.0007;
+			const double Gw = 0.0012;
+			P.Add(FV2(0.0006, Z1));
+			P.Add(FV2(0.0, Z1 - 0.0006));
+			for (int32 g = 1; g <= 3; ++g)
+			{
+				const double Zg = Z1 - H * g / 4.0;
+				P.Add(FV2(0.0, Zg + Gw));
+				P.Add(FV2(G, Zg));
+				P.Add(FV2(0.0, Zg - Gw));
+			}
+			P.Add(FV2(0.0, Z0 + 0.0006));
+			P.Add(FV2(0.0006, Z0));
+			TArray<FProfileStrip> Strips;
+			for (int32 i = 0; i + 1 < P.Num(); ++i)
+			{
+				const FV2 T = Norm2(P[i + 1] - P[i]);
+				const double ND = -T.Y;
+				const double NZ = -T.X;
+				Strips.Add({{P[i].X, P[i].Y, ND, NZ}, {P[i + 1].X, P[i + 1].Y, ND, NZ}});
+			}
+			W.BeginSolid();
+			const TArray<FV2> Hole = InsetLoop(Inner, 0.0);
+			AddFlat(W, InsetLoop(L.Outline, P[0].X), {Hole}, Z1, true);
+			AddFlat(W, InsetLoop(L.Outline, P.Last().X), {Hole}, Z0, false);
+			SweepProfile(W, L.Outline, true, Strips);
+			ChainWalls(W, Inner, Z0, Z1, -1.0);
+		};
+		const double Top = -L.T;
+		const double Bottom = Floor + Body::CabBottomAboveFloor;
+		Band(Top - Body::TopTrimH, Top);
+		Band(Bottom, Bottom + Body::BottomTrimH);
+	}
+
+	// Levelers (both styles), and on the coin-op the coin mechanism, the coin door with its lock and the cue-ball return ring.
+	void BuildHardware(FMeshWriter& W, const FLayout& L)
+	{
+		W.SetUVMode(EUVMode::Box);
+		const double Floor = -L.BedHeight;
+		const FV3 Up(0.0, 0.0, 1.0);
+		for (const FV2& C : LegCentres(L))
+		{
+			// Disc on the floor + threaded stem up to the leg / plinth.
+			const double DiscR = L.bCabinet ? Body::ScrewLevelerR : Body::LevelerR;
+			const double DiscH = L.bCabinet ? Body::ScrewDiscH : Body::LevelerDiscH;
+			const double StemR = L.bCabinet ? Body::ScrewStemR : Body::LevelerStemR;
+			const double StemH = L.bCabinet ? Body::ScrewStemH : Body::LevelerStemH;
+			AddCylinder(W, At(C, Floor), Up, DiscR, 0.0, DiscH, 0.002, 48, 4);
+			AddCylinder(W, At(C, Floor), Up, StemR, DiscH - 0.0005, DiscH + StemH, 0.0, 24, 2);
+		}
+		if (!L.bCabinet)
+		{
+			return;
+		}
+		const double X = L.HlR - Body::CabInset; // foot board face
+		// Coin plate + slide.
+		const double Zc = Floor + Body::CoinCentreZ;
+		AddAxisBox(W, FV3(X - 0.001, -0.5 * Body::CoinPlateW, Zc - 0.5 * Body::CoinPlateH), FV3(X + Body::CoinPlateT, 0.5 * Body::CoinPlateW, Zc + 0.5 * Body::CoinPlateH));
+		const double Xp = X + Body::CoinPlateT;
+		AddAxisBox(W, FV3(Xp - 0.001, -0.5 * Body::SlideW, Zc - 0.5 * Body::SlideH), FV3(Xp + Body::SlideOut, 0.5 * Body::SlideW, Zc + 0.5 * Body::SlideH));
+		// Slide handle knob at the front.
+		AddCylinder(W, FV3(Xp + Body::SlideOut, 0.0, Zc), FV3(1.0, 0.0, 0.0), 0.012, -0.001, 0.012, 0.004, 32, 4);
+		// Coin door (wall side, core -y) + lock cylinder.
+		const double Y = -(L.HwR - Body::CabInset);
+		AddAxisBox(W, FV3(Body::DoorX0, Y - Body::DoorT, Floor + Body::DoorZ0), FV3(Body::DoorX1, Y + 0.001, Floor + Body::DoorZ1));
+		AddCylinder(W, FV3(Body::DoorX1 - 0.035, Y - Body::DoorT, Floor + 0.5 * (Body::DoorZ0 + Body::DoorZ1)), FV3(0.0, -1.0, 0.0), Body::LockR, -0.001,
+			Body::LockOut, 0.002, 32, 3);
+		// Cue-ball return ring around the opening (revolved about the x axis on the board face).
+		{
+			W.BeginSolid();
+			const double R0 = Body::ReturnR;
+			const double R1 = Body::ReturnR + 0.009;
+			const double T = 0.005;
+			// Half-round face from the inner edge over to the outer edge (flattened: radial half-width x axial height T).
+			FProfileStrip Face;
+			const double Rm = 0.5 * (R0 + R1);
+			const double Rr = 0.5 * (R1 - R0);
+			for (int32 k = 0; k <= 8; ++k)
+			{
+				const double A = kPi * k / 8.0;
+				Face.Add({Rm - Rr * FMath::Cos(A), T * FMath::Sin(A), -FMath::Cos(A) * T, FMath::Sin(A) * Rr});
+			}
+			const FProfileStrip Back = {{R1, 0.0, 0.0, -1.0}, {R0, 0.0, 0.0, -1.0}};
+			AddRevolve(W, FV3(X, Body::ReturnY, Floor + Body::ReturnFloorZ + Body::ReturnR), FV3(1.0, 0.0, 0.0), {Face, Back}, 48);
+		}
+	}
+
+	// Coin-op black ABS parts besides the castings: the ball-trap channel behind the window, the window frame, the recessed ball tray,
+	// the cue-ball return cup, the six coin slots on the slide and the coin-return slot.
+	void BuildCastingExtras(FMeshWriter& W, const FLayout& L)
+	{
+		W.SetUVMode(EUVMode::Box);
+		const double Floor = -L.BedHeight;
+		const double X = L.HlR - Body::CabInset; // foot board outer face
+		const double Xi = X - Body::Board;       // inner face
+		const double P = 0.002;                  // plate thickness of the open boxes
+		// Open box behind an opening (y0..y1, z0..z1) from the board's inner face back by Depth: back, top, bottom, two sides (the
+		// opening's walls through the board are the board's own laminate edges).
+		auto OpenBox = [&](double Y0, double Y1, double Z0, double Z1, double Depth) {
+			const double Xb = Xi - Depth;
+			AddAxisBox(W, FV3(Xb - P, Y0 - P, Z0 - P), FV3(Xb, Y1 + P, Z1 + P));
+			AddAxisBox(W, FV3(Xb, Y0 - P, Z1), FV3(Xi, Y1 + P, Z1 + P));
+			AddAxisBox(W, FV3(Xb, Y0 - P, Z0 - P), FV3(Xi, Y1 + P, Z0));
+			AddAxisBox(W, FV3(Xb, Y0 - P, Z0), FV3(Xi, Y0, Z1));
+			AddAxisBox(W, FV3(Xb, Y1, Z0), FV3(Xi, Y1 + P, Z1));
+		};
+		const double WZ0 = Floor + Body::WindowZ0;
+		const double WZ1 = Floor + Body::WindowZ1;
+		OpenBox(Body::WindowY0, Body::WindowY1, WZ0, WZ1, 0.07);
+		OpenBox(Body::TrayY0, Body::TrayY1, Floor + Body::TrayZ0, Floor + Body::TrayZ1, Body::TrayDepth);
+		// Window frame: a ring 4 mm proud of the board face (1 mm into it).
+		const double F = Body::WindowFrame;
+		AddBoard(W, RectLoop(Body::WindowY0 - F, WZ0 - F, Body::WindowY1 + F, WZ1 + F), {RectLoop(Body::WindowY0, WZ0, Body::WindowY1, WZ1)}, FV3(X - 0.001, 0.0, 0.0),
+			FV3(0.0, 1.0, 0.0), FV3(0.0, 0.0, 1.0), 0.005);
+		// Cue-ball return cup: a tube in the round opening (its outside = the opening's wall, back to back), closed at the back.
+		{
+			W.BeginSolid();
+			const double R0 = Body::ReturnR;
+			const double R1 = Body::ReturnR + P;
+			const double D = Body::ReturnDepth + Body::Board;
+			const FProfileStrip Inside = {{R0, 0.0, -1.0, 0.0}, {R0, -D, -1.0, 0.0}};
+			const FProfileStrip Bottom = {{R0, -D, 0.0, 1.0}, {0.0, -D, 0.0, 1.0}};
+			const FProfileStrip Outside = {{R1, 0.0, 1.0, 0.0}, {R1, -D - P, 1.0, 0.0}};
+			const FProfileStrip Back = {{R1, -D - P, 0.0, -1.0}, {0.0, -D - P, 0.0, -1.0}};
+			const FProfileStrip Rim = {{R0, 0.0, 0.0, 1.0}, {R1, 0.0, 0.0, 1.0}};
+			AddRevolve(W, FV3(X, Body::ReturnY, Floor + Body::ReturnFloorZ + Body::ReturnR), FV3(1.0, 0.0, 0.0), {Inside, Bottom, Outside, Back, Rim}, 48);
+		}
+		// Coin slots: six quarter-sized recesses (dark discs) on the slide, and the coin-return slot under it.
+		const double Zc = Floor + Body::CoinCentreZ;
+		const double Xp = X + Body::CoinPlateT;
+		for (int32 i = 0; i < 6; ++i)
+		{
+			const double Yq = (i - 2.5) * 0.025;
+			AddCylinder(W, FV3(Xp + 0.5 * Body::SlideOut, Yq, Zc + 0.5 * Body::SlideH), FV3(0.0, 0.0, 1.0), Body::QuarterR, -0.0005, 0.0003, 0.0, 32, 1);
+		}
+		AddAxisBox(W, FV3(Xp - 0.0005, -0.02, Zc - 0.5 * Body::CoinPlateH + 0.012), FV3(Xp + 0.0004, 0.02, Zc - 0.5 * Body::CoinPlateH + 0.020));
+	}
+
+	// Scratched plexiglass pane of the ball-trap window, 7 mm behind the foot board face.
+	void BuildWindow(FMeshWriter& W, const FLayout& L)
+	{
+		W.SetUVMode(EUVMode::Box);
+		const double Floor = -L.BedHeight;
+		const double X = L.HlR - Body::CabInset - 0.007;
+		AddAxisBox(W, FV3(X - 0.003, Body::WindowY0, Floor + Body::WindowZ0), FV3(X, Body::WindowY1, Floor + Body::WindowZ1));
+	}
+
+	// The black rubber lip along the bottom of each cushion face (below the nose line, behind it in plan), a thin solid on the face
+	// plane between the jaw blends.
+	void BuildRubberStrip(FMeshWriter& W, const FLayout& L)
+	{
+		W.SetUVMode(EUVMode::Box);
+		const double Hs = L.O.RubberStripHeightCm / FRbCoords::CmPerMeter;
+		const double Ts = L.O.RubberStripThicknessCm / FRbCoords::CmPerMeter;
+		for (const FCushion& Cu : L.Cushions)
+		{
+			const FCushionFrame& Fr = Cu.Frame;
+			const FV3 A0 = Cu.A.Bottom[0];
+			const FV3 B0 = Cu.B.Bottom[0];
+			const FV3 Up = (Cu.A.Top[0] - A0) * (Hs / Fr.H); // along the face up to the strip height
+			const FV3 D = (B0 - A0).GetSafeNormal();
+			const double Margin = 0.002;
+			if ((B0 - A0).Size() < 4.0 * Margin)
+			{
+				continue;
+			}
+			const FV3 Pa = A0 + D * Margin;
+			const FV3 Pb = B0 - D * Margin;
+			const FV3 T = Fr.FaceNormal * Ts;
+			// The front face's bottom slides up the face direction back onto the cloth (z = 0).
+			const FV3 Tb = T + Up * (-T.Z / Up.Z);
+			const FV3 C[8] = {Pa, Pb, Pb + Up, Pa + Up, Pa + Tb, Pb + Tb, Pb + Up + T, Pa + Up + T};
+			AddHexahedron(W, C);
 		}
 	}
 
@@ -2537,14 +3640,12 @@ namespace RbTableMeshBuilderPrivate
 			}
 			break;
 		case ERbTablePart::RailCaps:
-			BuildRailRing(W, L, L.Zc - L.CapT, L.Zc, true, L.CapBand);
+			BuildRailCaps(W, L);
 			break;
 		case ERbTablePart::Apron:
-			BuildRailRing(W, L, -L.T, L.Zc - L.CapT, false, 0.0);
-			BuildSkirt(W, L);
+			BuildApron(W, L);
 			break;
 		case ERbTablePart::PocketLiners:
-			BuildLiners(W, L);
 			BuildCollars(W, L);
 			BuildRailBlocks(W, L);
 			break;
@@ -2555,6 +3656,43 @@ namespace RbTableMeshBuilderPrivate
 			if (L.O.bBuildLegs)
 			{
 				BuildLegs(W, L);
+			}
+			break;
+		case ERbTablePart::RubberStrip:
+			BuildRubberStrip(W, L);
+			break;
+		case ERbTablePart::PocketBuckets:
+			BuildBuckets(W, L);
+			break;
+		case ERbTablePart::Castings:
+			if (L.bCabinet)
+			{
+				BuildCastingZones(W, L);
+				BuildCastingExtras(W, L);
+			}
+			break;
+		case ERbTablePart::Cabinet:
+			if (L.bCabinet)
+			{
+				BuildCabinet(W, L);
+			}
+			break;
+		case ERbTablePart::Trim:
+			if (L.bCabinet)
+			{
+				BuildTrim(W, L);
+			}
+			break;
+		case ERbTablePart::Hardware:
+			if (L.O.bBuildLegs)
+			{
+				BuildHardware(W, L);
+			}
+			break;
+		case ERbTablePart::Window:
+			if (L.bCabinet)
+			{
+				BuildWindow(W, L);
 			}
 			break;
 		case ERbTablePart::Count:
@@ -2633,5 +3771,108 @@ namespace RbTableMeshBuilder
 	bool PartUsesNanite(ERbTablePart Part)
 	{
 		return Part != ERbTablePart::Sights;
+	}
+
+	ERbTableBaseStyle ResolveBaseStyle(const rb::TableSpec& Spec, const FRbTableMeshOptions& Options)
+	{
+		const bool bCabinet = Options.BaseStyle == ERbTableBaseStyle::Cabinet ||
+			(Options.BaseStyle == ERbTableBaseStyle::Auto && Spec.Cloth == rb::ClothPreset::NappedBar);
+		return bCabinet ? ERbTableBaseStyle::Cabinet : ERbTableBaseStyle::Legs;
+	}
+
+	double ResolveLinerThicknessCm(const rb::TableSpec& Spec, const FRbTableMeshOptions& Options)
+	{
+		if (Options.LinerThicknessCm > 0.0)
+		{
+			return Options.LinerThicknessCm;
+		}
+		return ResolveBaseStyle(Spec, Options) == ERbTableBaseStyle::Cabinet ? 0.3 : 0.8;
+	}
+
+	double ResolveOuterCornerRadiusCm(const rb::TableSpec& Spec, const FRbTableMeshOptions& Options)
+	{
+		if (Options.OuterCornerRadiusCm > 0.0)
+		{
+			return Options.OuterCornerRadiusCm;
+		}
+		return ResolveBaseStyle(Spec, Options) == ERbTableBaseStyle::Cabinet ? 4.0 : 2.0;
+	}
+
+	FMaterialTableParameters GetMaterialTableParameters(const rb::TableGeometry& Geometry, const FRbTableMeshOptions& Options)
+	{
+		const rb::TableSpec& Spec = Geometry.Spec;
+		constexpr double Cm = FRbCoords::CmPerMeter;
+		FMaterialTableParameters Out;
+		Out.Scalars.Add({FName(TEXT("HalfLength")), 0.5 * Spec.Length});
+		Out.Scalars.Add({FName(TEXT("HalfWidth")), 0.5 * Spec.Width});
+		Out.Scalars.Add({FName(TEXT("CushionWidth")), Spec.CushionWidth});
+		// The rubber face's base line behind the nose (CushionProfile point 0: 0.4 CushionWidth).
+		Out.Scalars.Add({FName(TEXT("FaceBase")), Geometry.Profile.Points.Size() > 0 ? Geometry.Profile.Points[0].x : 0.4 * Spec.CushionWidth});
+		Out.Scalars.Add({FName(TEXT("CornerRadiusCm")), ResolveOuterCornerRadiusCm(Spec, Options)});
+		Out.Scalars.Add({FName(TEXT("BedHeightCm")), Cm * Spec.BedHeight});
+		Out.Vectors.Add({FName(TEXT("HalfOuterCm")), FVector2D(Cm * (0.5 * Spec.Length + Spec.RailWidthTotal), Cm * (0.5 * Spec.Width + Spec.RailWidthTotal))});
+		return Out;
+	}
+
+	bool PartExpected(ERbTableBaseStyle Style, ERbTablePart Part)
+	{
+		switch (Part)
+		{
+		case ERbTablePart::Castings:
+		case ERbTablePart::Cabinet:
+		case ERbTablePart::Trim:
+		case ERbTablePart::Window:
+			return Style == ERbTableBaseStyle::Cabinet;
+		case ERbTablePart::Count:
+			return false;
+		default:
+			return true;
+		}
+	}
+
+	FString GetDefaultMaterialPath(ERbTablePreset Preset, ERbTablePart Part)
+	{
+		// Paths of Tools/unreal/editor/rb_make_materials.py (the dive-bar instances: venue-dive-bar 6.4, RbAssetPaths).
+		const bool bBar = ResolveBaseStyle(rb::GetTableSpec(RbTypes::ToCore(Preset)), FRbTableMeshOptions()) == ERbTableBaseStyle::Cabinet;
+		const TCHAR* Name = nullptr;
+		switch (Part)
+		{
+		case ERbTablePart::Bed:
+		case ERbTablePart::CushionCloth: Name = bBar ? TEXT("MI_RbCloth_BarGreen") : TEXT("M_RbCloth"); break;
+		case ERbTablePart::RailCaps: Name = bBar ? TEXT("MI_RbRail_BlackLaminate") : TEXT("M_RbRailWood"); break;
+		case ERbTablePart::Apron:
+		case ERbTablePart::Cabinet: Name = bBar ? TEXT("MI_RbLaminate_Walnut") : TEXT("M_RbRailWood"); break;
+		case ERbTablePart::Legs: Name = bBar ? TEXT("MI_RbLaminate_Walnut") : TEXT("MI_RbRailWood_Legs"); break; // legs: vertical grain
+		case ERbTablePart::PocketLiners:
+		case ERbTablePart::RubberStrip: Name = bBar ? TEXT("MI_RbCushionRubber_Old") : TEXT("M_RbCushionRubber"); break;
+		case ERbTablePart::Sights: Name = bBar ? TEXT("MI_RbSight_WhitePlastic") : TEXT("M_RbSight"); break;
+		case ERbTablePart::PocketBuckets: Name = bBar ? TEXT("MI_RbCushionRubber_Old") : TEXT("M_RbPocketLiner"); break; // gully throat: rubber
+		case ERbTablePart::Castings: Name = TEXT("M_RbPlasticABS"); break;
+		case ERbTablePart::Trim: Name = TEXT("M_RbAluminium"); break;
+		case ERbTablePart::Hardware: Name = bBar ? TEXT("M_RbChrome") : TEXT("M_RbSteel"); break;
+		case ERbTablePart::Window: Name = TEXT("M_RbPlexi"); break;
+		case ERbTablePart::Count: break;
+		}
+		return Name ? FString::Printf(TEXT("/Game/Generated/Materials/%s.%s"), Name, Name) : FString();
+	}
+
+	bool ComputeLookDevMetrics(const rb::TableGeometry& Geometry, const FRbTableMeshOptions& Options, FLookDevMetrics& Out, FString& OutError)
+	{
+		FLayout L;
+		if (!BuildLayout(Geometry, Options, L, OutError))
+		{
+			return false;
+		}
+		Out.Style = L.Style;
+		Out.OuterCornerRadius = L.OuterR;
+		Out.CapEdgeRadius = L.CapEdge;
+		Out.CapEdgeSegments = L.EdgeSegs;
+		Out.NoseRollWidth = L.RollWidth;
+		Out.NoseRollMaxSagitta = L.RollMaxSagitta;
+		Out.CornerCutX = L.CornerCutX;
+		Out.CornerCutY = L.CornerCutY;
+		Out.SideCutHalf = L.SideCutHalf;
+		Out.SkirtInset = L.SkirtInset;
+		return true;
 	}
 }

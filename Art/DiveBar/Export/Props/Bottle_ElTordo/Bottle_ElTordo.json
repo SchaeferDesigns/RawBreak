@@ -1,0 +1,83 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Bottle_ElTordo",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "body_diameter_m": 0.076,
+ "bounds_max_m": [
+  0.0384,
+  0.03838,
+  0.3015
+ ],
+ "bounds_min_m": [
+  -0.038,
+  -0.03838,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.0384,
+  0.03838,
+  0.3015
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.038,
+  -0.03838,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueProp",
+ "design": {
+  "H": 0.3,
+  "R": 0.038,
+  "closure": "screw",
+  "fill": 0.55,
+  "glass": "Glass_Clear",
+  "hb": 0.165,
+  "hs": 0.07,
+  "kind": "spirit",
+  "label": "bottle_el_tordo",
+  "label_z": 0.088,
+  "liquid": "Liquid_Clear",
+  "rn": 0.014,
+  "shoulder": "slope"
+ },
+ "external_inputs": [],
+ "family": "Bottles",
+ "fbx": "SM_DB_Bottle_ElTordo.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "b4378a317cf09f6eac57ba4158ceab92c6a8c6ce2864f891c25f9fdcc0391d2a",
+ "glass_height_m": 0.3,
+ "ledger_asset_id": "SM_DB_Bottle_ElTordo",
+ "material_slots": [
+  "MI_DB_Glass_Clear",
+  "MI_DB_Liquid_Clear",
+  "MI_DB_Label_Atlas",
+  "MI_DB_Aluminium"
+ ],
+ "nanite": false,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "C02",
+ "target_dimensions_m": [
+  0.0764,
+  0.076,
+  0.3015
+ ],
+ "tolerance_m": 0.01,
+ "translucent": true,
+ "triangles": 2816,
+ "triangles_render": 2744,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Bottles",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Bottles/SM_DB_Bottle_ElTordo",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Bottle_ElTordo/T_DB_Bottle_ElTordo_WM.png"
+}

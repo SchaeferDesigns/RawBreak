@@ -1,0 +1,30 @@
+{
+ "acoustic_material": "none",
+ "asset_id": "GB_Bulb",
+ "bounds_max_m": [
+  0.03,
+  0.03,
+  0.05
+ ],
+ "bounds_min_m": [
+  -0.03,
+  -0.03,
+  -0.055
+ ],
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Greybox",
+ "fbx": "SM_DB_GB_Bulb.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Emissive_Bulb2700"
+ ],
+ "mesh": "SM_DB_GB_Bulb",
+ "notes": "A19 frosted bulb (emissive), pivot at the filament centre",
+ "owner": "M2-A",
+ "pivot": "center",
+ "profile": "RbVenueBlock",
+ "triangles": 300,
+ "ue_folder": "Arch/Greybox"
+}

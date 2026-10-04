@@ -4,6 +4,12 @@ The ONLY external asset sources allowed in M2 (both publish every asset under CC
 
   python Tools/art/fetch_cc0.py --list Art/DiveBar/cc0_inputs.json --package M2-B
   python Tools/art/fetch_cc0.py --list Art/Tables/cc0_inputs.json --package M2-L --verify     # hashes only, no download
+  python Tools/art/fetch_cc0.py --list Art/DiveBar/cc0_inputs.json --package M2-B --verify --prepare Art/DiveBar/Textures/CC0
+
+--prepare DIR (M2-B, needs Pillow): converts the pinned raw files into the engine inputs DIR/<id>/T_DB_CC0_<id>_{BC,N,M}.jpg at the
+entry's prep_px ("BC" sRGB colour / mask, "N" DirectX normal, "M" linear R = AO, G = roughness, B = height) and writes
+DIR/cc0_prepared.json (maps + real-world tile size in metres from the source's API, the UV0 world-scale tiling of the materials).
+The prepared files are committed (LFS, small); Art/Third stays ignored.
 
 List file (JSON array; owned by the package that uses the inputs):
   [{"source": "polyhaven", "id": "rosewood_veneer1", "res": "2k", "maps": ["Diffuse", "nor_dx", "Rough", "AO"], "format": "png"},
@@ -59,6 +65,9 @@ def fetch_polyhaven(entry: dict, dest: Path) -> tuple[dict[str, str], str, str]:
 		(dest / name).write_bytes(data)
 		hashes[name] = _sha256(data)
 	authors = ", ".join(sorted(info.get("authors", {}).keys()))
+	dims = info.get("dimensions") or []
+	if len(dims) >= 2 and dims[0]:
+		entry["_size_m"] = [round(float(dims[0]) / 1000.0, 4), round(float(dims[1]) / 1000.0, 4)]   # the API gives millimetres
 	return hashes, f"https://polyhaven.com/a/{asset_id}", authors
 
 
@@ -66,6 +75,8 @@ def fetch_ambientcg(entry: dict, dest: Path) -> tuple[dict[str, str], str, str]:
 	asset_id, res, fmt = entry["id"], entry.get("res", "2K"), entry.get("format", "PNG")
 	data = _json(f"https://ambientcg.com/api/v2/full_json?id={asset_id}&include=downloadData")
 	asset = data["foundAssets"][0]
+	if asset.get("dimensionX"):
+		entry["_size_m"] = [round(float(asset["dimensionX"]) / 100.0, 4), round(float(asset.get("dimensionY") or asset["dimensionX"]) / 100.0, 4)]
 	downloads = asset["downloadFolders"]["default"]["downloadFiletypeCategories"]["zip"]["downloads"]
 	pick = next(d for d in downloads if d["attribute"] == f"{res}-{fmt}")
 	archive = _get(pick["fullDownloadPath"])
@@ -99,12 +110,92 @@ def append_ledger(fragment: Path, rows: list[dict]) -> None:
 				writer.writerow(row)
 
 
+# --------------------------------------------------------------------------------------------------------------------
+# --prepare: raw CC0 maps -> the engine inputs of the venue materials (M2-B)
+# --------------------------------------------------------------------------------------------------------------------
+
+# Raw file name fragments per role (Poly Haven "<id>_<map>_<res>.jpg", ambientCG "<id>_<res>-<fmt>_<Map>.jpg").
+ROLE_KEYS = {
+	"color": ("_diff_", "_col_", "_Color."),
+	"normal": ("_nor_dx_", "_NormalDX."),
+	"rough": ("_rough_", "_Roughness."),
+	"ao": ("_ao_", "_AmbientOcclusion."),
+	"height": ("_disp_", "_Displacement."),
+	"opacity": ("_Opacity.",),
+}
+
+
+def _find_role(files: list[Path], role: str) -> Path | None:
+	for path in files:
+		name = path.name
+		if any(key.lower() in name.lower() for key in ROLE_KEYS[role]):
+			return path
+	return None
+
+
+def prepare(entries: list[dict], lock: dict, raw_root: Path, out_root: Path) -> list[str]:
+	"""Writes DIR/<id>/T_DB_CC0_<id>_{BC,N,M}.jpg + DIR/cc0_prepared.json. Returns failures."""
+	from PIL import Image  # host Python with Pillow (Tools/art only)
+
+	failures: list[str] = []
+	manifest: dict[str, dict] = {}
+	for entry in entries:
+		source, asset_id = entry["source"], entry["id"]
+		key = f"{source}/{asset_id}"
+		raw = raw_root / source / asset_id
+		files = sorted(raw.glob("*")) if raw.exists() else []
+		if not files:
+			failures.append(f"{key}: no raw files in {raw} (run without --verify first)")
+			continue
+		px = int(entry.get("prep_px", 1024))
+		dest = out_root / asset_id
+		dest.mkdir(parents=True, exist_ok=True)
+		maps: dict[str, str] = {}
+		color = _find_role(files, "color")
+		if color is not None:
+			img = Image.open(color).convert("RGB").resize((px, px), Image.LANCZOS)
+			name = f"T_DB_CC0_{asset_id}_BC.jpg"
+			img.save(dest / name, quality=92, subsampling=0)
+			maps["BC"] = name
+		normal = _find_role(files, "normal")
+		if normal is not None:
+			img = Image.open(normal).convert("RGB").resize((px, px), Image.LANCZOS)
+			name = f"T_DB_CC0_{asset_id}_N.jpg"
+			img.save(dest / name, quality=95, subsampling=0)
+			maps["N"] = name
+		rough, ao, height = _find_role(files, "rough"), _find_role(files, "ao"), _find_role(files, "height")
+		if rough is not None or ao is not None or height is not None:
+			def channel(path, default):
+				if path is None:
+					return Image.new("L", (px, px), default)
+				return Image.open(path).convert("L").resize((px, px), Image.LANCZOS)
+			packed = Image.merge("RGB", (channel(ao, 255), channel(rough, 128), channel(height, 128)))
+			name = f"T_DB_CC0_{asset_id}_M.jpg"
+			packed.save(dest / name, quality=95, subsampling=0)
+			maps["M"] = name
+		opacity = _find_role(files, "opacity")
+		if opacity is not None:
+			img = Image.open(opacity).convert("L").resize((px, px), Image.LANCZOS)
+			name = f"T_DB_CC0_{asset_id}_O.jpg"
+			img.save(dest / name, quality=95)
+			maps["O"] = name
+		if not maps:
+			failures.append(f"{key}: no usable maps among {[f.name for f in files]}")
+			continue
+		manifest[asset_id] = {"source": source, "maps": maps, "px": px, "size_m": lock.get(key, {}).get("size_m"),
+			"ref": lock.get(key, {}).get("ref", ""), "use": entry.get("use", "")}
+		print(f"[fetch_cc0] prepared {key}: {sorted(maps)} at {px} px, size {manifest[asset_id]['size_m']}")
+	(out_root / "cc0_prepared.json").write_text(json.dumps(manifest, indent=1, sort_keys=True), encoding="utf-8")
+	return failures
+
+
 def main() -> int:
 	p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	p.add_argument("--list", required=True)
 	p.add_argument("--package", required=True, help="owning work package, e.g. M2-B (ledger fragment + used_by)")
 	p.add_argument("--dest", default=str(REPO / "Art" / "Third"))
 	p.add_argument("--verify", action="store_true", help="only check the pinned hashes of already downloaded files")
+	p.add_argument("--prepare", default="", help="write the engine inputs (BC / N / M) of every entry into this folder (M2-B)")
 	a = p.parse_args()
 
 	list_path = Path(a.list)
@@ -131,6 +222,8 @@ def main() -> int:
 		if pinned and pinned != hashes:
 			failures.append(f"{key}: upstream files changed since they were pinned")
 		lock[key] = {"files": hashes, "ref": ref}
+		if entry.get("_size_m"):
+			lock[key]["size_m"] = entry["_size_m"]
 		print(f"[fetch_cc0] {key}: {len(hashes)} file(s)")
 		rows.append({"asset_id": asset_id, "used_by": a.package, "source": source, "source_ref": ref, "author": author,
 			"licence": "CC0-1.0", "licence_url": LICENCE_URL[source], "date": _dt.date.today().isoformat(), "account": "",
@@ -139,6 +232,8 @@ def main() -> int:
 	if not a.verify:
 		lock_path.write_text(json.dumps(lock, indent=1, sort_keys=True), encoding="utf-8")
 		append_ledger(REPO / "Docs" / "licenses" / "ledger" / f"{a.package}.csv", rows)
+	if a.prepare and not failures:
+		failures += prepare(entries, lock, Path(a.dest), Path(a.prepare) if Path(a.prepare).is_absolute() else REPO / a.prepare)
 	for line in failures:
 		print(f"[fetch_cc0] FAIL {line}")
 	return 1 if failures else 0
