@@ -1,0 +1,53 @@
+{
+ "acoustic_material": "glass",
+ "asset_id": "Neon_Open",
+ "bounds_max_m": [
+  0.03,
+  3.80404,
+  1.65
+ ],
+ "bounds_min_m": [
+  -0.0925,
+  3.03429,
+  1.11
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 0,
+ "design": "Art/DiveBar/neon/N2.svg",
+ "electrodes": 4,
+ "external_inputs": [],
+ "family": "Neon",
+ "fbx": "SM_DB_Neon_Open.fbx",
+ "frame": "venue",
+ "generator": "db_neon.py",
+ "material_slots": [
+  "MI_DB_Neon_ClearRed",
+  "MI_DB_Steel_Black",
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Neon_StdBlue",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Steel_Zinc"
+ ],
+ "mesh": "SM_DB_Neon_Open",
+ "min_bend_radius_m": 0.02,
+ "notes": "emissive tubes out of Lumen GI (the proxy rect light lights the room, 4.1); dead segments steady off (S8)",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "profile": "RbVenueProp",
+ "proxy_flux_lm": 422.6,
+ "sign": "N2",
+ "supports": 9,
+ "triangles": 3872,
+ "tube_diameter_m": 0.015,
+ "tube_flux_lm": {
+  "ClearRed": 510.6,
+  "StdBlue": 817.1
+ },
+ "tube_flux_total_lm": 1327.7,
+ "tube_length_m": {
+  "ClearRed": 1.596,
+  "StdBlue": 2.156
+ },
+ "ue_folder": "Lighting/Neon"
+}

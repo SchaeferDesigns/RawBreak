@@ -1,0 +1,33 @@
+{
+ "acoustic_material": "none",
+ "asset_id": "GB_Shade",
+ "bounds_max_m": [
+  0.18,
+  0.18,
+  0.11
+ ],
+ "bounds_min_m": [
+  -0.18,
+  -0.18,
+  -0.15
+ ],
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Greybox",
+ "fbx": "SM_DB_GB_Shade.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Enamel_Green",
+  "MI_DB_Enamel_WhiteInt",
+  "MI_DB_Steel_Black",
+  "MI_DB_Plastic_Black"
+ ],
+ "mesh": "SM_DB_GB_Shade",
+ "notes": "lamp shade stand-in (H03): 0.36 m spun dome, green enamel outside, white inside; pivot at the bulb centre",
+ "owner": "M2-A",
+ "pivot": "center",
+ "profile": "RbVenueBlock",
+ "triangles": 2456,
+ "ue_folder": "Arch/Greybox"
+}

@@ -1,0 +1,67 @@
+{
+ "N1": {
+  "name": "Old Castor LAGER",
+  "proxy_lm": 616.1,
+  "total_lm": 1935.5,
+  "tube_flux_lm": {
+   "ClearRed": 911.0,
+   "NoviolGold": 1024.5
+  },
+  "tube_length_m": {
+   "ClearRed": 2.847,
+   "NoviolGold": 1.065
+  }
+ },
+ "N2": {
+  "name": "OPEN",
+  "proxy_lm": 441.4,
+  "total_lm": 1386.7,
+  "tube_flux_lm": {
+   "ClearRed": 569.6,
+   "StdBlue": 817.1
+  },
+  "tube_length_m": {
+   "ClearRed": 1.78,
+   "StdBlue": 2.156
+  }
+ },
+ "N3": {
+  "name": "HOLLENBECK Light",
+  "proxy_lm": 686.0,
+  "total_lm": 2155.0,
+  "tube_flux_lm": {
+   "StdBlue": 974.4,
+   "White": 1180.6
+  },
+  "tube_length_m": {
+   "StdBlue": 2.571,
+   "White": 1.226
+  }
+ },
+ "N4": {
+  "name": "POOL",
+  "proxy_lm": 525.8,
+  "total_lm": 1651.8,
+  "tube_flux_lm": {
+   "ClearRed": 587.8,
+   "NoviolGold": 1064.0
+  },
+  "tube_length_m": {
+   "ClearRed": 1.837,
+   "NoviolGold": 1.106
+  }
+ },
+ "N5": {
+  "name": "Lantern Flats IPA",
+  "proxy_lm": 194.0,
+  "total_lm": 609.4,
+  "tube_flux_lm": {
+   "CobaltBlue": 488.5,
+   "RubyRed": 120.9
+  },
+  "tube_length_m": {
+   "CobaltBlue": 2.061,
+   "RubyRed": 1.025
+  }
+ }
+}

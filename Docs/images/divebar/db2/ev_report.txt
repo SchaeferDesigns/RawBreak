@@ -1,0 +1,8 @@
+﻿VDB-T2 adapted EV100 per view (venue-dive-bar 4.5; Eyes preset, 12 s warm-up, capture log 'RbVenue EV'). EV100 = log2(8 L) of the metered luminance the view adapted to (the spec's convention, 4.4: cloth 39.5 cd/m^2 -> 8.30); camera = log2(1 / exposure) with UE's 18 % calibration and the preset's compensation (for information)
+V01   RbCam_DB_V01     Open      EV100   3.67  band 3.0-4.0  ok   (camera  3.75)
+V02   RbCam_DB_V02     Open      EV100   2.98  band 4.5-5.5  OUT  (camera  3.19)
+V03   RbCam_DB_V03     Open      EV100   5.98  band 6.5-7.5  OUT  (camera  5.51)
+V04   RbCam_DB_V04     Open      EV100   6.44  band 7.8-8.4  OUT  (camera  5.87)
+V05   RbCam_DB_V05     Open      EV100   4.91  band 4.5-5.5  ok   (camera  4.71)
+V08   RbCam_DB_V08     Open      EV100   3.96  band 4.0-5.0  OUT  (camera  3.99)
+V12   RbCam_DB_V12     LightsUp  EV100   6.11  band 5.5-6.5  ok   (camera  5.62)

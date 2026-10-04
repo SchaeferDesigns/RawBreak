@@ -1,0 +1,84 @@
+{
+ "acoustic_material": "brick_painted",
+ "acoustic_surfaces": [
+  {
+   "area_m2": 11.85,
+   "material": "brick_painted",
+   "wall": "front"
+  },
+  {
+   "area_m2": 45.1,
+   "material": "brick_painted",
+   "wall": "left"
+  },
+  {
+   "area_m2": 45.1,
+   "material": "brick_painted",
+   "wall": "right"
+  },
+  {
+   "area_m2": 17.58,
+   "material": "block_painted",
+   "wall": "back"
+  },
+  {
+   "area_m2": 10.03,
+   "material": "block_painted",
+   "wall": "rear_left"
+  },
+  {
+   "area_m2": 10.03,
+   "material": "block_painted",
+   "wall": "rear_right"
+  },
+  {
+   "area_m2": 16.77,
+   "material": "block_painted",
+   "wall": "rear_outer"
+  },
+  {
+   "area_m2": 5.15,
+   "material": "block_painted",
+   "wall": "corridor_wall"
+  },
+  {
+   "area_m2": 22.01,
+   "material": "wood_panel",
+   "wall": "paneling"
+  }
+ ],
+ "asset_id": "Arch_Walls",
+ "bounds_max_m": [
+  20.32,
+  7.65,
+  3.35
+ ],
+ "bounds_min_m": [
+  -0.33,
+  -0.33,
+  0.0
+ ],
+ "collision_hulls": 27,
+ "external_inputs": [],
+ "family": "Architecture",
+ "fbx": "SM_DB_Arch_Walls.fbx",
+ "frame": "venue",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Block_Painted",
+  "MI_DB_Brick_PaintedGreen",
+  "MI_DB_Plaster_Cream",
+  "MI_DB_Plaster_Oxblood",
+  "MI_DB_Paneling_Dark",
+  "MI_DB_Wood_Stained",
+  "MI_DB_Rubber_Black"
+ ],
+ "mesh": "SM_DB_Arch_Walls",
+ "notes": "shell walls with openings, pool-room paneling, chair rail, cove base, storefront sill",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "priority": "mid",
+ "profile": "RbVenueBlock",
+ "triangles": 922,
+ "ue_folder": "Arch"
+}
