@@ -53,3 +53,16 @@ ESTIMATE (to be fitted against recordings, audio.md 3.8): ball material (`E` der
 `nu` 0.35, loss factor 0.015), cloth image (0.9, 8 kHz corner), contact times of the soft contacts (`CONTACTS`),
 structural modal banks (`RAIL_BARBOX`, `RAIL_PRO`, `BED_MODES`, `POCKET_MODES`, `CUE_MODES`) and their radiation
 corners, rolling/gully noise levels, the dive-bar tail, and the presentation modes (`PRESENTATION_MODES`).
+
+## Audio v1 in the engine (M2-C)
+
+The C++ port of `runtime_render` lives in `Source/RawBreakAudioDsp` (engine-agnostic, unit-tested against the golden vectors
+above); the engine side (voices, plans, room tone, mix) in `Source/RawBreak/*/Audio`. Two more tools serve it:
+
+| Tool | Does |
+|---|---|
+| `ir_synth.py` | the venues' room impulse responses (image sources + Sabine tail per band, diffuse-field level for a unit source at 1 m) -> `out/ref/IR_RB_<Venue>.{wav,json}`, imported by `Tools/unreal/editor/rb_make_audio.py` (`--check` prints the measured RT60 per band) |
+| `m2_report.py` | plots the engine recordings of `RawBreak.Functional.Audio.*` (`rbue.py test --sound`): spectrograms with the event log of the recorded breaks, AU-0 alignment (with an independent phase-slope check of AU-T08 / AU-T21), the volume / replay / pause mix run, the room tone spectra -> `Docs/images/dev/m2c/*.png`; needs numpy + matplotlib (the system Python) |
+
+`out/ref/divebar_break8_events.json` is the event log of the dive-bar 8-ball break (AU-T12 event coverage). Results and
+the recordings: `Docs/audio/m2/README.md`, the AU-0 spike: `Docs/audio/m2/au0.md`.

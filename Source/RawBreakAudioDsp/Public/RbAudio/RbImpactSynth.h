@@ -1,63 +1,74 @@
 #pragma once
 
 // Impact synthesis (Docs/specs/audio.md 3.2-3.6): the C++ port of Tools/audio/click_synth.py `runtime_render`.
-//   FContactPulse / HertzPulse   self-similar Hertz + Tsuji contact force pulse (AU-T01..T04)
-//   FModalBank                   biquad resonator bank with a radiation high-pass (rails, bed, pockets, cue body)
-//   FImpactRenderer              renders one FImpactEvent into a voice buffer at a fractional start frame (overlap-add):
-//                                force at the device rate (4x evaluation + decimation FIR), per-order ball radiation kernels,
-//                                cloth image, structural bank (3.6 steps 0-5); golden vectors AU-T11
-//   FNoiseSource                 rolling / sliding / gully / floor noise driven by FContinuousSegment speeds
-// Owner: M2-C (stub by the M2 architect step: the API; TODO(M2-C) the port).
+//   FModalBankDesign   structural radiators (rails, bed, pockets, cue, cabinet) as biquad resonators driven by the contact force,
+//                      radiating as small pistons with a radiation-efficiency high-pass (ESTIMATE banks of audio.md 3.5)
+//   FImpactRenderer    renders one FImpactEvent into a buffer at a fractional start frame (overlap-add): force at the device rate
+//                      (4x evaluation + decimation FIR, the fraction applied exactly), the four per-order ball kernels combined with
+//                      the listener weights, the order-1 near-field term, the cloth / floor image, the structural bank
+//                      (3.6 steps 0-5; golden vectors AU-T11). Zero latency: the output is aligned with the true onset; up to
+//                      RuntimeLatency frames of band-limit pre-ringing are written before it.
+// Owner: M2-C.
 
 #include "CoreMinimal.h"
 
 #include "RbAudio/RbAudioDspTypes.h"
+#include "RbAudio/RbAudioMath.h"
 
 namespace RbAudio
 {
-	struct FContactPulse
+	struct FModalMode
 	{
-		double Duration = 0.0;  // T [s]
-		double PeakForce = 0.0; // F_max [N]
-		double Impulse = 0.0;   // J [N s]
+		double FrequencyHz = 100.0;
+		double ModalMass = 1.0;   // [kg]
+		double LossFactor = 0.1;  // eta
+		double Area = 0.01;       // radiating area [m^2]
 	};
 
-	// Undamped Hertz estimate for an impact at NormalSpeed between masses with the effective mass m* and stiffness K; the
-	// restitution-dependent (Tsuji) correction and the self-similar shape table are TODO(M2-C) (AU-T01..T04).
-	RAWBREAKAUDIODSP_API FContactPulse HertzPulse(double NormalSpeed, double EffectiveMass, double Stiffness, double Restitution);
+	// Mode table of a bank (click_synth.py RAIL_BARBOX, RAIL_PRO, BED_MODES, POCKET_MODES, CUE_MODES).
+	RAWBREAKAUDIODSP_API TConstArrayView<FModalMode> GetModalModes(EModalBank Bank, double& OutRadiationCornerHz, bool& bOutBaffled);
 
-	class RAWBREAKAUDIODSP_API FModalBank
+	// A bank's filters for one sample rate: per mode acc / F = -(1/M) s^2 / (s^2 + eta wn s + wn^2) (bilinear, prewarped),
+	// p = sum rho0 S acc / (2 pi) (baffled) or / (4 pi) (free) at 1 m, radiation high-pass |H| = f^2 / (f^2 + fc^2).
+	struct FModalBankDesign
 	{
-	public:
-		struct FMode
-		{
-			double FrequencyHz = 1000.0;
-			double Decay60Seconds = 0.05; // T60 of the mode
-			double Gain = 1.0;
-		};
-
-		void Initialize(double SampleRate, TArrayView<const FMode> Modes, double RadiationHighPassHz);
-		// Adds the bank's response to a force pulse starting at FractionalStart (frames) into Out (TODO(M2-C)).
-		void Excite(const FContactPulse& Pulse, double FractionalStart, TArrayView<float> Out) const;
-
-	private:
+		EModalBank Bank = EModalBank::None;
 		double SampleRate = 48000.0;
-		TArray<FMode> Modes;
-		double HighPassHz = 0.0;
+		TArray<FBiquad> Modes;      // gains folded in
+		FBiquad HighPass;           // identity when fc = 0
+		bool bHighPass = false;
+		int32 TailSamples = 0;      // after the force pulse, until every mode decayed by 80 dB
 	};
+	using FModalBankDesignPtr = TSharedPtr<const FModalBankDesign, ESPMode::ThreadSafe>;
+	RAWBREAKAUDIODSP_API FModalBankDesignPtr GetModalBankDesign(EModalBank Bank, double SampleRate);
 
 	class RAWBREAKAUDIODSP_API FImpactRenderer
 	{
 	public:
-		// Builds the kernels for the device rate (per ball radius / mass of the active ball set).
-		void Initialize(double SampleRate);
+		explicit FImpactRenderer(double InSampleRate = 48000.0) { Initialize(InSampleRate); }
+
+		// Prepares the decimation FIR and the bank designs for the device rate (kernels come with the events).
+		void Initialize(double InSampleRate);
 		double GetSampleRate() const { return SampleRate; }
 
-		// Renders Event into Out, whose first frame is device frame BufferStartFrame; EventFrame is the event's (fractional)
-		// device frame from the clock. Returns the number of frames written (0 when the event is outside the buffer).
+		// Adds Event into Out, whose first frame is device frame BufferStartFrame; EventFrame is the (fractional) device frame of
+		// the contact start (before propagation). Frames outside Out are dropped. Returns the number of frames written.
 		int32 Render(const FImpactEvent& Event, double EventFrame, int64 BufferStartFrame, TArrayView<float> Out) const;
+		// The same into a double buffer (offline / golden tests).
+		int32 Render(const FImpactEvent& Event, double EventFrame, int64 BufferStartFrame, TArrayView<double> Out) const;
+
+		// Frames the event writes relative to EventFrame: [OutFirst, OutEnd) (pre-ringing, propagation, tails).
+		void Extent(const FImpactEvent& Event, int32& OutFirst, int32& OutEnd) const;
 
 	private:
+		template <typename SampleType>
+		int32 RenderImpl(const FImpactEvent& Event, double EventFrame, int64 BufferStartFrame, TArrayView<SampleType> Out) const;
+		void ComputeForce(const FImpactEvent& Event, double Frac, TArray<double>& OutG) const;
+
 		double SampleRate = 48000.0;
+		FModalBankDesignPtr Banks[static_cast<int32>(EModalBank::Count)];
+		mutable TArray<double> ScratchG;
+		mutable TArray<double> ScratchKernel;
+		mutable TArray<double> ScratchOut;
 	};
 }
