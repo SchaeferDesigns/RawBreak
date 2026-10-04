@@ -79,6 +79,14 @@ namespace RbTypes
 		case ERbTablePart::PocketLiners: return TEXT("PocketLiners");
 		case ERbTablePart::Sights: return TEXT("Sights");
 		case ERbTablePart::Legs: return TEXT("Legs");
+		// M2-L block (append-only).
+		case ERbTablePart::RubberStrip: return TEXT("RubberStrip");
+		case ERbTablePart::PocketBuckets: return TEXT("PocketBuckets");
+		case ERbTablePart::Castings: return TEXT("Castings");
+		case ERbTablePart::Cabinet: return TEXT("Cabinet");
+		case ERbTablePart::Trim: return TEXT("Trim");
+		case ERbTablePart::Hardware: return TEXT("Hardware");
+		case ERbTablePart::Window: return TEXT("Window");
 		case ERbTablePart::Count: break;
 		}
 		return TEXT("Unknown");

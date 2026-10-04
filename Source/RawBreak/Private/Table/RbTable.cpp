@@ -62,14 +62,20 @@ ARbTable::ARbTable()
 	ClothOrigin = CreateDefaultSubobject<USceneComponent>(TEXT("ClothOrigin"));
 	ClothOrigin->SetupAttachment(Root);
 
+	// M2-L: empty entries = the preset's default material (RbTableMeshBuilder::GetDefaultMaterialPath: the 9-ft pro table's cloth /
+	// walnut / leather, the coin-op table's bar cloth / laminate / ABS / chrome of venue-dive-bar 6.4). A level overrides a part by
+	// setting its entry.
 	PartMaterials.SetNum(static_cast<int32>(ERbTablePart::Count));
-	PartMaterials[static_cast<int32>(ERbTablePart::Bed)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatCloth));
-	PartMaterials[static_cast<int32>(ERbTablePart::CushionCloth)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatCloth));
-	PartMaterials[static_cast<int32>(ERbTablePart::RailCaps)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatRailWood));
-	PartMaterials[static_cast<int32>(ERbTablePart::Apron)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatRailWood));
-	PartMaterials[static_cast<int32>(ERbTablePart::PocketLiners)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatPocketLiner));
-	PartMaterials[static_cast<int32>(ERbTablePart::Sights)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatSight));
-	PartMaterials[static_cast<int32>(ERbTablePart::Legs)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatRailWood));
+}
+
+FSoftObjectPath ARbTable::GetResolvedPartMaterialPath(ERbTablePart Part) const
+{
+	const int32 Index = static_cast<int32>(Part);
+	if (PartMaterials.IsValidIndex(Index) && !PartMaterials[Index].IsNull())
+	{
+		return PartMaterials[Index].ToSoftObjectPath();
+	}
+	return FSoftObjectPath(RbTableMeshBuilder::GetDefaultMaterialPath(Preset, Part));
 }
 
 const FRbTableContext& ARbTable::GetContext() const
@@ -85,9 +91,9 @@ FString ARbTable::MakeBuildKey() const
 	// M2: venue condition and lamp footprint (they change the context, not the meshes).
 	Key += FString::Printf(TEXT("|%d|%d|%d|%lld|%d|%d|%.12g|%.12g|%.12g|%.12g"), TableIndex, bUseVenueCondition ? 1 : 0, static_cast<int32>(VenueKind),
 		VenueSeed, bFirstCareerTable ? 1 : 0, bUseLampFootprint ? 1 : 0, LampFootprintMin.X, LampFootprintMin.Y, LampFootprintMax.X, LampFootprintMax.Y);
-	for (const TSoftObjectPtr<UMaterialInterface>& Material : PartMaterials)
+	for (int32 Index = 0; Index < static_cast<int32>(ERbTablePart::Count); ++Index)
 	{
-		Key += TEXT("|") + Material.ToSoftObjectPath().ToString();
+		Key += TEXT("|") + GetResolvedPartMaterialPath(static_cast<ERbTablePart>(Index)).ToString();
 	}
 	return Key;
 }
@@ -165,8 +171,7 @@ void ARbTable::RebuildMeshes()
 	for (int32 Index = 0; Index < static_cast<int32>(ERbTablePart::Count); ++Index)
 	{
 		const ERbTablePart Part = static_cast<ERbTablePart>(Index);
-		UMaterialInterface* Material =
-			PartMaterials.IsValidIndex(Index) ? RbTablePrivate::LoadIfExists<UMaterialInterface>(PartMaterials[Index].ToSoftObjectPath()) : nullptr;
+		UMaterialInterface* Material = RbTablePrivate::LoadIfExists<UMaterialInterface>(GetResolvedPartMaterialPath(Part));
 		UStaticMesh* Baked =
 			bUseBakedMeshes ? RbTablePrivate::LoadIfExists<UStaticMesh>(FSoftObjectPath(RbTableMeshBuilder::GetBakedMeshObjectPath(Preset, Part))) : nullptr;
 		const FName Name =

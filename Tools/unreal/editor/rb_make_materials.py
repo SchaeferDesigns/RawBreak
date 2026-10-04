@@ -1,5 +1,5 @@
-"""UE-3: generates every M_Rb* material, MPC_RbBalls and the procedural textures they sample (Docs/ue-architecture.md 8.2,
-ue5-realism-plan 6.x). Run inside Unreal (headless):
+"""Generates every M_Rb* / MI_Rb* table-family material, MPC_RbBalls and the textures they sample (Docs/ue-architecture.md 8.2,
+18.7; ue5-realism-plan 6.x; venue-dive-bar 6.4). Owner: M2-L (UE-3 in M1). Run inside Unreal (headless):
 
   python Tools/unreal/rbue.py py Tools/unreal/editor/rb_make_materials.py
 
@@ -24,6 +24,26 @@ under Shaders/Private, included by Custom nodes (/RawBreak/Private/*.ush via the
   MI_RbCloth_Green   classic green cloth (M_RbCloth defaults to tournament blue for the 9-ft pro table)
   MI_RbCue_LocalSections  M_RbCue with the sections along local X (meshes without UV1: dev swatches)
 
+M2-L look-dev (18.7; HLSL of the new layers in Shaders/Private/RbTableLook.ush, placed from the part's LocalPosition = the
+table-local frame, every layer scaled by the material's own Age scalar - the dive bar's 0.80 is carried here, never read from
+MPC_DB_Venue):
+  M_RbCloth          + wear (RbClothWear): chalk dust at the pockets and the break area, ball burns, worn lanes, the rack
+                     impression, faint ball tracks, frayed pocket points, stains (Age > 0.4), pilling and the nap direction of
+                     napped bar cloth (Napped = 1). Worsted 9-ft defaults: Age 0.15.
+  MI_RbCloth_BarGreen  napped bar cloth of the coin-op table (venue-dive-bar 3.2 / 6.4: #2F6B40, fuzz 0.35, Age 0.80)
+  M_RbRailWood       CC0 walnut veneer scan (Poly Haven walnut_veneer, Art/Tables/cc0_inputs.json) stained under the clear coat;
+                     MI_RbRailWood_Legs with the grain vertical (procedural wood when the CC0 inputs are missing)
+  M_RbLaminate       single-slab laminate with burns, glass rings, scratches, worn-through cabinet corners and kick grime:
+                     MI_RbRail_BlackLaminate (bar-table rail caps), MI_RbLaminate_Walnut (the cabinet's printed walnut, Poly
+                     Haven walnut_veneer_02 as the print)
+  M_RbPocketLiner    CC0 leather scan (Poly Haven brown_leather) for the 9-ft drop pockets
+  M_RbCushionRubber  + rubber bloom with Age; MI_RbCushionRubber_Old (bar table)
+  M_RbPlasticABS     black satin ABS of the coin-op castings (scuffs, chips); MI_RbSight_WhitePlastic (bar-table sights)
+  M_RbAluminium / M_RbChrome / M_RbSteel   brushed trim, chrome coin mechanism / door / return ring, steel levelers
+  M_RbPlexi          scratched plexiglass of the ball-trap window (opaque dark approximation, see Docs/references/table-lookdev.md)
+  M_RbBall           + worn-ball layer (RbBallWear in RbBall.ush: grime, collision scuffs, chalk, per-ball roughness), off by
+                     default; MI_RbBall_DiveBar (venue-dive-bar 6.4: roughness 0.10-0.15 per ball, haze 0.3, yellowed white)
+
 Textures (/Game/Generated/Materials/Textures), generated here in pure Python and imported from Saved/RbGenerated:
   T_RbBallGlyphs     1024^2 single-channel signed distance field, 4 x 4 cells: cell n = the label of ball n inscribed in the
                      number circle, 6 and 9 underscored, cell 0 empty. Glyph outlines: Roboto Bold / Bold Condensed (Apache
@@ -37,6 +57,8 @@ collection keeps its parameter ids (materials reference them by id). Prints the 
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import os
 import struct
@@ -57,6 +79,35 @@ FONT_DIR = os.path.join(os.path.abspath(unreal.Paths.engine_content_dir()), "Sla
 INC_BALL = "/RawBreak/Private/RbBall.ush"
 INC_OCC = "/RawBreak/Private/RbBallOcclusion.ush"
 INC_SURF = "/RawBreak/Private/RbSurfaces.ush"
+INC_LOOK = "/RawBreak/Private/RbTableLook.ush"
+
+# CC0 inputs of the table materials (Art/Tables/cc0_inputs.json, pinned by Art/Tables/cc0_inputs.lock.json, fetched by
+# Tools/art/fetch_cc0.py into the git-ignored Art/Third; ledger Docs/licenses/ledger/M2-L.csv).
+PROJECT_DIR = os.path.abspath(unreal.Paths.project_dir())
+CC0_DIR = os.path.join(PROJECT_DIR, "Art", "Third", "polyhaven")
+CC0_LOCK = os.path.join(PROJECT_DIR, "Art", "Tables", "cc0_inputs.lock.json")
+CC0_TEXTURES = [
+	# (Poly Haven id, file, texture asset, kind)
+	("walnut_veneer", "walnut_veneer_diff_2k.png", "T_RbWalnutVeneer_D", "color"),
+	("walnut_veneer", "walnut_veneer_nor_dx_2k.png", "T_RbWalnutVeneer_N", "normal"),
+	("walnut_veneer", "walnut_veneer_rough_2k.png", "T_RbWalnutVeneer_R", "mask"),
+	("walnut_veneer_02", "walnut_veneer_02_diff_2k.png", "T_RbWalnutPrint_D", "color"),
+	("walnut_veneer_02", "walnut_veneer_02_rough_2k.png", "T_RbWalnutPrint_R", "mask"),
+	("brown_leather", "brown_leather_albedo_2k.png", "T_RbLeather_D", "color"),
+	("brown_leather", "brown_leather_nor_dx_2k.png", "T_RbLeather_N", "normal"),
+	("brown_leather", "brown_leather_rough_2k.png", "T_RbLeather_R", "mask"),
+]
+
+# Table dimensions for the wear placement (TableSpec: playing half length / width [m]; outer half size of the coin-op cabinet
+# = playing half + RailWidthTotal [cm], its plan-corner radius and bed height [cm]; RbTableMeshBuilder / venue-dive-bar 3.1).
+NINE_FOOT_HALF = (1.27, 0.635)
+SEVEN_FOOT_BAR_HALF = (1.016, 0.508)
+SEVEN_FOOT_BAR_OUTER_CM = (118.11, 67.31)
+SEVEN_FOOT_BAR_CORNER_CM = 4.0
+SEVEN_FOOT_BAR_BED_CM = 74.3
+DIVE_BAR_AGE = 0.80          # venue-dive-bar 6.2 (the table carries its own Age scalar)
+TOURNAMENT_AGE = 0.30        # the M1 test room's 9-ft table: a kept club table, not new (M2-L r5: 0.15 read as a CG-clean cloth)
+BAR_GREEN = (0.022, 0.108, 0.040)   # venue-dive-bar 3.2 bar green (#2F6B40 new) as a used, darkened cloth (linear, card-checked)
 
 MEL = unreal.MaterialEditingLibrary
 BALL_RADIUS_CM = 2.8575  # 57.15 mm (WPA), MPC default
@@ -66,7 +117,7 @@ STRIPE_HALF_ANGLE_DEG = 38.0
 CIRCLE_HALF_ANGLE_DEG = 24.0
 
 # Cloth dye colours (linear, ESTIMATE from swatches): tournament blue (M_RbCloth default) and classic green (MI).
-CLOTH_BLUE = (0.008, 0.105, 0.400)
+CLOTH_BLUE = (0.016, 0.085, 0.235)
 CLOTH_GREEN = (0.030, 0.150, 0.040)
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -558,6 +609,48 @@ def make_textures() -> dict:
 	return {"atlas": atlas, "weave_n": weave_n, "weave_m": weave_m}
 
 
+def _sha256(path: str) -> str:
+	h = hashlib.sha256()
+	with open(path, "rb") as f:
+		for block in iter(lambda: f.read(1 << 20), b""):
+			h.update(block)
+	return h.hexdigest()
+
+
+def make_cc0_textures() -> dict:
+	"""Imports the pinned CC0 scans of Art/Tables/cc0_inputs.json (SHA-256 checked against the lock file; an input that does not
+	match its pin is refused). Without the raw downloads (a fresh clone before Tools/art/fetch_cc0.py) the committed texture
+	assets are kept as they are; without those either, the materials fall back to their procedural surfaces (warning)."""
+	with open(CC0_LOCK, "r", encoding="utf-8") as f:
+		lock = json.load(f)
+	out = {}
+	for asset_id, filename, name, kind in CC0_TEXTURES:
+		src = os.path.join(CC0_DIR, asset_id, filename)
+		existing = f"{TEX_DIR}/{name}"
+		if not os.path.exists(src):
+			if unreal.EditorAssetLibrary.does_asset_exist(existing):
+				rb.log(f"{name}: raw CC0 input {src} missing - keeping the committed texture")
+				out[name] = unreal.load_asset(existing)
+			else:
+				unreal.log_warning(f"[rb] {name}: CC0 input {src} missing (run Tools/art/fetch_cc0.py) - procedural fallback")
+				out[name] = None
+			continue
+		pinned = lock.get(f"polyhaven/{asset_id}", {}).get("files", {}).get(filename)
+		if pinned is None or _sha256(src) != pinned:
+			rb.fail(f"{src}: not pinned in {CC0_LOCK} or SHA-256 mismatch (refusing an unpinned CC0 input)")
+		if kind == "normal":
+			props = {"compression_settings": unreal.TextureCompressionSettings.TC_NORMALMAP, "srgb": False, "flip_green_channel": False,
+				"lod_group": unreal.TextureGroup.TEXTUREGROUP_WORLD_NORMAL_MAP}
+		elif kind == "mask":
+			props = {"compression_settings": unreal.TextureCompressionSettings.TC_GRAYSCALE, "srgb": False,
+				"lod_group": unreal.TextureGroup.TEXTUREGROUP_WORLD}
+		else:
+			props = {"compression_settings": unreal.TextureCompressionSettings.TC_DEFAULT, "srgb": True,
+				"lod_group": unreal.TextureGroup.TEXTUREGROUP_WORLD}
+		out[name] = import_texture(src, name, props)
+	return out
+
+
 # --------------------------------------------------------------------------------------------------------------------
 # Material parameter collection
 # --------------------------------------------------------------------------------------------------------------------
@@ -756,11 +849,22 @@ def make_ball(textures: dict) -> str:
 			("ExposureTime", exposure, ""), ("StripeHalfAngleDeg", stripe, ""), ("CircleHalfAngleDeg", circle, ""),
 			("CueBallDots", dots, ""), ("GlyphAtlas", atlas, "")], INC_BALL)
 
+	# Worn bar balls (M2-L, venue-dive-bar 6.4): grime, collision scuffs, chalk and a per-ball roughness in
+	# [RoughnessMin, RoughnessMax] seeded by the number. Defaults 0 = a clean set (the M1 balls are unchanged).
+	roughness = g.scalar("Roughness", 0.04, "Resin")         # Ra 0.03 um: optically smooth
+	worn = g.custom("RbBallWear",
+		"float R = Roughness;\nconst float3 A = RbBallWear(P, BallNumber, Albedo, Dirt, Chalk, RoughnessMin, RoughnessMax, R);\n"
+		"OutRoughness = R;\nreturn A;",
+		[("P", local, ""), ("BallNumber", number, ""), ("Albedo", albedo, ""), ("Dirt", g.scalar("Dirt", 0.0, "Wear"), ""),
+			("Chalk", g.scalar("Chalk", 0.0, "Wear"), ""), ("RoughnessMin", g.scalar("RoughnessMin", 0.0, "Wear"), ""),
+			("RoughnessMax", g.scalar("RoughnessMax", 0.0, "Wear"), ""), ("Roughness", roughness, "")], INC_BALL,
+		extra_outputs=[("OutRoughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+
 	# Resin SSS (plan 6.2: MFP 0.5-2 mm, light balls further); High / Epic only (plan 9.4).
 	radius = g.scalar("BallRadiusCm", BALL_RADIUS_CM, "Ball")
 	mfp_fraction = g.scalar("MfpFraction", 0.035, "Resin")
 	mfp = g.custom("RbBallMfp", "return RbBallMfp(Albedo, BallRadiusCm, MfpFraction);",
-		[("Albedo", albedo, ""), ("BallRadiusCm", radius, ""), ("MfpFraction", mfp_fraction, "")], INC_BALL)
+		[("Albedo", worn, ""), ("BallRadiusCm", radius, ""), ("MfpFraction", mfp_fraction, "")], INC_BALL)
 	zero3 = g.const((0.0, 0.0, 0.0))
 	zero = g.const(0.0)
 	mfp_q = g.quality(mfp, low=zero3, medium=zero3)
@@ -775,11 +879,10 @@ def make_ball(textures: dict) -> str:
 	g.link(n_world, normal, "VectorInput")
 
 	f0 = g.scalar("F0", 0.049, "Resin")                     # n = 1.57 (T1)
-	roughness = g.scalar("Roughness", 0.04, "Resin")         # Ra 0.03 um: optically smooth
 	haze_r = g.scalar("HazeRoughness", 0.20, "Resin")
 	haze_w = g.scalar("HazeWeight", 0.18, "Resin")
 	haze_q = g.quality(haze_w, low=zero)                     # haze lobe off on Low (plan 9.4)
-	slab = g.slab(sss=unreal.MaterialSubSurfaceType.MSS_DIFFUSION, albedo=albedo, f0=f0, roughness=roughness, second_roughness=haze_r,
+	slab = g.slab(sss=unreal.MaterialSubSurfaceType.MSS_DIFFUSION, albedo=worn, f0=f0, roughness=(worn, "OutRoughness"), second_roughness=haze_r,
 		second_weight=haze_q, mfp=mfp_q, normal=normal)
 	g.m.set_editor_property("tangent_space_normal", False)
 	g.front(slab)
@@ -797,26 +900,44 @@ def make_cloth(textures: dict, mpc) -> str:
 	m_tex = g.node(unreal.MaterialExpressionTextureSampleParameter2D, -1000, parameter_name="WeaveMask", texture=textures["weave_m"],
 		sampler_type=unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR, group="Weave")
 	g.link(uv_w, m_tex, "UVs")
-	color = g.vector("ClothColor", CLOTH_BLUE, "Cloth")   # tournament blue, luminance 0.106 (plan 6.3: 0.10-0.20)
+	color = g.vector("ClothColor", CLOTH_BLUE, "Cloth")   # tournament blue, luminance 0.086 (18.7: 0.05-0.10, card-checked)
 	strength = g.scalar("WeaveNormalStrength", 0.55, "Weave")
 	lighten = g.scalar("FuzzLighten", 1.35, "Cloth")
 	surface = g.custom("RbCloth",
 		f"const float Resolved = RbClothWeaveResolved(UV, {WEAVE_TILE_M / (WEAVE_YARNS / 2)!r});\n"
 		"Normal = RbClothNormal(NormalTS, WeaveNormalStrength, Resolved);\n"
 		"Roughness = saturate(Mask.g + 0.06 * (1.0 - Resolved));\n"
-		"const float3 Albedo = RbClothAlbedo(ClothColor, Mask.r, Mask.b, UV, Resolved);\n"
+		"const float3 Albedo = RbClothAlbedo(ClothColor, Mask.r, Mask.b, UV, Resolved * WeaveContrast);\n"
 		"FuzzColor = RbClothFuzzColor(Albedo, FuzzLighten);\n"
 		"return Albedo;",
 		[("NormalTS", n_tex, "RGB"), ("Mask", m_tex, "RGB"), ("ClothColor", color, ""), ("UV", uv, ""), ("WeaveNormalStrength", strength, ""),
-			("FuzzLighten", lighten, "")], INC_SURF,
+			("FuzzLighten", lighten, ""), ("WeaveContrast", g.scalar("WeaveContrast", 1.0, "Weave"), "")], INC_SURF,
 		extra_outputs=[("Normal", unreal.CustomMaterialOutputType.CMOT_FLOAT3), ("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1),
 			("FuzzColor", unreal.CustomMaterialOutputType.CMOT_FLOAT3)])
 	fuzz = g.scalar("FuzzAmount", 0.25, "Cloth")
 	fuzz_r = g.scalar("FuzzRoughness", 0.5, "Cloth")
 	aniso = g.scalar("Anisotropy", 0.15, "Cloth")
 	f0 = g.scalar("F0", 0.04, "Cloth")
-	slab = g.slab(albedo=(surface, "return"), f0=f0, roughness=(surface, "Roughness"), normal=(surface, "Normal"), anisotropy=aniso,
-		fuzz_amount=fuzz, fuzz_roughness=fuzz_r, fuzz_color=(surface, "FuzzColor"))
+
+	# M2-L wear (RbTableLook.ush): placed from the table-local position; the view direction in the same frame for the nap.
+	local = g.node(unreal.MaterialExpressionLocalPosition, -1800)
+	cam = g.node(unreal.MaterialExpressionTransform, -1300, transform_source_type=unreal.MaterialVectorCoordTransformSource.TRANSFORMSOURCE_WORLD,
+		transform_type=unreal.MaterialVectorCoordTransform.TRANSFORM_LOCAL)
+	g.link(g.node(unreal.MaterialExpressionCameraVectorWS, -1500), cam, "")
+	wear = g.custom("RbClothWear",
+		"float3 A = Albedo;\nfloat R = Roughness;\nfloat3 N = NormalTS;\nfloat F = Fuzz;\nfloat3 FC = FuzzColor;\n"
+		"RbClothWear(P, normalize(Cam), HalfLength, HalfWidth, CushionWidth, FaceBase, Age, Napped, NapSheen, Seed, A, R, N, F, FC);\n"
+		"OutRoughness = R;\nOutNormal = N;\nOutFuzz = F;\nOutFuzzColor = FC;\nreturn A;",
+		[("Albedo", surface, "return"), ("Roughness", surface, "Roughness"), ("NormalTS", surface, "Normal"), ("Fuzz", fuzz, ""),
+			("FuzzColor", surface, "FuzzColor"), ("P", local, ""), ("Cam", cam, ""),
+			("HalfLength", g.scalar("HalfLength", NINE_FOOT_HALF[0], "Table"), ""), ("HalfWidth", g.scalar("HalfWidth", NINE_FOOT_HALF[1], "Table"), ""),
+			("CushionWidth", g.scalar("CushionWidth", 0.0508, "Table"), ""), ("FaceBase", g.scalar("FaceBase", 0.02032, "Table"), ""),
+			("Age", g.scalar("Age", TOURNAMENT_AGE, "Wear"), ""), ("Napped", g.scalar("Napped", 0.0, "Wear"), ""),
+			("NapSheen", g.scalar("NapSheen", 0.30, "Wear"), ""), ("Seed", g.scalar("Seed", 3.0, "Wear"), "")], INC_LOOK,
+		extra_outputs=[("OutRoughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1), ("OutNormal", unreal.CustomMaterialOutputType.CMOT_FLOAT3),
+			("OutFuzz", unreal.CustomMaterialOutputType.CMOT_FLOAT1), ("OutFuzzColor", unreal.CustomMaterialOutputType.CMOT_FLOAT3)])
+	slab = g.slab(albedo=(wear, "return"), f0=f0, roughness=(wear, "OutRoughness"), normal=(wear, "OutNormal"), anisotropy=aniso,
+		fuzz_amount=(wear, "OutFuzz"), fuzz_roughness=fuzz_r, fuzz_color=(wear, "OutFuzzColor"))
 
 	# Analytic ball occlusion (plan 6.5) -> material AO (indirect diffuse only).
 	world = g.node(unreal.MaterialExpressionWorldPosition, -1600)
@@ -852,21 +973,51 @@ def make_cloth_instance(name: str, color) -> str:
 	return path
 
 
-def make_rail_wood() -> str:
-	"""Lacquered rail wood (plan 6.4): clear-coat slab (F0 0.04, gloss, 80 um, slight amber) vertically layered over wood."""
+def texture_param(g: Graph, name: str, texture, uv, kind: str, group: str):
+	sampler = {"color": unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, "normal": unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL,
+		"mask": unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE}[kind]
+	node = g.node(unreal.MaterialExpressionTextureSampleParameter2D, -1000, parameter_name=name, texture=texture, sampler_type=sampler, group=group)
+	g.link(uv, node, "UVs")
+	return node
+
+
+def make_rail_wood(cc0: dict) -> str:
+	"""Lacquered rail wood (plan 6.4): clear-coat slab (F0 0.04, gloss, 80 um, slight amber) vertically layered over wood. M2-L: the
+	wood is the CC0 walnut veneer scan (grain along U = along the rail when GrainAlongU = 1; the legs' instance turns it vertical),
+	stained darker by StainTint; the procedural figure of M1 when the scan is missing."""
 	g = Graph("M_RbRailWood", used_with_nanite=True)
 	uv = g.texcoord(0)
-	light = g.vector("WoodLight", (0.105, 0.058, 0.032), "Wood")   # stained walnut (linear, ESTIMATE)
-	dark = g.vector("WoodDark", (0.046, 0.022, 0.011), "Wood")
-	rings = g.scalar("RingsPerMetre", 160.0, "Wood")
-	wood_r = g.scalar("WoodRoughness", 0.50, "Wood")
-	wood = g.custom("RbWood", "return RbWoodSurface(UV, Light, Dark, RingsPerMetre, Roughness);",
-		[("UV", uv, ""), ("Light", light, ""), ("Dark", dark, ""), ("RingsPerMetre", rings, ""), ("Roughness", wood_r, "")], INC_SURF,
-		output=unreal.CustomMaterialOutputType.CMOT_FLOAT4)
-	albedo = g.mask(wood, "rgb")
-	rough = g.mask(wood, "a")
 	aniso = g.scalar("GrainAnisotropy", 0.30, "Wood")
-	base = g.slab(albedo=albedo, f0=g.const(0.04), roughness=rough, anisotropy=aniso)
+	if cc0.get("T_RbWalnutVeneer_D") is not None:
+		along = g.scalar("GrainAlongU", 1.0, "Wood")
+		size = g.scalar("VeneerSizeM", 0.85, "Wood")
+		tuv = g.custom("RbVeneerUV", "return lerp(UV, UV.yx, step(0.5, Along)) / max(Size, 0.01);",
+			[("UV", uv, ""), ("Along", along, ""), ("Size", size, "")], INC_SURF, output=unreal.CustomMaterialOutputType.CMOT_FLOAT2)
+		diff = texture_param(g, "VeneerColor", cc0["T_RbWalnutVeneer_D"], tuv, "color", "Wood")
+		nrm = texture_param(g, "VeneerNormal", cc0["T_RbWalnutVeneer_N"], tuv, "normal", "Wood") if cc0.get("T_RbWalnutVeneer_N") else None
+		rgh = texture_param(g, "VeneerRoughness", cc0["T_RbWalnutVeneer_R"], tuv, "mask", "Wood") if cc0.get("T_RbWalnutVeneer_R") else None
+		stain = g.vector("StainTint", (0.14, 0.10, 0.08), "Wood")   # dark stained walnut under the coat (linear, ESTIMATE; r1: 0.25 read as pine)
+		inputs = [("Veneer", diff, "RGB"), ("Stain", stain, ""), ("Along", along, ""), ("Strength", g.scalar("VeneerNormalStrength", 0.5, "Wood"), "")]
+		inputs += [("NormalTex", nrm, "RGB")] if nrm else []
+		inputs += [("RoughTex", rgh, "R")] if rgh else []
+		wood = g.custom("RbVeneer",
+			("float3 N = " + ("NormalTex" if nrm else "float3(0.0, 0.0, 1.0)") + ";\n"
+			"N = Along > 0.5 ? float3(N.y, N.x, N.z) : N;   // swapped UVs mirror the tangent frame\n"
+			"Normal = normalize(float3(N.xy * Strength, max(N.z, 1e-3)));\n"
+			"Roughness = lerp(0.38, 0.62, " + ("RoughTex" if rgh else "0.5") + ");\n"
+			"return Veneer * Stain;"),
+			inputs, INC_SURF,
+			extra_outputs=[("Normal", unreal.CustomMaterialOutputType.CMOT_FLOAT3), ("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+		base = g.slab(albedo=wood, f0=g.const(0.04), roughness=(wood, "Roughness"), normal=(wood, "Normal"), anisotropy=aniso)
+	else:
+		light = g.vector("WoodLight", (0.105, 0.058, 0.032), "Wood")   # stained walnut (linear, ESTIMATE)
+		dark = g.vector("WoodDark", (0.046, 0.022, 0.011), "Wood")
+		rings = g.scalar("RingsPerMetre", 160.0, "Wood")
+		wood_r = g.scalar("WoodRoughness", 0.50, "Wood")
+		wood = g.custom("RbWood", "return RbWoodSurface(UV, Light, Dark, RingsPerMetre, Roughness);",
+			[("UV", uv, ""), ("Light", light, ""), ("Dark", dark, ""), ("RingsPerMetre", rings, ""), ("Roughness", wood_r, "")], INC_SURF,
+			output=unreal.CustomMaterialOutputType.CMOT_FLOAT4)
+		base = g.slab(albedo=g.mask(wood, "rgb"), f0=g.const(0.04), roughness=g.mask(wood, "a"), anisotropy=aniso)
 	coat = make_coat(g, (0.93, 0.86, 0.72), 0.008, 0.07)
 	layer = g.node(unreal.MaterialExpressionSubstrateVerticalLayering, 100)
 	g.link(coat[0], layer, "Top")
@@ -913,6 +1064,160 @@ def make_leather(name: str, color, roughness: float) -> str:
 		fuzz_amount=g.scalar("FuzzAmount", 0.10, "Leather"), fuzz_roughness=g.const(0.6), fuzz_color=fuzz_col)
 	g.front(slab)
 	return g.finish()
+
+
+def make_pocket_leather(cc0: dict) -> str:
+	"""9-ft leather drop pockets (plan 6.4: slab + fuzz 0.1, dark brown, roughness 0.5-0.7): the CC0 brown_leather scan, darkened;
+	the procedural pebbled leather of M1 when the scan is missing."""
+	if cc0.get("T_RbLeather_D") is None:
+		return make_leather("M_RbPocketLiner", (0.045, 0.028, 0.018), 0.55)
+	g = Graph("M_RbPocketLiner", used_with_nanite=True)
+	uv = g.binary(unreal.MaterialExpressionDivide, g.texcoord(0), g.scalar("LeatherSizeM", 0.45, "Leather"))
+	diff = texture_param(g, "LeatherColor", cc0["T_RbLeather_D"], uv, "color", "Leather")
+	nrm = texture_param(g, "LeatherNormal", cc0["T_RbLeather_N"], uv, "normal", "Leather")
+	rgh = texture_param(g, "LeatherRoughness", cc0["T_RbLeather_R"], uv, "mask", "Leather")
+	tint = g.vector("LeatherTint", (0.50, 0.55, 0.62), "Leather")   # the scan (mean 0.084, 0.028, 0.006) toward a deep brown
+	local = g.node(unreal.MaterialExpressionLocalPosition, -1800)
+	surf = g.custom("RbPocketLeather",
+		"Normal = normalize(float3(N.xy * Strength, max(N.z, 1e-3)));\n"
+		"const float K = RbPocketCavity(P, CavityDepthCm, CavityFloor);\n"
+		"Roughness = lerp(0.85, lerp(0.45, 0.75, R), K);\nF0K = 0.04 * K;\nF90K = K;\nreturn C * Tint * K;",
+		[("C", diff, "RGB"), ("N", nrm, "RGB"), ("R", rgh, "R"), ("Tint", tint, ""), ("Strength", g.scalar("NormalStrength", 0.8, "Leather"), ""),
+			("P", local, ""), ("CavityDepthCm", g.scalar("CavityDepthCm", 7.0, "Pocket"), ""), ("CavityFloor", g.scalar("CavityFloor", 0.25, "Pocket"), "")],
+		INC_LOOK, extra_outputs=[("Normal", unreal.CustomMaterialOutputType.CMOT_FLOAT3), ("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1),
+			("F0K", unreal.CustomMaterialOutputType.CMOT_FLOAT1), ("F90K", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+	fuzz_col = g.binary(unreal.MaterialExpressionMultiply, surf, g.const(1.6))
+	slab = g.slab(albedo=surf, f0=(surf, "F0K"), f90=(surf, "F90K"), roughness=(surf, "Roughness"), normal=(surf, "Normal"),
+		fuzz_amount=g.scalar("FuzzAmount", 0.10, "Leather"), fuzz_roughness=g.const(0.6), fuzz_color=fuzz_col)
+	g.front(slab)
+	return g.finish()
+
+
+def make_laminate(cc0: dict) -> str:
+	"""Bar-table laminate (plan 6.4 "bar-table laminate": single slab, roughness 0.3-0.5; venue-dive-bar 3.1 / 6.4): a flat colour
+	(black rail caps) or a printed woodgrain (the cabinet's "walnut", the CC0 walnut_veneer_02 scan as the print, UsePrint = 1),
+	with burns, glass rings, scratches, and on the cabinet the worn-through corners and kick grime (RbLaminateWear)."""
+	g = Graph("M_RbLaminate", used_with_nanite=True)
+	uv = g.texcoord(0)
+	local = g.node(unreal.MaterialExpressionLocalPosition, -1800)
+	inputs = [("UV", uv, ""), ("P", local, ""), ("BaseColor", g.vector("BaseColor", (0.022, 0.021, 0.021), "Laminate"), ""),
+		("BaseRoughness", g.scalar("Roughness", 0.40, "Laminate"), ""), ("UsePrint", g.scalar("UsePrint", 0.0, "Laminate"), ""),
+		("PrintTint", g.vector("PrintTint", (0.42, 0.33, 0.27), "Laminate"), ""),
+		("Age", g.scalar("Age", DIVE_BAR_AGE, "Wear"), ""), ("Burns", g.scalar("Burns", 0.35, "Wear"), ""),
+		("Rings", g.scalar("Rings", 0.30, "Wear"), ""), ("Scratches", g.scalar("Scratches", 0.45, "Wear"), ""),
+		("CornerWear", g.scalar("CornerWear", 0.0, "Wear"), ""),
+		("HalfOuterCm", g.mask(g.node(unreal.MaterialExpressionVectorParameter, -1400, parameter_name="HalfOuterCm",
+			default_value=unreal.LinearColor(SEVEN_FOOT_BAR_OUTER_CM[0], SEVEN_FOOT_BAR_OUTER_CM[1], 0.0, 0.0), group="Table"), "rg"), ""),
+		("CornerRadiusCm", g.scalar("CornerRadiusCm", SEVEN_FOOT_BAR_CORNER_CM, "Table"), ""),
+		("BedHeightCm", g.scalar("BedHeightCm", SEVEN_FOOT_BAR_BED_CM, "Table"), ""), ("Seed", g.scalar("Seed", 5.0, "Wear"), "")]
+	g.params.append(("HalfOuterCm", SEVEN_FOOT_BAR_OUTER_CM))
+	print_code = "float3 PrintC = float3(0.2, 0.12, 0.07);\nfloat PrintR = 0.5;\n"
+	if cc0.get("T_RbWalnutPrint_D") is not None:
+		puv = g.binary(unreal.MaterialExpressionDivide, uv, g.scalar("PrintSizeM", 0.9, "Laminate"))
+		inputs.append(("PrintTex", texture_param(g, "PrintColor", cc0["T_RbWalnutPrint_D"], puv, "color", "Laminate"), "RGB"))
+		print_code = "float3 PrintC = PrintTex;\nfloat PrintR = 0.5;\n"
+		if cc0.get("T_RbWalnutPrint_R") is not None:
+			inputs.append(("PrintRough", texture_param(g, "PrintRoughness", cc0["T_RbWalnutPrint_R"], puv, "mask", "Laminate"), "R"))
+			print_code = "float3 PrintC = PrintTex;\nfloat PrintR = PrintRough;\n"
+	surf = g.custom("RbLaminate",
+		print_code +
+		"float3 A = lerp(BaseColor, PrintC * PrintTint, UsePrint);\n"
+		"float R = saturate(BaseRoughness + UsePrint * 0.12 * (PrintR - 0.5));\n"
+		"float3 N = float3(0.0, 0.0, 1.0);\n"
+		"RbLaminateWear(UV, P, Age, Burns, Rings, Scratches, CornerWear, HalfOuterCm, CornerRadiusCm, BedHeightCm, Seed, A, R, N);\n"
+		"Roughness = R;\nNormal = N;\nreturn A;",
+		inputs, INC_LOOK,
+		extra_outputs=[("Normal", unreal.CustomMaterialOutputType.CMOT_FLOAT3), ("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+	slab = g.slab(albedo=surf, f0=g.const(0.04), roughness=(surf, "Roughness"), normal=(surf, "Normal"))
+	g.front(slab)
+	return g.finish()
+
+
+def make_plastic() -> str:
+	"""Black satin ABS of the coin-op castings (venue-dive-bar 3.1: "black ABS, satin, chipped"; RbPlasticWear)."""
+	g = Graph("M_RbPlasticABS", used_with_nanite=True)
+	surf = g.custom("RbPlastic",
+		"float3 A = Albedo;\nfloat R = BaseRoughness;\nfloat3 N = float3(0.0, 0.0, 1.0);\n"
+		"RbPlasticWear(UV, Age, Chips, Seed, A, R, N);\nRoughness = R;\nNormal = N;\nreturn A;",
+		[("UV", g.texcoord(0), ""), ("Albedo", g.vector("Albedo", (0.022, 0.022, 0.024), "Plastic"), ""),
+			("BaseRoughness", g.scalar("Roughness", 0.26, "Plastic"), ""), ("Age", g.scalar("Age", DIVE_BAR_AGE, "Wear"), ""),
+			("Chips", g.scalar("Chips", 0.35, "Wear"), ""), ("Seed", g.scalar("Seed", 2.0, "Wear"), "")], INC_LOOK,
+		extra_outputs=[("Normal", unreal.CustomMaterialOutputType.CMOT_FLOAT3), ("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+	slab = g.slab(albedo=surf, f0=g.const(0.045), roughness=(surf, "Roughness"), normal=(surf, "Normal"))
+	g.front(slab)
+	return g.finish()
+
+
+def make_metal(name: str, f0, roughness: float, anisotropy: float, pitting: float, age: float) -> str:
+	"""Metal slab (venue-dive-bar 6.3 metals: F0 linear, roughness, anisotropy for brushed aluminium) with fingerprints / smudges,
+	pitting and oxide dullness scaled by Age (RbMetalWear)."""
+	g = Graph(name, used_with_nanite=True)
+	f0v = g.vector("F0", f0, "Metal")
+	wear = g.custom("RbMetal", "float R = BaseRoughness;\nconst float K = RbMetalWear(UV, Age, Pitting, Seed, R);\nRoughness = R;\nreturn F0 * K;",
+		[("UV", g.texcoord(0), ""), ("F0", f0v, ""), ("BaseRoughness", g.scalar("Roughness", roughness, "Metal"), ""),
+			("Age", g.scalar("Age", age, "Wear"), ""), ("Pitting", g.scalar("Pitting", pitting, "Wear"), ""), ("Seed", g.scalar("Seed", 4.0, "Wear"), "")],
+		INC_LOOK, extra_outputs=[("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+	slab = g.slab(albedo=g.const((0.0, 0.0, 0.0)), f0=wear, f90=g.const((1.0, 1.0, 1.0)), roughness=(wear, "Roughness"),
+		anisotropy=g.scalar("Anisotropy", anisotropy, "Metal"))
+	g.front(slab)
+	return g.finish()
+
+
+def make_plexi() -> str:
+	"""Ball-trap window: scratched, grimy clear acrylic in front of the dark trap. M2 approximation: an opaque dark gloss slab (the
+	balls in the trap are not rendered yet; a translucent pane and the trap contents are a later step, Docs/references/table-lookdev.md)."""
+	g = Graph("M_RbPlexi", used_with_nanite=True)
+	rough = g.custom("RbPlexi", "return RbPlexiRoughness(UV, Age, BaseRoughness, Seed);",
+		[("UV", g.texcoord(0), ""), ("Age", g.scalar("Age", DIVE_BAR_AGE, "Wear"), ""), ("BaseRoughness", g.scalar("Roughness", 0.04, "Plexi"), ""),
+			("Seed", g.scalar("Seed", 6.0, "Wear"), "")], INC_LOOK, output=unreal.CustomMaterialOutputType.CMOT_FLOAT1)
+	slab = g.slab(albedo=g.vector("Albedo", (0.006, 0.006, 0.007), "Plexi"), f0=g.const(0.04), roughness=rough)
+	g.front(slab)
+	return g.finish()
+
+
+def make_rubber() -> str:
+	"""Cushion rubber / pocket liner rubber (plan 6.4: albedo 0.02-0.04, roughness 0.6) with the pale bloom of old rubber (Age) and
+	the pocket cavity (RbPocketCavity: below the cloth the liners and gully throats darken with depth; the cushion strip is above)."""
+	g = Graph("M_RbCushionRubber", used_with_nanite=True)
+	local = g.node(unreal.MaterialExpressionLocalPosition, -1800)
+	surf = g.custom("RbRubber",
+		"float R = BaseRoughness;\nconst float3 A = RbRubberWear(UV, Age, Albedo, R);\n"
+		"const float K = RbPocketCavity(P, CavityDepthCm, CavityFloor);\nRoughness = lerp(0.85, R, K);\nF0K = 0.04 * K;\nF90K = K;\nreturn A * K;",
+		[("UV", g.texcoord(0), ""), ("Albedo", g.vector("Albedo", (0.022, 0.022, 0.022), "Rubber"), ""),
+			("BaseRoughness", g.scalar("Roughness", 0.60, "Rubber"), ""), ("Age", g.scalar("Age", TOURNAMENT_AGE, "Wear"), ""), ("P", local, ""),
+			("CavityDepthCm", g.scalar("CavityDepthCm", 4.0, "Pocket"), ""), ("CavityFloor", g.scalar("CavityFloor", 0.20, "Pocket"), "")], INC_LOOK,
+		extra_outputs=[("Roughness", unreal.CustomMaterialOutputType.CMOT_FLOAT1), ("F0K", unreal.CustomMaterialOutputType.CMOT_FLOAT1),
+			("F90K", unreal.CustomMaterialOutputType.CMOT_FLOAT1)])
+	slab = g.slab(albedo=surf, f0=(surf, "F0K"), f90=(surf, "F90K"), roughness=(surf, "Roughness"))
+	g.front(slab)
+	return g.finish()
+
+
+def make_instance(name: str, parent: str, scalars: dict | None = None, vectors: dict | None = None) -> str:
+	"""A material instance constant of a generated parent (idempotent: parent and every listed parameter are reset each run)."""
+	path = f"{MAT_DIR}/{name}"
+	mi = unreal.load_asset(path) if unreal.EditorAssetLibrary.does_asset_exist(path) else None
+	if mi is not None and not isinstance(mi, unreal.MaterialInstanceConstant):
+		rb.delete_asset_if_exists(path)
+		mi = None
+	if mi is None:
+		tools = unreal.AssetToolsHelpers.get_asset_tools()
+		mi = tools.create_asset(name, MAT_DIR, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+		if mi is None:
+			rb.fail(f"could not create {path}")
+	parent_asset = unreal.load_asset(f"{MAT_DIR}/{parent}")
+	if parent_asset is None:
+		rb.fail(f"{name}: parent {parent} missing")
+	MEL.set_material_instance_parent(mi, parent_asset)
+	MEL.clear_all_material_instance_parameters(mi)
+	for key, value in (scalars or {}).items():
+		MEL.set_material_instance_scalar_parameter_value(mi, key, float(value))
+	for key, value in (vectors or {}).items():
+		MEL.set_material_instance_vector_parameter_value(mi, key, unreal.LinearColor(value[0], value[1], value[2], value[3] if len(value) > 3 else 1.0))
+	MEL.update_material_instance(mi)
+	unreal.EditorAssetLibrary.save_loaded_asset(mi, False)
+	rb.log(f"{path} ({parent}): " + ", ".join(f"{k}={v}" for k, v in {**(scalars or {}), **(vectors or {})}.items()))
+	return path
 
 
 def make_brass() -> str:
@@ -1079,16 +1384,48 @@ def verify(paths: list) -> None:
 		rb.fail(f"MPC_RbBalls vectors {sorted(names)}")
 
 
+def make_table_instances() -> list:
+	"""The table-family instances of M2-L: the 9-ft legs, and the dive bar's coin-op table (venue-dive-bar 6.4)."""
+	hl, hw = SEVEN_FOOT_BAR_HALF
+	return [
+		make_instance("MI_RbRailWood_Legs", "M_RbRailWood", {"GrainAlongU": 0.0}),
+		make_instance("MI_RbCloth_BarGreen", "M_RbCloth", {"Napped": 1.0, "Age": DIVE_BAR_AGE, "NapSheen": 0.25, "FuzzAmount": 0.35, "FuzzRoughness": 0.55,
+			"WeaveNormalStrength": 0.10, "WeaveContrast": 0.25, "Anisotropy": 0.05, "HalfLength": hl, "HalfWidth": hw, "Seed": 11.0},
+			{"ClothColor": BAR_GREEN}),
+		make_instance("MI_RbRail_BlackLaminate", "M_RbLaminate", {"UsePrint": 0.0, "Roughness": 0.16, "Burns": 0.45, "Rings": 0.18, "Scratches": 0.50,
+			"CornerWear": 0.0, "Seed": 17.0}, {"BaseColor": (0.018, 0.017, 0.017)}),
+		make_instance("MI_RbLaminate_Walnut", "M_RbLaminate", {"UsePrint": 1.0, "Roughness": 0.36, "Burns": 0.06, "Rings": 0.10, "Scratches": 0.35,
+			"CornerWear": 1.0, "Seed": 23.0}, {"PrintTint": (0.40, 0.31, 0.25)}),
+		make_instance("MI_RbCushionRubber_Old", "M_RbCushionRubber", {"Age": DIVE_BAR_AGE, "Roughness": 0.70, "CavityDepthCm": 2.5, "CavityFloor": 0.12},
+			{"Albedo": (0.018, 0.018, 0.019)}),
+		make_instance("MI_RbSight_WhitePlastic", "M_RbPlasticABS", {"Roughness": 0.30, "Age": 0.6, "Chips": 0.0, "Seed": 9.0},
+			{"Albedo": (0.58, 0.56, 0.49)}),
+		make_instance("MI_RbBall_DiveBar", "M_RbBall", {"RoughnessMin": 0.10, "RoughnessMax": 0.15, "HazeWeight": 0.30, "Dirt": 0.65, "Chalk": 0.6},
+			{"WhiteColor": (0.72, 0.70, 0.64)}),
+	]
+
+
+def verify_table_defaults(paths: list) -> None:
+	"""Every default part material of RbTableMeshBuilder::GetDefaultMaterialPath (both committed presets) must be generated here."""
+	names = {p.rsplit("/", 1)[1] for p in paths}
+	for required in ("M_RbCloth", "MI_RbCloth_BarGreen", "M_RbRailWood", "MI_RbRailWood_Legs", "MI_RbRail_BlackLaminate", "MI_RbLaminate_Walnut",
+			"M_RbCushionRubber", "MI_RbCushionRubber_Old", "M_RbSight", "MI_RbSight_WhitePlastic", "M_RbPocketLiner", "M_RbPlasticABS",
+			"M_RbAluminium", "M_RbChrome", "M_RbSteel", "M_RbPlexi", "MI_RbBall_DiveBar"):
+		if required not in names:
+			rb.fail(f"{required} (a default table material) was not generated")
+
+
 def main() -> None:
 	rb.ensure_dir(MAT_DIR)
 	textures = make_textures()
+	cc0 = make_cc0_textures()
 	mpc = make_mpc()
 	paths = [
 		make_ball(textures),
 		make_cloth(textures, mpc),
-		make_rail_wood(),
-		make_simple("M_RbCushionRubber", (0.025, 0.025, 0.025), 0.60),
-		make_leather("M_RbPocketLiner", (0.045, 0.028, 0.018), 0.55),
+		make_rail_wood(cc0),
+		make_rubber(),
+		make_pocket_leather(cc0),
 		make_leather("M_RbLeather", (0.060, 0.034, 0.020), 0.50),
 		make_brass(),
 		make_sight(),
@@ -1096,12 +1433,20 @@ def main() -> None:
 		make_room_wall(),
 		make_room_floor(),
 		make_lamp_diffuser(),
+		make_laminate(cc0),
+		make_plastic(),
+		make_metal("M_RbAluminium", (0.91, 0.92, 0.92), 0.35, 0.55, 0.0, DIVE_BAR_AGE),
+		make_metal("M_RbChrome", (0.55, 0.56, 0.55), 0.08, 0.0, 1.0, DIVE_BAR_AGE),
+		make_metal("M_RbSteel", (0.56, 0.57, 0.58), 0.32, 0.0, 0.3, TOURNAMENT_AGE),
+		make_plexi(),
 		MPC_PATH,
 	]
 	paths.append(make_cloth_instance("MI_RbCloth_Green", CLOTH_GREEN))
 	paths.append(make_cue_swatch_instance())
+	paths += make_table_instances()
 	verify(paths)
-	rb.log(f"UE-3 materials OK ({len(paths)} assets)")
+	verify_table_defaults(paths)
+	rb.log(f"table-family materials OK ({len(paths)} assets)")
 
 
 main()

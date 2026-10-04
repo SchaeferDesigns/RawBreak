@@ -15,7 +15,12 @@
 // that axis (bPoseCue), so the "cue under the chin" view exists before the pawn's own get-down path is capturable.
 // bHideLampFixture: while this camera is the view target the test room's lamp housing is hidden (the overhead view looks at
 // the table from above the lamp); the lights stay on.
+// Placement TableView (M2-L, Docs/ue-architecture.md 18.7): one of the standard table look-dev views (overhead, standing at the
+// head end, pocket close-up, cushion grazing, rail close-up) computed from the table's own geometry, so the same camera works on
+// every preset and after every TableSpec change (ComputeTableViewPose).
+// Table: TableIndex >= 0 = the level's table with that index (URbTableSubsystem), else the player's table.
 // Look-dev only: nothing happens unless this camera is the local player's view target, so the cameras can stay in the M1 map.
+// Owner: M2-L (UE-8 in M1).
 
 #include "CoreMinimal.h"
 #include "CineCameraActor.h"
@@ -32,6 +37,27 @@ enum class ERbLookDevPlacement : uint8
 {
 	Fixed,     // the placed transform
 	ChinOnCue, // eye from the cue axis (plan 4.2), cue posed at address
+	TableView, // M2-L: a standard table view (ERbTableLookDevView) from the table geometry
+};
+
+// Standard table look-dev views of M2-L (Docs/ue-architecture.md 18.7; the chin-on-cue view is the ChinOnCue placement).
+UENUM(BlueprintType)
+enum class ERbTableLookDevView : uint8
+{
+	Overhead,       // straight down over the bed centre, the whole table in frame (image right = foot)
+	Standing,       // standing eye (1.65 m above the floor) behind the head rail, looking at the foot spot
+	PocketCloseUp,  // the foot-left corner pocket from the table side: jaws, facings, liner, drop, hardware
+	CushionGrazing, // 3 cm above the cloth along the right long cushion: nose roll, rubber, cloth sheen at grazing angles
+	RailCloseUp,    // from outside, above the right long rail: cap edge, sights, rail body, apron / cabinet below
+	FootEnd,        // bent over the foot end (eye 1.15 m above the floor): foot rail, coin mechanism, trap window, ball tray, return
+};
+
+// Result of a table view placement (world space, cm).
+struct FRbTableViewPose
+{
+	FVector Eye = FVector::ZeroVector;
+	FRotator Rotation = FRotator::ZeroRotator;
+	FVector FocusPoint = FVector::ZeroVector;
 };
 
 // Result of the chin-on-cue placement (world space, cm).
@@ -83,9 +109,29 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Camera")
 	bool bHideLampFixture = false;
 
+	// TableView placement: which view (M2-L).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Camera")
+	ERbTableLookDevView TableView = ERbTableLookDevView::Standing;
+
+	// The table this camera looks at: >= 0 = the table with that TableIndex, else the player's table (URbTableSubsystem).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Camera")
+	int32 TableIndex = -1;
+
+	// Look-dev exposure calibration [EV] added to the preset's exposure compensation (M2-L): a look-dev room darker than the venue it
+	// stands in for adapts lower than the venue's target band (venue-dive-bar 4.5); the bias restores that band for the captures.
+	// 0 = the preset's exposure law unchanged (M1 cameras).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Camera")
+	float ExposureBiasEv = 0.0f;
+
 	// Chin-on-cue eye and cue pose (plan 4.2) for a cue ball / aim point in the core table frame [m]; Params gives s_e, h_c, y_vc.
 	static FRbChinOnCuePose ComputeChinOnCuePose(const ARbTable& Table, const FRbCameraPresetParams& Params, const FVector2D& CueBall,
 		const FVector2D& AimPoint, double ElevationDeg, double TipGapM, double BallRadiusM, double TipDomeRadiusM);
+
+	// Eye, rotation and focus point of a standard table view (M2-L), from the table's TableSpec / geometry and its frame.
+	static FRbTableViewPose ComputeTableViewPose(const ARbTable& Table, ERbTableLookDevView View);
+
+	// The table this camera looks at (TableIndex, else the player's table), nullptr without one.
+	ARbTable* ResolveTable() const;
 
 	// Aspect ratio (width / height) of the game viewport; 16:9 without one (editor preview, commandlets).
 	static float GetViewportAspect();

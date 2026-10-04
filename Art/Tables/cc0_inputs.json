@@ -1,0 +1,8 @@
+[
+ {"source": "polyhaven", "id": "walnut_veneer", "res": "2k", "maps": ["Diffuse", "nor_dx", "Rough"], "format": "png",
+  "use": "9-ft rail caps, apron and legs: quarter-sawn walnut veneer under a stained clear coat (M_RbRailWood)"},
+ {"source": "polyhaven", "id": "walnut_veneer_02", "res": "2k", "maps": ["Diffuse", "Rough"], "format": "png",
+  "use": "7-ft coin-op cabinet: the printed walnut grain of the woodgrain laminate (MI_RbLaminate_Walnut)"},
+ {"source": "polyhaven", "id": "brown_leather", "res": "2k", "maps": ["Diffuse", "nor_dx", "Rough"], "format": "png",
+  "use": "9-ft leather drop pockets (M_RbPocketLeather)"}
+]

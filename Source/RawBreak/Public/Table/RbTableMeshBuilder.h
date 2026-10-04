@@ -42,8 +42,25 @@
 //                cup (bar tables) of outer radius r_p hanging below the slate. The hole walls inside the rectangle (slate
 //                below the drop rounding, cushion cuts) are cloth-covered and belong to the Bed / CushionCloth solids.
 //   Sights       18 flush discs (Sight::Position, SightDiameter) inlaid in the caps.
-//   Legs         four square legs (pro / home tables) or a coin-op cabinet with feet (bar tables) down to the floor
-//                (z = -BedHeight).
+//   Legs         four legs with plinths (pro / home tables) or the coin-op cabinet's four pedestal legs (bar tables) down to
+//                the levelers.
+//
+// M2-L look-dev (Docs/ue-architecture.md 18.7): detail only where the physics does not look.
+//   * The rail outline is a rounded rectangle (OuterBoundary with plan-corner radius OuterCornerRadiusCm); the rails are built
+//     as zones between cuts (9-ft: four mitred rails; 7-ft: caps between the castings), each a closed solid. The outer top
+//     edge of the caps is a REAL quarter round (CapEdgeRadiusCm, EdgeSegments), the caps' top plane stays RailTopZ.
+//   * Cushion nose roll: behind the exact nose line (z = h, BuildNoseOutline) the cloth rolls over the rubber nose onto the
+//     cushion-top plane within NoseRollWidthCm (vertical tangent at the nose line, a small convex bulge, tangent onto the
+//     top plane; the real cushion top is convex above the physics' planar approximation). It never reaches in front of the
+//     nose outline, tapers to zero along the jaw arcs so the facings (physics planes) are untouched.
+//   * RubberStrip: the black rubber lip along the bottom of each cushion face (z <= RubberStripHeightCm, behind the nose line).
+//   * PocketBuckets: 9-ft leather drop pockets (flange + bulged bucket), 7-ft gully throats; PocketLiners keeps the rubber
+//     liner collars (the physics' back wall r_p) and the corner inserts.
+//   * Coin-op (BaseStyle Cabinet, venue-dive-bar 3.1 "HALVERSON Stallion 7"): corner and side castings replace the rail
+//     around the pockets (tops flush with RailTopZ, openings = the liner collars, >= 2 mm to the capture cylinder r_p), the
+//     cabinet box of boards (Z 0.30 m .. the rail underside), aluminium trim, pedestal legs with screw levelers, the coin
+//     mechanism with its 6-quarter slide on the foot end, the coin door on the wall side (core -y), the ball-trap window,
+//     the ball tray and the cue-ball return cup in the foot end.
 
 #include "CoreMinimal.h"
 
@@ -65,15 +82,32 @@ struct FRbTableMeshOptions
 	int32 CircleSegments = 128;      // pocket circles (full circle, even): sagitta 0.019 mm at r_p = 62 mm
 	int32 SightSegments = 32;
 	int32 DropRoundingSegments = 8;  // quarter circle of the slate drop rounding r_d
-	double ApronDepthCm = 18.0;      // rail/apron height below the cloth (art, ESTIMATE)
-	double LegSizeCm = 16.0;         // square legs (M1 art)
+	double ApronDepthCm = 18.0;      // rail/apron height below the cloth (art, ESTIMATE; legs style)
+	double LegSizeCm = 15.0;         // square legs (legs style)
 	bool bBuildLegs = true;
 	ERbTableBaseStyle BaseStyle = ERbTableBaseStyle::Auto;
 	double CapThicknessCm = 2.0;     // wooden rail cap slab
 	double SkirtThicknessCm = 2.5;   // apron skirt board (reduced automatically to clear the pocket circles)
 	double SightDepthCm = 0.3;       // inlay depth of the flush sights
-	double LinerThicknessCm = 0.3;   // leather / rubber pocket wall and liner collar (the rails are cut at r_p + this)
-	double CapEdgeRoundingCm = 0.4;  // normal band of the rounded outer rail-cap edge
+	double LinerThicknessCm = -1.0;  // leather / rubber pocket wall and liner collar (the rails are cut at r_p + this); <= 0 = the base
+	                                 // style's default (M2-L: legs 0.8 = the leather lip that rings a pro table's pocket on the rail
+	                                 // top; cabinet 0.3 = the coin-op's rubber liner inside the casting, whose corner islands leave no
+	                                 // more room). ResolveLinerThicknessCm.
+	double CapEdgeRoundingCm = 0.4;  // M1 (unused since M2: the cap edge is real geometry, CapEdgeRadiusCm)
+
+	// --- M2-L look-dev (<= 0 = the base style's default) -----------------------------------------------------------------
+	double OuterCornerRadiusCm = -1.0; // plan-corner radius of the rail outline (legs 2.0, cabinet 4.0)
+	double CapEdgeRadiusCm = -1.0;     // real quarter round of the outer rail-cap edge (legs 0.8, cabinet 0.5; >= 0.3)
+	int32 EdgeSegments = 8;            // segments of every rounded profile edge (>= 8)
+	int32 CornerSegments = 12;         // segments of a plan-corner arc (even: the mitre lies on its 45 deg sample)
+	double NoseRollWidthCm = 0.8;      // cushion nose roll width behind the straight nose line (0.6 x the jaw radius along the jaws)
+	double NoseRollBulge = 0.25;       // max bulge of the roll above the straight blend, as a fraction of its width
+	int32 NoseRollSegments = 12;
+	double NoseRollTaperCm = 3.0;      // the straight roll widens from the jaw width to NoseRollWidthCm over this length
+	double RubberStripHeightCm = 0.45; // rubber lip at the bottom of the cushion face
+	double RubberStripThicknessCm = 0.08;
+	double CornerCastingLengthCm = 24.0; // coin-op corner castings: along each rail from the outer corner (past the pocket collar)
+	double SideCastingLengthCm = 26.0;   // coin-op side castings: total length along the long rail
 };
 
 struct FRbTableMeshSet
@@ -109,4 +143,37 @@ namespace RbTableMeshBuilder
 	// the rendered one) and Nanite (not on the thin sights).
 	RAWBREAK_API bool PartHasCollision(ERbTablePart Part);
 	RAWBREAK_API bool PartUsesNanite(ERbTablePart Part);
+
+	// --- M2-L -----------------------------------------------------------------------------------------------------------------
+
+	// The base style the options resolve to for a table (Auto: Cabinet for napped bar cloth).
+	RAWBREAK_API ERbTableBaseStyle ResolveBaseStyle(const rb::TableSpec& Spec, const FRbTableMeshOptions& Options);
+
+	// The liner thickness [cm] the options resolve to for a table (LinerThicknessCm, or the base style's default when <= 0).
+	RAWBREAK_API double ResolveLinerThicknessCm(const rb::TableSpec& Spec, const FRbTableMeshOptions& Options);
+
+	// Whether BuildAll produces triangles for a part in a base style (coin-op parts are empty on a legs table).
+	RAWBREAK_API bool PartExpected(ERbTableBaseStyle Style, ERbTablePart Part);
+
+	// Object path of the default material of a part for a preset (generated by Tools/unreal/editor/rb_make_materials.py; the
+	// dive-bar instances of venue-dive-bar 6.4 for the coin-op preset). ARbTable uses it for parts without an override, the bake
+	// assigns it to the baked asset.
+	RAWBREAK_API FString GetDefaultMaterialPath(ERbTablePreset Preset, ERbTablePart Part);
+
+	// Resolved geometry parameters (tests, look-dev): rail outline corner radius, cap edge radius, nose roll width, the cushion
+	// roll's worst tessellation sagitta [m] and the coin-op cut positions (corner cut |x| / |y| and side half-length, core m).
+	struct FLookDevMetrics
+	{
+		ERbTableBaseStyle Style = ERbTableBaseStyle::Legs;
+		double OuterCornerRadius = 0.0;
+		double CapEdgeRadius = 0.0;
+		int32 CapEdgeSegments = 0;
+		double NoseRollWidth = 0.0;
+		double NoseRollMaxSagitta = 0.0;
+		double CornerCutX = 0.0;
+		double CornerCutY = 0.0;
+		double SideCutHalf = 0.0;
+		double SkirtInset = 0.0;
+	};
+	RAWBREAK_API bool ComputeLookDevMetrics(const rb::TableGeometry& Geometry, const FRbTableMeshOptions& Options, FLookDevMetrics& Out, FString& OutError);
 }
