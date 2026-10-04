@@ -12,9 +12,11 @@
 #include "Engine/CollisionProfile.h"
 #include "Engine/Engine.h"
 #include "Engine/UserInterfaceSettings.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 
@@ -28,6 +30,69 @@ namespace RbContractTests
 	{
 		const IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(Name);
 		return Var ? Var->GetInt() : INDEX_NONE;
+	}
+
+	// What Contracts.Packaging reports for one playable map (mirror of rbue.py cook_list_problems):
+	//   exists + listed      -> Ok (the state after the architect listed it at the merge)
+	//   exists + not listed  -> Error for a map that must already be listed (the test room), else a Warning (request)
+	//   missing + listed     -> Error (the cook fails with "Could not find package")
+	//   missing + not listed -> Ok (not generated yet)
+	enum class ECookListVerdict : uint8
+	{
+		Ok,
+		Warning,
+		Error,
+	};
+
+	ECookListVerdict CookListVerdict(bool bExists, bool bListed, bool bMustBeListed)
+	{
+		if (bExists)
+		{
+			return bListed ? ECookListVerdict::Ok : (bMustBeListed ? ECookListVerdict::Error : ECookListVerdict::Warning);
+		}
+		return bListed ? ECookListVerdict::Error : ECookListVerdict::Ok;
+	}
+
+	// The package of one MapsToCook entry of DefaultGame.ini, `(FilePath="/Game/Generated/Maps/L_X")` -> "/Game/Generated/Maps/L_X"
+	// (empty when the entry has no FilePath).
+	FString MapsToCookPackage(const FString& Entry)
+	{
+		const int32 Key = Entry.Find(TEXT("FilePath="));
+		if (Key == INDEX_NONE)
+		{
+			return FString();
+		}
+		FString Value = Entry.Mid(Key + 9).TrimStart();
+		Value.RemoveFromStart(TEXT("\""));
+		int32 End = INDEX_NONE;
+		for (const TCHAR* Stop : {TEXT("\""), TEXT(")"), TEXT(",")})
+		{
+			const int32 At = Value.Find(Stop);
+			End = At != INDEX_NONE && (End == INDEX_NONE || At < End) ? At : End;
+		}
+		return (End == INDEX_NONE ? Value : Value.Left(End)).TrimStartAndEnd();
+	}
+
+	// Every generated level (Content/Generated/Maps/**.umap) as a package name. DirectoriesToAlwaysCook = /Game/Generated cooks
+	// only .uasset files (UE 5.8 CookOnTheFlyServer: FindFilesRecursive with the asset extension), never a .umap: a generated map
+	// - a venue, the title, a sublevel that is streamed in by name - reaches the packaged build only through MapsToCook or as a
+	// reference of a cooked map, so the contract lists every one of them (review).
+	TArray<FString> GeneratedMapPackages()
+	{
+		TArray<FString> Files;
+		IFileManager::Get().FindFilesRecursive(Files, *FPaths::Combine(FPaths::ProjectContentDir(), TEXT("Generated/Maps")),
+			*(FString(TEXT("*")) + FPackageName::GetMapPackageExtension()), true, false);
+		TArray<FString> Packages;
+		for (const FString& File : Files)
+		{
+			FString Package;
+			if (FPackageName::TryConvertFilenameToLongPackageName(File, Package))
+			{
+				Packages.AddUnique(Package);
+			}
+		}
+		Packages.Sort();
+		return Packages;
 	}
 }
 
@@ -173,44 +238,103 @@ bool FRbContractVenues::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbContractPackaging, "RawBreak.Unit.Contracts.Packaging", RB_UNIT_TEST_FLAGS)
 bool FRbContractPackaging::RunTest(const FString& Parameters)
 {
-	// Every level the game can open (the venues of the title screen and the title itself) is cooked once it exists: the packaged
-	// build of the owner playtest (M2-A10) must not miss a map. DefaultGame.ini lists them (architect, at the merge of the package
-	// that generates the map). A listed map that does not exist would fail the cook ("Could not find package"), so a map is added
-	// only together with its generated level. A generated map that is not listed yet is a WARNING, not a failure: on the branch
+	// Every level the game can open (the venues of the title screen and the title itself) and every other generated level (the
+	// venues' sublevels; DirectoriesToAlwaysCook never cooks a .umap, see GeneratedMapPackages) is cooked once it exists: the
+	// packaged build of the owner playtest (M2-A10) must not miss a map. DefaultGame.ini lists them (architect, at the merge of the
+	// package that generates the map). A listed map that does not exist would fail the cook ("Could not find package"), so a map is
+	// added only together with its generated level. A generated map that is not listed yet is a WARNING, not a failure: on the branch
 	// of the package that generates it nobody but the architect may edit DefaultGame.ini (18.2); at the merge the architect lists
 	// it, and `rbue.py package` refuses to cook while a generated playable map is missing from MapsToCook.
 	TArray<FString> Cooked;
 	GConfig->GetArray(TEXT("/Script/UnrealEd.ProjectPackagingSettings"), TEXT("MapsToCook"), Cooked, GGameIni);
+	TArray<FString> Listed;
+	for (const FString& Entry : Cooked)
+	{
+		const FString Package = RbContractTests::MapsToCookPackage(Entry);
+		if (TestFalse(FString::Printf(TEXT("MapsToCook entry %s has a FilePath"), *Entry), Package.IsEmpty()))
+		{
+			Listed.Add(Package);
+		}
+	}
+	// The levels the game opens (the title, every venue) and every generated level incl. sublevels (see GeneratedMapPackages), plus
+	// every listed map (a listed map that does not exist - a typo, a removed level - fails the cook).
 	TArray<FString> Candidates = {RbAssetPaths::TitleMap};
 	const UEnum* Venues = StaticEnum<ERbVenue>();
 	for (int32 Index = 0; Index < Venues->NumEnums() - 1; ++Index)
 	{
-		Candidates.Add(RbTypes::MapFor(static_cast<ERbVenue>(Venues->GetValueByIndex(Index))));
+		Candidates.AddUnique(RbTypes::MapFor(static_cast<ERbVenue>(Venues->GetValueByIndex(Index))));
+	}
+	for (const FString& Map : RbContractTests::GeneratedMapPackages())
+	{
+		Candidates.AddUnique(Map);
+	}
+	for (const FString& Map : Listed)
+	{
+		Candidates.AddUnique(Map);
 	}
 	TestTrue(TEXT("the M1 test room exists (committed content)"), FPackageName::DoesPackageExist(RbAssetPaths::M1TestRoomMap));
 	for (const FString& Map : Candidates)
 	{
-		const bool bListed = Cooked.ContainsByPredicate([&Map](const FString& Entry) { return Entry.Contains(FString::Printf(TEXT("\"%s\""), *Map)); });
+		const bool bListed = Listed.Contains(Map);
 		const bool bExists = FPackageName::DoesPackageExist(Map);
-		if (bExists && Map == RbAssetPaths::M1TestRoomMap)
+		switch (RbContractTests::CookListVerdict(bExists, bListed, Map == RbAssetPaths::M1TestRoomMap))
 		{
-			TestTrue(FString::Printf(TEXT("%s exists and is in MapsToCook"), *Map), bListed);
-		}
-		else if (bExists && !bListed)
-		{
+		case RbContractTests::ECookListVerdict::Ok:
+			AddInfo(FString::Printf(TEXT("%s: %s"), *Map, bExists ? TEXT("generated and in MapsToCook") : TEXT("not generated yet (its package's generator)")));
+			break;
+		case RbContractTests::ECookListVerdict::Warning:
 			AddWarning(FString::Printf(TEXT("%s is generated but not in MapsToCook yet: the architect lists it in DefaultGame.ini at the merge of its "
 				"package (request; rbue.py package refuses to cook without it)"), *Map));
+			break;
+		case RbContractTests::ECookListVerdict::Error:
+			AddError(bExists ? FString::Printf(TEXT("%s exists but is not in MapsToCook"), *Map)
+							 : FString::Printf(TEXT("%s is in MapsToCook but not generated (the cook would fail)"), *Map));
+			break;
 		}
-		else
-		{
-			TestFalse(FString::Printf(TEXT("%s is not generated yet and must not be in MapsToCook (the cook would fail)"), *Map), bListed);
-			AddInfo(FString::Printf(TEXT("%s not generated yet (its package's generator)"), *Map));
-		}
+	}
+
+	// The packaged build starts where the game starts: the title once M2-D generated it (M2-A10: the owner plays title -> dive bar),
+	// the test room before. GameDefaultMap is the architect's (DefaultEngine.ini), switched at the merge of M2-D like MapsToCook.
+	FString DefaultMapPath;
+	GConfig->GetString(TEXT("/Script/EngineSettings.GameMapsSettings"), TEXT("GameDefaultMap"), DefaultMapPath, GEngineIni);
+	const FString DefaultMap = FPackageName::ObjectPathToPackageName(DefaultMapPath);
+	TestTrue(FString::Printf(TEXT("GameDefaultMap %s exists"), *DefaultMapPath), !DefaultMap.IsEmpty() && FPackageName::DoesPackageExist(DefaultMap));
+	if (FPackageName::DoesPackageExist(RbAssetPaths::TitleMap) && DefaultMap != RbAssetPaths::TitleMap)
+	{
+		AddWarning(FString::Printf(TEXT("%s is generated but GameDefaultMap is still %s: the architect switches it at the merge of M2-D (request; "
+			"rbue.py package refuses to cook without it)"), RbAssetPaths::TitleMap, *DefaultMap));
 	}
 	TArray<FString> AlwaysCook;
 	GConfig->GetArray(TEXT("/Script/UnrealEd.ProjectPackagingSettings"), TEXT("DirectoriesToAlwaysCook"), AlwaysCook, GGameIni);
 	TestTrue(TEXT("/Game/Generated always cooked (assets loaded by path)"),
 		AlwaysCook.ContainsByPredicate([](const FString& Entry) { return Entry.Contains(TEXT("\"/Game/Generated\"")); }));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbPipelineCookListVerdict, "RawBreak.Unit.Pipeline.CookListVerdict", RB_UNIT_TEST_FLAGS)
+bool FRbPipelineCookListVerdict::RunTest(const FString& Parameters)
+{
+	// The four states a playable map passes through (review: a generated map that the architect had listed at the merge must be
+	// Ok, not "not generated yet and must not be listed").
+	using RbContractTests::CookListVerdict;
+	using V = RbContractTests::ECookListVerdict;
+	TestTrue(TEXT("not generated, not listed: ok (before its package)"), CookListVerdict(false, false, false) == V::Ok);
+	TestTrue(TEXT("generated, not listed: warning (request to the architect)"), CookListVerdict(true, false, false) == V::Warning);
+	TestTrue(TEXT("generated and listed: ok (after the merge)"), CookListVerdict(true, true, false) == V::Ok);
+	TestTrue(TEXT("listed but not generated: error (the cook fails)"), CookListVerdict(false, true, false) == V::Error);
+	TestTrue(TEXT("test room not listed: error"), CookListVerdict(true, false, true) == V::Error);
+	TestTrue(TEXT("test room listed: ok"), CookListVerdict(true, true, true) == V::Ok);
+
+	// MapsToCook entries as GConfig returns them (review: listed maps are compared by their package, not by a substring).
+	using RbContractTests::MapsToCookPackage;
+	TestEqual(TEXT("entry"), MapsToCookPackage(TEXT("(FilePath=\"/Game/Generated/Maps/L_DiveBar\")")), FString(TEXT("/Game/Generated/Maps/L_DiveBar")));
+	TestEqual(TEXT("sublevel entry"), MapsToCookPackage(TEXT("(FilePath=\"/Game/Generated/Maps/L_DiveBar_Light_Open\")")),
+		FString(TEXT("/Game/Generated/Maps/L_DiveBar_Light_Open")));
+	TestEqual(TEXT("unquoted entry"), MapsToCookPackage(TEXT("(FilePath=/Game/Generated/Maps/L_Title)")), FString(TEXT("/Game/Generated/Maps/L_Title")));
+	TestEqual(TEXT("no FilePath"), MapsToCookPackage(TEXT("(Path=\"/Game/Generated\")")), FString());
+
+	// The generated levels on disk include the committed test room (and, after the M2 merges, the venues' sublevels).
+	TestTrue(TEXT("generated maps include the test room"), RbContractTests::GeneratedMapPackages().Contains(FString(RbAssetPaths::M1TestRoomMap)));
 	return true;
 }
 

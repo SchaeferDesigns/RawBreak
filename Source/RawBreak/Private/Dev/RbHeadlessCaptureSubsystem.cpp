@@ -348,13 +348,24 @@ void URbHeadlessCaptureSubsystem::ApplyHideTags(UWorld* World)
 
 bool URbHeadlessCaptureSubsystem::ApplyCamera(UWorld* World)
 {
-	const FString Name = Views.IsValidIndex(ViewIndex) ? Views[ViewIndex].Camera : FString();
+	if (!Views.IsValidIndex(ViewIndex))
+	{
+		return false;
+	}
+	// A reference, not a copy: this runs every frame, also inside the perf recording (no per-frame FString allocation).
+	const FString& Name = Views[ViewIndex].Camera;
 	APlayerController* PC = GetGameInstance() ? GetGameInstance()->GetFirstLocalPlayerController(World) : nullptr;
+	// Every view needs the local player's camera manager (the player view renders through it, the cuts are raised on it): without
+	// it the view is not ready, and the grace frames fail the run instead of waiting for the global timeout (review).
+	if (!PC || !PC->PlayerCameraManager)
+	{
+		return false;
+	}
 	// The first frames of a view are camera cuts: the eye adaptation snaps to the new view (PostProcessEyeAdaptation: bCameraCut
 	// -> ForceTarget) and the temporal history restarts, so a view never inherits the previous view's exposure.
 	auto Cut = [this, PC]()
 	{
-		if (CutFramesLeft > 0 && PC && PC->PlayerCameraManager)
+		if (CutFramesLeft > 0)
 		{
 			PC->PlayerCameraManager->SetGameCameraCutThisFrame();
 			--CutFramesLeft;
@@ -365,14 +376,16 @@ bool URbHeadlessCaptureSubsystem::ApplyCamera(UWorld* World)
 		Cut();
 		return true;
 	}
-	if (!PC)
-	{
-		return false;
-	}
-	ACameraActor* Camera = FindCamera(World, Name);
+	ACameraActor* Camera = ViewCamera.Get();
 	if (!Camera)
 	{
-		return false;
+		// Searched until found (sublevels may stream in), then cached for the rest of the view (re-searched only if it goes away).
+		Camera = FindCamera(World, Name);
+		if (!Camera)
+		{
+			return false;
+		}
+		ViewCamera = Camera;
 	}
 	Cut();
 	// Look-dev views never show the (body-less) player pawn or its shadow.
@@ -397,6 +410,7 @@ void URbHeadlessCaptureSubsystem::BeginView(int32 Index)
 {
 	ViewIndex = Index;
 	bCameraApplied = false;
+	ViewCamera.Reset();
 	FramesWithoutCamera = 0;
 	FramesInStage = 0;
 	IdleFrames = 0;
@@ -427,7 +441,9 @@ void URbHeadlessCaptureSubsystem::Tick(float DeltaTime)
 	}
 	++FramesInStage;
 
-	// Every view waits for its camera: a named camera that does not show up within the grace frames fails the run.
+	// Every view waits for its camera: a named camera (or, for the player view, the local player's camera manager) that does not
+	// show up within the grace frames fails the run. A stage that is not ready does nothing this frame: in particular it must not
+	// advance after Finish() set EStage::Done (review: the warm-up used to ignore the result and could leave Done again).
 	auto CameraReady = [this, World]()
 	{
 		if (ApplyCamera(World))
@@ -436,7 +452,9 @@ void URbHeadlessCaptureSubsystem::Tick(float DeltaTime)
 		}
 		if (++FramesWithoutCamera > kCameraGraceFrames)
 		{
-			Finish(false, FString::Printf(TEXT("no CameraActor with tag, name or label '%s'"), *Views[ViewIndex].Camera));
+			const FString& Camera = Views.IsValidIndex(ViewIndex) ? Views[ViewIndex].Camera : FString();
+			Finish(false, Camera.IsEmpty() ? FString(TEXT("no local player controller / camera manager for the player view"))
+										   : FString::Printf(TEXT("no CameraActor with tag, name or label '%s'"), *Camera));
 		}
 		return false;
 	};
@@ -480,6 +498,10 @@ void URbHeadlessCaptureSubsystem::Tick(float DeltaTime)
 			Stage = EStage::Warmup;
 			FramesInStage = 0;
 			WarmupElapsed = 0.0;
+			// Snap the exposure again now that the final shaders render: the first cut of the view happened while the view may still
+			// have shown default materials (a cold DDC compiles for minutes), and the Eyes preset adapts down at only 0.7 EV/s, so a
+			// snap to the fallback image could stay visible after a 4 s warm-up (review).
+			CutFramesLeft = kCameraCutFrames;
 			UE_LOG(LogRawBreak, Display, TEXT("RbCapture: compilers idle after %.1f s, warming up view '%s' for %d frames / %.1f s"), Now - StartTime,
 				Views[ViewIndex].Camera.IsEmpty() ? TEXT("player") : *Views[ViewIndex].Camera, WarmupFrames, WarmupSeconds);
 		}
@@ -487,7 +509,10 @@ void URbHeadlessCaptureSubsystem::Tick(float DeltaTime)
 	}
 
 	case EStage::Warmup:
-		CameraReady();
+		if (!CameraReady())
+		{
+			break;
+		}
 		WarmupElapsed += DeltaTime;
 		if (RemainingCompileJobs() > 0)
 		{
@@ -495,7 +520,7 @@ void URbHeadlessCaptureSubsystem::Tick(float DeltaTime)
 			FramesInStage = 0;
 			IdleFrames = 0;
 		}
-		else if (FramesInStage >= WarmupFrames && WarmupElapsed >= WarmupSeconds)
+		else if (FramesInStage >= WarmupFrames && WarmupElapsed >= WarmupSeconds && CutFramesLeft == 0)
 		{
 			if (!Views[ViewIndex].OutputPath.IsEmpty())
 			{
@@ -512,7 +537,10 @@ void URbHeadlessCaptureSubsystem::Tick(float DeltaTime)
 		break;
 
 	case EStage::Requested:
-		CameraReady();
+		if (!CameraReady())
+		{
+			break;
+		}
 		if (bScreenshotSaved)
 		{
 			bScreenshotSaved = false;
@@ -536,7 +564,10 @@ void URbHeadlessCaptureSubsystem::Tick(float DeltaTime)
 		break;
 
 	case EStage::PerfRecord:
-		CameraReady();
+		if (!CameraReady())
+		{
+			break;
+		}
 		RecordPerfFrame();
 		if (PerfFrameMs.Num() >= PerfFrames)
 		{
@@ -622,6 +653,17 @@ bool URbHeadlessCaptureSubsystem::WritePerfReport(FString& OutError) const
 	{
 		Exec.Add(JsonString(Command));
 	}
+	// The scalability groups in effect at the end of the recording (rb.Quality sets them): the report shows the settings that were
+	// really rendered, also when something applied other settings after the start-up commands (review: `host.quality` of rbue.py
+	// is only what was asked for).
+	static const TCHAR* const ScalabilityGroups[] = {TEXT("sg.ResolutionQuality"), TEXT("sg.ViewDistanceQuality"), TEXT("sg.AntiAliasingQuality"),
+		TEXT("sg.ShadowQuality"), TEXT("sg.GlobalIlluminationQuality"), TEXT("sg.ReflectionQuality"), TEXT("sg.PostProcessQuality"),
+		TEXT("sg.TextureQuality"), TEXT("sg.EffectsQuality"), TEXT("sg.FoliageQuality"), TEXT("sg.ShadingQuality")};
+	TArray<FString> Scalability;
+	for (const TCHAR* Group : ScalabilityGroups)
+	{
+		Scalability.Add(FString::Printf(TEXT("%s: %s"), *JsonString(Group), *JsonString(CVarString(Group))));
+	}
 
 	FString Json = TEXT("{\n");
 	Json += FString::Printf(TEXT(" \"map\": %s,\n"), *JsonString(World ? World->GetOutermost()->GetName() : FString()));
@@ -629,6 +671,7 @@ bool URbHeadlessCaptureSubsystem::WritePerfReport(FString& OutError) const
 	Json += FString::Printf(TEXT(" \"width\": %d,\n \"height\": %d,\n"), PerfWidth, PerfHeight);
 	Json += FString::Printf(TEXT(" \"screen_percentage\": %s,\n"), *JsonString(CVarString(TEXT("r.ScreenPercentage"))));
 	Json += FString::Printf(TEXT(" \"anti_aliasing\": %s,\n"), *JsonString(CVarString(TEXT("r.AntiAliasingMethod"))));
+	Json += FString::Printf(TEXT(" \"scalability\": {%s},\n"), *FString::Join(Scalability, TEXT(", ")));
 	Json += FString::Printf(TEXT(" \"rhi\": %s,\n \"adapter\": %s,\n"), *JsonString(GDynamicRHI ? GDynamicRHI->GetName() : TEXT("?")), *JsonString(GRHIAdapterName));
 	Json += FString::Printf(TEXT(" \"exec\": [%s],\n"), *FString::Join(Exec, TEXT(", ")));
 	Json += FString::Printf(TEXT(" \"frames\": %d,\n"), PerfFrameMs.Num());
@@ -716,6 +759,8 @@ void URbHeadlessCaptureSubsystem::Finish(bool bSuccess, const FString& Message)
 	}
 	if (bQuitWhenDone)
 	{
+		// A graceful exit: the process exit code stays 0 even after a failure (UE 5.8 on Windows drops the status of a non-forced
+		// RequestExitWithStatus), so callers detect failures by the "RbCapture: FAILED" line and the missing outputs (rbue.py does).
 		FPlatformMisc::RequestExit(false, TEXT("RbHeadlessCapture"));
 	}
 }

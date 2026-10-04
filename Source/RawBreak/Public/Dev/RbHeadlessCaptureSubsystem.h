@@ -12,8 +12,10 @@
 //
 // Sequence: wait for the world to begin play -> hide the actors carrying one of -RBCaptureHideTags (e.g. RbDB_Ceiling for the
 // dive bar's plan view V10) -> for every camera of -RBCaptureCamera (or once through the player's own view when none is given):
-// view through the camera actor whose tag, name or label matches (the player pawn is hidden then; a camera cut snaps the eye
+// view through the camera actor whose tag, name or label matches (labels exist in editor builds only: a packaged build, --exe,
+// finds cameras by tag or object name; the player pawn is hidden then; a camera cut snaps the eye
 // adaptation to the new view, so every view starts from its own exposure) -> wait until the shader and asset compilers are idle ->
+// a second camera cut (the exposure snaps to the image with the final shaders, not to a default-material frame of a cold DDC) ->
 // render at least Warmup frames AND WarmupSeconds of game time (auto exposure adapts in EV per SECOND - 0.7 EV/s down for the
 // Eyes preset - so a frame count alone under-converges on a fast GPU; Lumen, TSR history, virtual texture / Nanite streaming) ->
 // one screenshot via UGameViewportClient's capture delegate (scene only, or with the Slate UI of the viewport - overlay, menus,
@@ -25,8 +27,8 @@
 // -RBPerf (M2-A9 performance log): after the captures (or after its own warm-up when there are none) the console commands of
 // -RBPerfExec run once (e.g. "rb.Match.Break 9" so the break plays during the recording), then PerfFrames frames are recorded:
 // frame time, game thread, render thread, RHI thread (cycles of FViewport::Draw, like `stat unit`) and GPU
-// (RHIGetGPUFrameCycles) -> a JSON with mean / median / p95 / p99 / max per series, hitch counts and the raw samples. The view
-// is the last capture camera, else the player's.
+// (RHIGetGPUFrameCycles) -> a JSON with mean / median / p95 / p99 / max per series, hitch counts, the raw samples and the
+// scalability groups (sg.*) in effect at the end of the recording. The view is the last capture camera, else the player's.
 //
 // On timeout or any failure it logs an error and exits with the log line "RbCapture: FAILED". -ForceRes is required: without it
 // the engine clamps a windowed resolution to the desktop work area (1920x1080 on a 1080p monitor becomes a smaller size).
@@ -147,6 +149,9 @@ private:
 	double ViewStartTime = 0.0;
 	double LastProgressLog = 0.0;
 	bool bCameraApplied = false;
+	// The current view's camera once found: every later frame (incl. the whole perf recording) reuses it instead of iterating the
+	// world's cameras and building name strings per frame (review: no per-frame search / allocation inside the measured window).
+	TWeakObjectPtr<ACameraActor> ViewCamera;
 	FDelegateHandle ScreenshotHandle;
 	TSharedPtr<FRbCaptureExposureProbe, ESPMode::ThreadSafe> ExposureProbe;
 };

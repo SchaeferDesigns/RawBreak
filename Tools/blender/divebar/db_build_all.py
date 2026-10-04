@@ -32,6 +32,7 @@ GENERATORS = [
 	("divebar/db_jukebox.py", "M2-B"),        # H12 jukebox body
 	("divebar/db_dart.py", "M2-B"),           # M03 dart machine + board
 	("divebar/db_lathe_props.py", "M2-B"),    # C02 / H14 bottles, glasses (subset), C08 ashtray
+	("divebar/db_signs.py", "M2-B"),          # wall signs and paper (S1 / S5 / S19 / S20, M15 / M25; text from Tools/art/text_textures.py)
 	("divebar/db_decals.py", "M2-B"),         # first decal set (rings, burns, scuffs, stains) -> atlases
 ]
 

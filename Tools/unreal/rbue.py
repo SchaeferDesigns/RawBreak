@@ -33,6 +33,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -73,30 +74,38 @@ def _unmsys(value: str) -> str:
 def _run(cmd: list[str], timeout: float, echo_filter: re.Pattern | None = None, cwd: Path | None = None) -> tuple[int, list[str]]:
 	"""Runs cmd (tokens already in UE command-line form, see _q), streams matching lines, returns (exit code, lines).
 	Kills the whole process tree on timeout. On Windows the command line is passed verbatim to CreateProcess, so
-	-Key="value with spaces" reaches UE exactly as written (subprocess list quoting would escape the quotes)."""
+	-Key="value with spaces" reaches UE exactly as written (subprocess list quoting would escape the quotes).
+	The output is read by a thread and the timeout is the wait for the PROCESS, not a check per output line (review: a process
+	that hangs WITHOUT printing - a deadlocked editor, a PIE test waiting forever, a modal prompt of a cook - blocked the line loop
+	for good, so the timeout never fired and the Unreal process stayed alive on the shared machine; likewise a grandchild that
+	inherited the pipe kept the loop waiting after the process itself had exited)."""
 	line = " ".join(_q(c) for c in cmd)
 	print("[rbue] " + line, flush=True)
 	start = time.monotonic()
 	proc = subprocess.Popen(line if os.name == "nt" else cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(cwd or REPO),
 		text=True, encoding="utf-8", errors="replace", bufsize=1)
 	lines: list[str] = []
-	try:
+
+	def read_output() -> None:
 		assert proc.stdout is not None
 		for out_line in proc.stdout:
 			lines.append(out_line.rstrip("\n"))
 			if echo_filter is None or echo_filter.search(out_line):
 				print(out_line.rstrip("\n"), flush=True)
-			if time.monotonic() - start > timeout:
-				print(f"[rbue] TIMEOUT after {timeout:.0f} s - killing process tree", flush=True)
-				_kill_tree(proc.pid)
-				return 124, lines
-		proc.wait(timeout=max(1.0, timeout - (time.monotonic() - start)))
+
+	reader = threading.Thread(target=read_output, name="rbue-output", daemon=True)
+	reader.start()
+	try:
+		proc.wait(timeout=timeout)
 	except subprocess.TimeoutExpired:
 		print(f"[rbue] TIMEOUT after {timeout:.0f} s - killing process tree", flush=True)
 		_kill_tree(proc.pid)
-		return 124, lines
+		reader.join(timeout=30.0)
+		return 124, list(lines)
+	# The process has exited: drain what is left in the pipe (a grandchild that still holds it open is not waited for).
+	reader.join(timeout=15.0)
 	print(f"[rbue] exit {proc.returncode} after {time.monotonic() - start:.1f} s", flush=True)
-	return proc.returncode, lines
+	return proc.returncode, list(lines)
 
 
 # A material whose shader fails to compile renders with the engine's default material instead of failing the run, so a
@@ -111,6 +120,12 @@ ECHO = re.compile(r"(Error|error:|LogPython|LogRawBreak|LogRb|Automation|Test Co
 EV_LINE = re.compile(r"RbCapture: EV100 (\S+) (\S+)")
 
 
+def compiler_warnings(lines: list[str]) -> list[str]:
+	"""The compiler warnings of a UBT log (MSVC 'file(line): warning C4xxx: ...', unique): M2-A1 wants 0 from project code, so a
+	green build with warnings shows them in its summary (an incremental build only reports the files it recompiled)."""
+	return sorted(set(l.strip() for l in lines if re.search(r"\): warning [A-Z]+\d+:", l)))
+
+
 def cmd_build(a: argparse.Namespace) -> int:
 	cmd = [str(BUILD_BAT), a.target, "Win64", a.config, f"-Project={UPROJECT}", "-WaitMutex", "-NoHotReload"]
 	if a.clean:
@@ -120,7 +135,10 @@ def cmd_build(a: argparse.Namespace) -> int:
 	errors = [l for l in lines if re.search(r"\berror\b", l, re.IGNORECASE) and "0 error" not in l]
 	if code == 0 and not any("Result: Succeeded" in l for l in lines):
 		code = 1
-	print(f"[rbue] build {'OK' if code == 0 else 'FAILED'} ({len(errors)} error lines)")
+	warnings = compiler_warnings(lines)
+	for warning in warnings[:20]:
+		print(f"[rbue] compiler warning: {warning}")
+	print(f"[rbue] build {'OK' if code == 0 else 'FAILED'} ({len(errors)} error lines, {len(warnings)} compiler warning(s))")
 	return code
 
 
@@ -148,9 +166,16 @@ def cmd_py(a: argparse.Namespace) -> int:
 
 def _common(a: argparse.Namespace) -> list[str]:
 	"""COMMON without -NoSound when --sound is given (audio tests need a device or the mixer's null device, audio.md 8.8), plus
-	the raw extra UE arguments of --extra (e.g. --extra -RbUiScreen=Pause; M2, Docs/ue-architecture.md 18.9)."""
-	flags = [f for f in COMMON if not (getattr(a, "sound", False) and f == "-NoSound")]
-	return flags + list(getattr(a, "extra", None) or [])
+	the raw extra UE arguments of --extra (e.g. --extra -RbUiScreen=Pause; M2, Docs/ue-architecture.md 18.9). --sound mutes the
+	device's final output (-MuteAudio: the mixer still renders every block, the submix recordings of the audio tests are
+	unaffected) unless --audible is given too (review: a test run on the shared machine must not play breaks through the owner's
+	speakers)."""
+	sound = getattr(a, "sound", False)
+	flags = [f for f in COMMON if not (sound and f == "-NoSound")]
+	extra = list(getattr(a, "extra", None) or [])
+	if sound and not getattr(a, "audible", False) and not any(e.lower() == "-muteaudio" for e in extra):
+		flags.append("-MuteAudio")
+	return flags + extra
 
 
 def _split_list(value: str) -> list[str]:
@@ -219,6 +244,45 @@ def cmd_capture(a: argparse.Namespace) -> int:
 	return 0 if ok else (code or 1)
 
 
+TEST_RESULT = re.compile(r"Test Completed\. Result=\{(\w+)\}(?:.*?Path=\{([^}]*)\})?")
+TEST_FOUND = re.compile(r"Found (\d+) automation tests based on")
+TEST_EXIT = re.compile(r"\*\*\*\* TEST COMPLETE\. EXIT CODE: (-?\d+) \*\*\*\*")
+# Tests that need the audio device (M2-C, rbue.py test --sound): without it they fail with "no audio device".
+AUDIO_TESTS = "RawBreak.Functional.Audio."
+
+
+def test_run_problems(lines: list[str], sound: bool = False) -> tuple[int, int, list[str]]:
+	"""(passed, failed, problems) of an automation run's log lines. Besides failed tests, a run is only green when every test the
+	filter found completed and the automation shut down normally (review: an editor that crashed or hung after N green tests used
+	to count as "N passed, 0 failed" = exit 0, e.g. a crash inside a LevelSmoke PIE session at the integration round)."""
+	matches = [m for m in (TEST_RESULT.search(l) for l in lines) if m]
+	results = [m.group(1) for m in matches]
+	passed = sum(1 for r in results if r in ("Success", "Passed"))
+	failed_paths = [m.group(2) or "?" for m in matches if m.group(1) in ("Fail", "Failed")]
+	failed = len(failed_paths)
+	found = next((int(m.group(1)) for m in (TEST_FOUND.search(l) for l in lines) if m), None)
+	exit_code = next((int(m.group(1)) for m in (TEST_EXIT.search(l) for l in lines) if m), None)
+	problems = []
+	if failed:
+		problems.append(f"{failed} test(s) failed: {', '.join(failed_paths[:10])}{' ...' if failed > 10 else ''}")
+		if not sound and any(p.startswith(AUDIO_TESTS) for p in failed_paths):
+			problems.append(f"{AUDIO_TESTS}* need the audio device: run them (or the whole suite) with rbue.py test --sound (output muted)")
+	if found is None:
+		problems.append("no 'Found N automation tests' line: the automation run did not start")
+	elif found == 0:
+		problems.append("the filter matched no test")
+	elif len(results) != found:
+		problems.append(f"only {len(results)} of the {found} tests found completed (the editor crashed, hung or quit early)")
+	if exit_code is None:
+		problems.append("no 'TEST COMPLETE' line: the automation did not shut down normally (crash?)")
+	elif exit_code != 0 and not failed:  # a failed test alone already gives -1
+		problems.append(f"automation exit code {exit_code} without a failed test (an error outside the tests)")
+	other = len(results) - passed - failed
+	if other:
+		problems.append(f"{other} test(s) neither passed nor failed (skipped / not run)")
+	return passed, failed, problems
+
+
 def cmd_test(a: argparse.Namespace) -> int:
 	log = _log_path("test")
 	report = REPO / "Saved/RbLogs/AutomationReport"
@@ -226,18 +290,19 @@ def cmd_test(a: argparse.Namespace) -> int:
 		f'-ReportExportPath="{report}"', f'-abslog="{log}"'] + _common(a)
 	cmd += ["-RenderOffscreen"] if a.render else ["-NullRHI"]
 	code, lines = _run(cmd, a.timeout, ECHO)
-	failed = [l for l in lines if re.search(r"Test Completed\. Result=\{(Fail|Failed)\}", l)]
-	passed = [l for l in lines if re.search(r"Test Completed\. Result=\{(Success|Passed)\}", l)]
+	passed, failed, problems = test_run_problems(lines, a.sound)
 	# Warnings a test raised itself (AddWarning; captured log warnings end in "[log]") do not fail it but are requests, e.g.
 	# Contracts.Packaging "generated but not in MapsToCook yet" (18.12).
 	test_warnings = list(dict.fromkeys(l.split("Warning:", 1)[1].strip() for l in lines
 		if "LogAutomationController: Warning:" in l and not l.rstrip().endswith("[log]")))
 	for warning in test_warnings[:20]:
 		print(f"[rbue] test warning: {warning}")
-	print(f"[rbue] tests passed {len(passed)}, failed {len(failed)}, test warnings {len(test_warnings)}  log: {log}")
-	if not passed and not failed:
-		return code or 3
-	return 1 if failed else 0
+	for problem in problems:
+		print(f"[rbue] test run problem: {problem}")
+	print(f"[rbue] tests passed {passed}, failed {failed}, test warnings {len(test_warnings)}  log: {log}")
+	if not problems:
+		return 0
+	return 1 if failed else (code or 3)
 
 
 def cmd_game(a: argparse.Namespace) -> int:
@@ -327,17 +392,25 @@ def cmd_perf(a: argparse.Namespace) -> int:
 	if not out.exists():
 		print(f"[rbue] perf FAILED: no report {out}  log: {log}")
 		return code or 1
+	# Sampled again once the game has exited: another process that started rendering DURING the recording (an agent's capture)
+	# shows up here, not in the sample before (review).
+	busy_after = gpu_busy_percent()
+	if busy_after is not None and busy_after > PERF_BUSY_GPU_PERCENT:
+		print(f"[rbue] WARNING: the GPU is {busy_after:.0f} % busy after the recording (other processes): the GPU times may be too high")
 	report = json.loads(out.read_text(encoding="utf-8"))
-	report["host"] = {"gpu_busy_before_percent": busy, "gpu_busy_warning": busy is not None and busy > PERF_BUSY_GPU_PERCENT,
+	report["host"] = {"gpu_busy_before_percent": busy, "gpu_busy_after_percent": busy_after,
+		"gpu_busy_warning": any(value is not None and value > PERF_BUSY_GPU_PERCENT for value in (busy, busy_after)),
 		"exe": a.exe or "editor -game", "quality": a.quality, "date": _dt.datetime.now().isoformat(timespec="seconds")}
 	out.write_text(_perf_json(report), encoding="utf-8")
 	print(f"[rbue] perf {report['map']} {report['width']}x{report['height']} r.ScreenPercentage {report['screen_percentage']} "
-		f"({report['frames']} frames, exec {report['exec']}, {report['adapter']}; GPU busy before: "
-		f"{'n/a' if busy is None else f'{busy:.0f} %'})")
+		f"({report['frames']} frames, exec {report['exec']}, {report['adapter']}; GPU busy before / after: "
+		f"{'n/a' if busy is None else f'{busy:.0f} %'} / {'n/a' if busy_after is None else f'{busy_after:.0f} %'})")
 	for series in ("frame_ms", "game_ms", "render_ms", "rhi_ms", "gpu_ms"):
 		s = report[series]
 		print(f"[rbue]   {series:10s} mean {s['mean']:7.2f}  median {s['median']:7.2f}  p95 {s['p95']:7.2f}  p99 {s['p99']:7.2f}  max {s['max']:7.2f}")
 	print(f"[rbue]   frames over 16.7 ms: {report['frames_over_16_7ms']}, over 33.3 ms: {report['frames_over_33_3ms']}")
+	if report.get("scalability"):  # what was really rendered (rb.Quality sets the sg.* groups; --quality is only the request)
+		print("[rbue]   scalability in effect: " + ", ".join(f"{k.removeprefix('sg.').removesuffix('Quality')} {v}" for k, v in report["scalability"].items()))
 	verdict = perf_verdict(report)
 	for name, value, limit, ok in verdict:
 		print(f"[rbue]   {name:24s} {value:7.2f} <= {limit:5.2f}  {'ok' if ok else 'OVER'}")
@@ -366,18 +439,48 @@ def playable_maps() -> list[str]:
 	return re.findall(r'inline const TCHAR\* const \w+Map = TEXT\("(/Game/Generated/Maps/[^"]+)"\)', header)
 
 
-def cook_list_problems() -> list[str]:
-	"""Contracts.Packaging on the host: every generated playable map is in MapsToCook, every listed map exists."""
-	ini = (REPO / "Config/DefaultGame.ini").read_text(encoding="utf-8")
-	listed = re.findall(r'^\+MapsToCook=\(FilePath="([^"]+)"\)', ini, re.MULTILINE)
+def generated_maps() -> list[str]:
+	"""Every generated level on disk (Content/Generated/Maps/**/*.umap) incl. the venues' sublevels. DirectoriesToAlwaysCook
+	(/Game/Generated) cooks only .uasset files, never a .umap (UE 5.8 CookOnTheFlyServer), so each of them must be in MapsToCook
+	(mirror of RbContractTests::GeneratedMapPackages; review)."""
+	root = REPO / "Content"
+	return sorted("/Game/" + path.relative_to(root).with_suffix("").as_posix() for path in (root / "Generated/Maps").rglob("*.umap"))
+
+
+def _map_exists(game_path: str) -> bool:
+	return game_path.startswith("/Game/") and (REPO / "Content" / (game_path[len("/Game/"):] + ".umap")).exists()
+
+
+def title_map() -> str:
+	"""RbAssetPaths::TitleMap (M2-D's title / venue select)."""
+	header = (REPO / "Source/RawBreak/Public/Core/RbAssetPaths.h").read_text(encoding="utf-8")
+	match = re.search(r'inline const TCHAR\* const TitleMap = TEXT\("([^"]+)"\)', header)
+	return match.group(1) if match else ""
+
+
+def cook_list_problems(game_ini: str | None = None, engine_ini: str | None = None, exists=_map_exists, maps: list[str] | None = None,
+	title: str | None = None) -> list[str]:
+	"""Contracts.Packaging on the host: every generated map (the playable ones and their sublevels, see generated_maps) is in
+	MapsToCook, every listed map exists, and the build starts at an existing map - the title once it is generated (M2-A10: the
+	owner plays title -> dive bar). Arguments for the selftest."""
+	game_ini = game_ini if game_ini is not None else (REPO / "Config/DefaultGame.ini").read_text(encoding="utf-8")
+	engine_ini = engine_ini if engine_ini is not None else (REPO / "Config/DefaultEngine.ini").read_text(encoding="utf-8")
+	maps = maps if maps is not None else sorted(set(playable_maps()) | set(generated_maps()))
+	title = title if title is not None else title_map()
+	listed = re.findall(r'^\+MapsToCook=\(FilePath="?([^")]+)"?\)', game_ini, re.MULTILINE)
 	problems = []
-	for game_path in playable_maps():
-		exists = (REPO / "Content" / (game_path[len("/Game/"):] + ".umap")).exists()
-		if exists and game_path not in listed:
+	for game_path in maps:
+		if exists(game_path) and game_path not in listed:
 			problems.append(f"{game_path} is generated but not in DefaultGame.ini MapsToCook (architect: add it at the merge)")
 	for game_path in listed:
-		if not (REPO / "Content" / (game_path[len("/Game/"):] + ".umap")).exists():
+		if not exists(game_path):
 			problems.append(f"{game_path} is in MapsToCook but does not exist (the cook would fail)")
+	match = re.search(r"^GameDefaultMap=([^\r\n]+)$", engine_ini, re.MULTILINE)
+	default_map = match.group(1).strip().split(".")[0] if match else ""
+	if not default_map or not exists(default_map):
+		problems.append(f"DefaultEngine.ini GameDefaultMap '{default_map}' does not exist (the packaged build would start in no level)")
+	elif title and exists(title) and default_map != title:
+		problems.append(f"{title} is generated but GameDefaultMap is still {default_map} (architect: switch it at the merge of M2-D)")
 	return problems
 
 
@@ -390,12 +493,16 @@ def cmd_package(a: argparse.Namespace) -> int:
 		return 1
 	root = Path(os.environ.get("RB_BUILDS_DIR", str(_main_checkout().parent / "RawBreak_Builds")))
 	out_dir = Path(a.out_dir).resolve() if a.out_dir else root / a.label
-	# The game target is built first through rbue.py build (UBT with -WaitMutex): BuildCookRun's own -build step fails at once with
-	# "ConflictingInstance" while any other UBT runs on the shared machine. The editor binaries must be current (rbue.py build).
-	code = cmd_build(argparse.Namespace(target="RawBreak", config=a.config, clean=False, timeout=a.timeout))
-	if code:
-		print("[rbue] package FAILED: game target build")
-		return code
+	# Both targets are built first through rbue.py build (UBT with -WaitMutex): BuildCookRun's own -build step fails at once with
+	# "ConflictingInstance" while any other UBT runs on the shared machine. The editor target too (review): the cook runs
+	# UnrealEditor-Cmd with -nocompileeditor, and stale project editor modules (e.g. right after a merge) make the unattended cook
+	# fail on "modules are missing or built with a different engine version" instead of cooking with the current code.
+	for target in ("RawBreakEditor", "RawBreak"):
+		code = cmd_build(argparse.Namespace(target=target, config="Development" if target == "RawBreakEditor" else a.config, clean=False,
+			timeout=a.timeout))
+		if code:
+			print(f"[rbue] package FAILED: {target} build")
+			return code
 	log = _log_path("package")
 	cmd = [str(RUN_UAT), "BuildCookRun", f"-project={UPROJECT}", "-noP4", "-platform=Win64", f"-clientconfig={a.config}", "-cook",
 		"-stage", "-pak", "-archive", f"-archivedirectory={out_dir}", "-unattended", "-utf8output", "-nocompileeditor"]
@@ -572,7 +679,7 @@ OWNERS: dict[str, list[str]] = {
 		f"{_PIE}RbDiveBar*.cpp"]
 		+ _tests(["RbVenueTests"], []) + _package_common("m2a", "M2-A"),
 	"M2-B": ["Tools/blender/divebar/{db_bar,db_backbar,db_booth,db_stool,db_ledges,db_lamp,db_cue_rack,db_jukebox,db_dart,"
-		"db_lathe_props,db_props_common,db_decals}.py", "Art/DiveBar/Export/**", "Art/DiveBar/Textures/**", "Art/DiveBar/cc0_inputs*",
+		"db_lathe_props,db_props_common,db_decals,db_signs}.py", "Art/DiveBar/Export/**", "Art/DiveBar/Textures/**", "Art/DiveBar/cc0_inputs*",
 		"Tools/art/**", "Art/Fonts/**", f"{_ED}rb_make_divebar_materials.py", "Shaders/Private/Venue/*.ush",
 		"Content/Generated/Venues/DiveBar/{Props,Materials,Textures,Decals}/**"] + _package_common("m2b", "M2-B"),
 	"M2-C": ["Source/RawBreakAudioDsp/**", f"{_SRC}Audio/**", "Tools/audio/**", f"{_ED}rb_make_audio.py", "Content/Generated/Audio/**",
@@ -687,6 +794,12 @@ def touched_owners(path: str, before: str | None, after: str | None) -> set[str]
 	return touched or {owner}
 
 
+def generator_list(path: Path) -> list[str]:
+	"""The scripts of a GENERATORS list ('(script, owner),' rows) of rb_make_all.py / db_build_all.py, read as text: both run inside
+	Unreal / Blender and cannot be imported here."""
+	return re.findall(r'^\t\("([^"]+\.py)", "[^"]+"\),', path.read_text(encoding="utf-8"), re.MULTILINE)
+
+
 def _git(*args: str) -> str:
 	return subprocess.run(["git", *args], cwd=str(REPO), capture_output=True, text=True, encoding="utf-8", errors="replace", check=True).stdout
 
@@ -736,6 +849,12 @@ def cmd_owners(a: argparse.Namespace) -> int:
 
 # --- core tests (CMake) ---------------------------------------------------------------------------------------------------------
 
+def core_filters(filters: list[str], slow: bool) -> list[str]:
+	"""Arguments of the core test binary: the given filters (Tests/Core/TestMain.cpp: every include must match, '-' excludes) plus
+	'-_Slow_' unless --slow, also when filters are given (review: `core -- MOT_` must not start the opt-in slow MOT_ tests)."""
+	return list(filters) + ([] if slow or "-_Slow_" in filters else ["-_Slow_"])
+
+
 def cmd_core(a: argparse.Namespace) -> int:
 	build = (REPO / a.build_dir).resolve()
 	cmake = shutil.which("cmake") or "cmake"
@@ -754,8 +873,7 @@ def cmd_core(a: argparse.Namespace) -> int:
 		# The test binary directly (Tests/Core/TestMain.cpp): its filters, every failing test and check, and its own count. The
 		# default run excludes the opt-in `_Slow_` tests (PERF / CPU-time gates / statistical sets, Docs/architecture.md 18: nightly
 		# in Release on an idle machine); --slow runs them too.
-		filters = list(a.filters) or ([] if a.slow else ["-_Slow_"])
-		code, lines = _run([str(exe)] + filters, a.timeout, re.compile(r"(\[FAIL\]|FAILED|test\(s\) run)"))
+		code, lines = _run([str(exe)] + core_filters(a.filters, a.slow), a.timeout, re.compile(r"(\[FAIL\]|FAILED|test\(s\) run)"))
 	else:
 		code, lines = _run([ctest, "--test-dir", str(build), "-C", a.config, "-V"], a.timeout,
 			re.compile(r"(tests passed|tests failed|\[FAIL\]|FAILED|test\(s\) run)"))
@@ -796,6 +914,66 @@ def cmd_selftest(a: argparse.Namespace) -> int:
 
 	# Playable maps (the cook-list preflight of `package`) come from RbAssetPaths.h.
 	check("playable maps", sorted(playable_maps()), ["/Game/Generated/Maps/L_DiveBar", "/Game/Generated/Maps/L_M1_TestRoom", "/Game/Generated/Maps/L_Title"])
+	check("title map", title_map(), "/Game/Generated/Maps/L_Title")
+	room, bar, title = "/Game/Generated/Maps/L_M1_TestRoom", "/Game/Generated/Maps/L_DiveBar", "/Game/Generated/Maps/L_Title"
+	def cook(listed: list[str], generated: set[str], default_map: str) -> list[str]:
+		game = "\n".join(f'+MapsToCook=(FilePath="{m}")' for m in listed) + "\n"
+		engine = f"[/Script/EngineSettings.GameMapsSettings]\nGameDefaultMap={default_map}.{default_map.rsplit('/', 1)[-1]}\n"
+		return cook_list_problems(game, engine, lambda m: m in generated, [room, bar, title], title)
+	check("cook: M1 state", cook([room], {room}, room), [])
+	check("cook: after the M2 merges", len(cook([room, bar, title], {room, bar, title}, title)), 0)
+	check("cook: dive bar generated, not listed", len(cook([room], {room, bar}, room)), 1)
+	check("cook: listed, not generated", len(cook([room, bar], {room}, room)), 1)
+	check("cook: title generated and listed, default map not switched", len(cook([room, title], {room, title}, room)), 1)
+	check("cook: default map missing", len(cook([room], {room}, title)), 1)
+	sub = "/Game/Generated/Maps/L_DiveBar_Light_Open"
+	def cook_sub(listed: list[str], generated: set[str]) -> list[str]:
+		game = "\n".join(f'+MapsToCook=(FilePath="{m}")' for m in listed) + "\n"
+		engine = f"GameDefaultMap={room}.L_M1_TestRoom\n"
+		return cook_list_problems(game, engine, lambda m: m in generated, [room, bar, title, sub], title)
+	check("cook: sublevel generated, not listed", len(cook_sub([room, bar], {room, bar, sub})), 1)
+	check("cook: sublevel listed", cook_sub([room, bar, sub], {room, bar, sub}), [])
+	check("generated maps on disk include the test room", room in generated_maps(), True)
+
+	# Core test filters: the opt-in _Slow_ tests stay out unless --slow, with or without filters.
+	check("core filters default", core_filters([], False), ["-_Slow_"])
+	check("core filters with a filter", core_filters(["MOT_"], False), ["MOT_", "-_Slow_"])
+	check("core filters --slow", core_filters(["MOT_"], True), ["MOT_"])
+	check("core filters explicit exclude", core_filters(["-_Slow_"], False), ["-_Slow_"])
+
+	# Build summary: compiler warnings are counted (M2-A1: 0 from project code).
+	check("compiler warnings", compiler_warnings([
+		r"C:\x\Source\RawBreak\Private\A.cpp(12): warning C4456: declaration of 'X' hides previous local declaration",
+		r"C:\x\Source\RawBreak\Private\A.cpp(12): warning C4456: declaration of 'X' hides previous local declaration",
+		"Result: Succeeded", "0 warning(s)", "LogInit: Warning: not a compiler line"]),
+		[r"C:\x\Source\RawBreak\Private\A.cpp(12): warning C4456: declaration of 'X' hides previous local declaration"])
+
+	# The process runner: a normal exit, and a child that hangs WITHOUT printing is killed at the timeout (review: the old per-line
+	# check never fired for a silent hang).
+	check("run exit code and output", _run([sys.executable, "-c", "print('rb'); raise SystemExit(3)"], 60.0), (3, ["rb"]))
+	started = time.monotonic()
+	code, _ = _run([sys.executable, "-c", "import time; time.sleep(120)"], 2.0)
+	check("run kills a silent hang at the timeout", (code, time.monotonic() - started < 60.0), (124, True))
+
+	# Automation run verdict (cmd_test): every found test completed, the automation shut down normally, nothing failed.
+	def run_log(found: int | None, results: list[tuple[str, str]], exit_code: int | None) -> list[str]:
+		out = [] if found is None else [f"LogAutomationCommandLine: Display: Found {found} automation tests based on 'RawBreak.'"]
+		out += [f"LogAutomationController: Display: Test Completed. Result={{{r}}} Name={{{p.rsplit('.', 1)[-1]}}} Path={{{p}}}" for r, p in results]
+		return out + ([] if exit_code is None else [f"LogAutomationCommandLine: Display: **** TEST COMPLETE. EXIT CODE: {exit_code} ****"])
+	two_green = [("Success", "RawBreak.Unit.A.X"), ("Success", "RawBreak.Functional.LevelSmoke.L_M1_TestRoom")]
+	check("test run green", test_run_problems(run_log(2, two_green, 0)), (2, 0, []))
+	check("test run failed test", test_run_problems(run_log(2, [two_green[0], ("Fail", "RawBreak.Unit.B.Y")], -1))[:2], (1, 1))
+	check("test run crash after one test (no TEST COMPLETE)", len(test_run_problems(run_log(2, two_green[:1], None))[2]), 2)
+	check("test run did not start", len(test_run_problems(run_log(None, [], None))[2]), 2)
+	check("test run matched nothing", len(test_run_problems(run_log(0, [], 0))[2]), 1)
+	check("test run critical error", len(test_run_problems(run_log(2, two_green, -1))[2]), 1)
+	audio_fail = run_log(1, [("Fail", "RawBreak.Functional.Audio.AU0_Timing")], -1)
+	check("test run audio hint without --sound", any("--sound" in p for p in test_run_problems(audio_fail, False)[2]), True)
+	check("test run no audio hint with --sound", any("--sound" in p for p in test_run_problems(audio_fail, True)[2]), False)
+	check("--sound mutes by default", _common(argparse.Namespace(sound=True, audible=False, extra=[]))[-1], "-MuteAudio")
+	check("--sound --audible", "-MuteAudio" in _common(argparse.Namespace(sound=True, audible=True, extra=[])), False)
+	check("--sound with an explicit -muteaudio", _common(argparse.Namespace(sound=True, audible=False, extra=["-muteaudio"])).count("-MuteAudio"), 0)
+	check("no --sound keeps -NoSound", "-NoSound" in _common(argparse.Namespace(sound=False, extra=[])), True)
 
 	# Ledger validation: a clean CC0 row, then one broken field per case.
 	good = {"asset_id": "rosewood_veneer1", "used_by": "M2-L", "source": "polyhaven", "source_ref": "https://polyhaven.com/a/rosewood_veneer1",
@@ -835,7 +1013,7 @@ def cmd_selftest(a: argparse.Namespace) -> int:
 		"Source/RawBreak/Private/Venue/RbVenueInfo.cpp": "M2-A", "Tools/blender/divebar/db_arch.py": "M2-A",
 		"Art/DiveBar/Export/AxisTest/SM_DB_AxisTest.fbx": "M2-A", "Content/Generated/Maps/L_DiveBar_Lighting.umap": "M2-A",
 		"Content/Generated/Venues/DiveBar/Arch/SM_DB_Wall.uasset": "M2-A", "Source/RawBreakEditor/Private/Tests/RbDiveBarRackTest.cpp": "M2-A",
-		"Tools/blender/divebar/db_stool.py": "M2-B", "Art/DiveBar/Export/Stool_A/Stool_A.json": "M2-B", "Shaders/Private/Venue/RbVenueWear.ush": "M2-B",
+		"Tools/blender/divebar/db_stool.py": "M2-B", "Tools/blender/divebar/db_signs.py": "M2-B", "Art/DiveBar/Export/Stool_A/Stool_A.json": "M2-B", "Shaders/Private/Venue/RbVenueWear.ush": "M2-B",
 		"Content/Generated/Venues/DiveBar/Props/SM_DB_Stool_A.uasset": "M2-B", "Docs/licenses/ledger/M2-B.csv": "M2-B", "Tools/art/fetch_cc0.py": "M2-B",
 		"Source/RawBreakAudioDsp/Private/RbAudio/RbImpactSynth.cpp": "M2-C", "Source/RawBreak/Private/Tests/RbAudioDspTests.cpp": "M2-C",
 		"Source/RawBreak/Public/UI/Core/RbUiSubsystem.h": "M2-D", "Content/Generated/Maps/L_Title.umap": "M2-D", "Config/DefaultScalability.ini": "M2-D",
@@ -848,6 +1026,19 @@ def cmd_selftest(a: argparse.Namespace) -> int:
 	}
 	for path, want in expected_owner.items():
 		check(f"owner {path}", owner_of(path)[0], want)
+
+	# Every content generator a package owns is in the architect's regeneration lists, and every listed one has an owner (M2-A2:
+	# a clean Content/Generated is rebuilt by `rbbl.py all` + rb_make_all.py; a generator missing there silently drops its assets
+	# - review: M2-A's rb_make_divebar_fx.py was owned but not run, so the dust motes / light function vanished on regeneration).
+	owned = {pattern for package, pattern, _, _ in _OWNER_RULES if package != "M2-0"}
+	ue_listed = generator_list(REPO / f"{_ED}rb_make_all.py")
+	ue_owned = {p[len(_ED):] for p in owned if re.fullmatch(r"Tools/unreal/editor/rb_(make|bake|import)_\w+\.py", p)}
+	check("rb_make_all.py runs every owned UE generator", sorted(ue_owned - set(ue_listed)), [])
+	check("rb_make_all.py generators have owners", [s for s in ue_listed if not owner_of(_ED + s)[0]], [])
+	bl_listed = generator_list(REPO / "Tools/blender/divebar/db_build_all.py")
+	bl_owned = {p[len("Tools/blender/"):] for p in owned if re.fullmatch(r"Tools/blender/divebar/db_\w+\.py", p)} - {"divebar/db_props_common.py"}
+	check("db_build_all.py runs every owned Blender generator", sorted(bl_owned - set(bl_listed)), [])
+	check("db_build_all.py generators have owners", [s for s in bl_listed if not owner_of("Tools/blender/" + s)[0]], [])
 	try:
 		ties = [f"{p}: {owner_of(p)[1]}" for p in _git("ls-files").splitlines() if owner_of(p)[0] == "?"]
 		check("tracked files with two equally specific owners", ties, [])
@@ -917,7 +1108,8 @@ def main() -> int:
 	t = sub.add_parser("test")
 	t.add_argument("--filter", default="RawBreak.")
 	t.add_argument("--render", action="store_true", help="real RHI offscreen (functional / screenshot tests)")
-	t.add_argument("--sound", action="store_true", help="keep the audio device (drops -NoSound): RawBreak.Functional.Audio.* (M2-C)")
+	t.add_argument("--sound", action="store_true", help="keep the audio device (drops -NoSound, output muted): RawBreak.Functional.Audio.* (M2-C)")
+	t.add_argument("--audible", action="store_true", help="with --sound: do not mute the device's output (a human listens)")
 	t.add_argument("--extra", nargs="*", default=[], help="raw extra UE arguments, e.g. --extra=-RbSomething=1")
 	t.add_argument("--timeout", type=float, default=3600)
 	t.set_defaults(func=cmd_test)
@@ -963,7 +1155,7 @@ def main() -> int:
 	o.add_argument("--build-dir", default="build")
 	o.add_argument("--timeout", type=float, default=3600)
 	o.add_argument("--slow", action="store_true", help="include the opt-in _Slow_ tests (timing gates: only meaningful on an idle machine)")
-	o.add_argument("filters", nargs="*", help="test-name filters of Tests/Core/TestMain.cpp, e.g. MOT_ (after --); default -_Slow_")
+	o.add_argument("filters", nargs="*", help="test-name filters of Tests/Core/TestMain.cpp, e.g. MOT_ (after --); -_Slow_ is added unless --slow")
 	o.set_defaults(func=cmd_core)
 
 	w = sub.add_parser("owners", help="check that a package branch only touches the files it owns (18.2), or name a path's owner")
