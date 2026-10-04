@@ -5,7 +5,10 @@
 #include "Game/RbMatchDirector.h"
 #include "Player/RbStrokeComponent.h"
 #include "Replay/RbReplaySubsystem.h"
+#include "UI/Core/RbUiSubsystem.h"
+#include "UI/Live/SRbKeyHints.h"
 #include "UI/SRbInfoOverlay.h"
+#include "UI/Core/RbUiStyle.h"
 
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
@@ -18,8 +21,8 @@
 
 #include "rb/Rules/TableRules.h"
 
-// Owner: UE-7. Model, modes and fades of Docs/ue-architecture.md 6.6 (the header lists the rules); tests
-// RawBreak.Unit.Overlay.* (RbOverlayTests.cpp).
+// Owner: UE-7; since M2 M2-D (player-session binding, key hints). Model, modes and fades of Docs/ue-architecture.md 6.6 (the
+// header lists the rules); tests RawBreak.Unit.Overlay.* (RbOverlayTests.cpp).
 //
 // Text rules of BuildModel (balls by NUMBER, never by colour - plan 12.22; names only in hot-seat, practice is one human):
 //   mandatory  replay tag | lag turn | pending decision with every option (the highlighted one in brackets) | ball in hand
@@ -263,7 +266,7 @@ FRbOverlayModel URbOverlayComponent::BuildModel(const URbMatchDirector* Director
 	{
 		const FText Rate = FMath::IsNearlyEqual(Extras.ReplayRate, 1.0f) ? FText::GetEmpty()
 			: (Extras.ReplayRate <= 0.0f ? LOCTEXT("ReplayPaused", "  \u00B7  paused")
-				: FText::Format(LOCTEXT("ReplayRate", "  \u00B7  {0}x"), FText::AsNumber(Extras.ReplayRate, &FNumberFormattingOptions::DefaultNoGrouping())));
+				: FText::Format(LOCTEXT("ReplayRate", "  \u00B7  {0}x"), FText::AsNumber(Extras.ReplayRate, &FNumberFormattingOptions::DefaultNoGrouping(), RbUi::NumberCulture())));
 		Add(M.MandatoryLines, M.MandatoryTones, FText::Format(LOCTEXT("ReplayTag", "REPLAY  \u00B7  {0}{1}  \u00B7  R: next view"), ViewName(Extras.ReplayView), Rate),
 			ERbOverlayTone::Info);
 	}
@@ -711,8 +714,7 @@ void URbOverlayComponent::SetDirector(URbMatchDirector* InDirector)
 
 URbMatchDirector* URbOverlayComponent::FindDirector() const
 {
-	const ARbGameMode* GameMode = ARbGameMode::Get(this);
-	return GameMode ? GameMode->GetDirector() : nullptr;
+	return URbUiSubsystem::FindPlayerDirector(this); // the PLAYER's match only (UX-T25)
 }
 
 void URbOverlayComponent::EnsureDirectorBound()
@@ -804,14 +806,68 @@ void URbOverlayComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	{
 		CreateWidget();
 	}
-	RefreshCountdown -= RealDelta;
-	if (RefreshCountdown <= 0.0f || (!bDirectorOverride && FindDirector() != Director.Get()))
+	// The context (the player's match, the key hints) is read ten times a second, never per frame: finding the player's session
+	// walks the level's tables (URbTableSubsystem::GetPlayerTable: an actor iteration into a fresh, sorted array) and the hint
+	// model build + change detection allocate. The fades run every tick.
+	ContextCountdown -= RealDelta;
+	const bool bContextTick = ContextCountdown <= 0.0f;
+	if (bContextTick)
 	{
-		// Periodic refresh for what has no event (raw-input mode, replay rate); OnMatchChanged covers the match itself.
+		ContextCountdown = ContextInterval;
+	}
+	RefreshCountdown -= RealDelta;
+	if (RefreshCountdown <= 0.0f || (bContextTick && !bDirectorOverride && FindDirector() != Director.Get()))
+	{
+		// Periodic refresh for what has no event (raw-input mode, replay rate); OnMatchChanged covers the match itself; a
+		// different player table rebinds at the next context tick.
 		RefreshCountdown = 0.25f;
 		Refresh();
 	}
 	AdvanceOverlay(RealDelta);
+
+	// Key hints (M2-D): the hold / fade runs every tick on the current model, the model itself is rebuilt on the context ticks.
+	if (!bContextTick)
+	{
+		TickKeyHintFade(RealDelta, false);
+		return;
+	}
+	const APlayerController* PC = Cast<APlayerController>(GetOwner());
+	const UWorld* World = GetWorld();
+	const bool bPaused = World && World->IsPaused(); // a paused world (menu, pause command) shows no hints
+	AdvanceKeyHints(PC && PC->IsLocalController() && !bPaused ? FRbKeyHintsModel::Build(PC) : FRbKeyHintsModel(), RealDelta);
+}
+
+void URbOverlayComponent::AdvanceKeyHints(const FRbKeyHintsModel& Model_, float DeltaSeconds)
+{
+	FString Key = Model_.ToDebugString();
+	const bool bChanged = Key != HintKey;
+	if (bChanged)
+	{
+		HintKey = MoveTemp(Key);
+		HintModel = Model_;
+		HintHold = HintModel.IsEmpty() ? 0.0f : RbUi::KeyHintHold; // a new context shows its hints again
+		if (HintsWidget.IsValid() && !HintModel.IsEmpty())
+		{
+			HintsWidget->SetModel(HintModel); // an empty model keeps the last text while it fades out
+		}
+	}
+	TickKeyHintFade(DeltaSeconds, bChanged);
+}
+
+void URbOverlayComponent::TickKeyHintFade(float DeltaSeconds, bool bContextChanged)
+{
+	const float Dt = FMath::Max(0.0f, DeltaSeconds);
+	if (!bContextChanged && !URbUiSubsystem::IsDevHoldKeyHints())
+	{
+		HintHold = FMath::Max(0.0f, HintHold - Dt);
+	}
+	const float Target = HintHold > 0.0f ? 1.0f : 0.0f;
+	HintOpacity = HintOpacity < Target ? FMath::Min(Target, HintOpacity + Dt / RbUi::FadeIn) : FMath::Max(Target, HintOpacity - Dt / RbUi::FadeOut);
+	if (HintsWidget.IsValid())
+	{
+		HintsWidget->SetRenderOpacity(HintOpacity);
+		HintsWidget->SetVisibility(HintOpacity > 0.0f ? EVisibility::HitTestInvisible : EVisibility::Collapsed);
+	}
 }
 
 void URbOverlayComponent::CreateWidget()
@@ -831,6 +887,11 @@ void URbOverlayComponent::CreateWidget()
 	Widget->SetModel(Model);
 	Widget->SetFullOpacity(Opacity);
 	Viewport->AddViewportWidgetForPlayer(Player, Widget.ToSharedRef(), 10);
+	HintsWidget = SNew(SRbKeyHints);
+	HintsWidget->SetModel(HintModel);
+	HintsWidget->SetRenderOpacity(HintOpacity);
+	HintsWidget->SetVisibility(HintOpacity > 0.0f ? EVisibility::HitTestInvisible : EVisibility::Collapsed);
+	Viewport->AddViewportWidgetForPlayer(Player, HintsWidget.ToSharedRef(), 15); // prompts layer (ui-ux 2.3)
 	WidgetViewport = Viewport;
 	BeginDrawHandle = Viewport->OnBeginDraw().AddUObject(this, &URbOverlayComponent::OnViewportBeginDraw);
 }
@@ -852,12 +913,21 @@ void URbOverlayComponent::RemoveWidget()
 	if (Viewport && Player)
 	{
 		Viewport->RemoveViewportWidgetForPlayer(Player, Widget.ToSharedRef());
+		if (HintsWidget.IsValid())
+		{
+			Viewport->RemoveViewportWidgetForPlayer(Player, HintsWidget.ToSharedRef());
+		}
 	}
 	else if (Viewport)
 	{
 		Viewport->RemoveViewportWidgetContent(Widget.ToSharedRef());
+		if (HintsWidget.IsValid())
+		{
+			Viewport->RemoveViewportWidgetContent(HintsWidget.ToSharedRef());
+		}
 	}
 	Widget.Reset();
+	HintsWidget.Reset();
 	WidgetViewport.Reset();
 }
 
