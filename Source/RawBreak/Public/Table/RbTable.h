@@ -61,9 +61,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table")
 	bool bUseBakedMeshes = true;
 
-	// Material per ERbTablePart (index = part). Defaults: the generated materials of RbAssetPaths.
+	// Material override per ERbTablePart (index = part). An empty entry = the preset's default material
+	// (RbTableMeshBuilder::GetDefaultMaterialPath, M2-L; see GetResolvedPartMaterialPath).
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "RawBreak|Table")
 	TArray<TSoftObjectPtr<UMaterialInterface>> PartMaterials;
+
+	// The material a part is shown with: its PartMaterials entry, else the preset's default (M2-L).
+	FSoftObjectPath GetResolvedPartMaterialPath(ERbTablePart Part) const;
 
 	// --- M2 additions (Docs/ue-architecture.md 18.6 multi-table, venue-dive-bar hand-off H-2; architect) ---------------
 

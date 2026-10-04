@@ -89,6 +89,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Room")
 	double BedHeight = 76.5;
 
+	// Optional surface materials (M2-L look-dev rooms, e.g. a dark room around the bar table); empty = the generated M_RbRoomWall /
+	// M_RbRoomFloor (or the fallback albedos above).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Room")
+	TSoftObjectPtr<UMaterialInterface> WallMaterialOverride;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Room")
+	TSoftObjectPtr<UMaterialInterface> FloorMaterialOverride;
+
 	// --- table lamp (WPA, physical units) -----------------------------------------------------------------------------
 
 	// Fixture underside (louvre bottoms) above the cloth [cm]; WPA >= 101.6 cm for a lamp that can be moved aside.
@@ -154,6 +162,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Post")
 	float BloomIntensity = 0.15f;
+
+	// White balance [K] of the post-process baseline; <= 0 = the lamp's colour temperature + 200 K (the eye adapted to the illuminant,
+	// M1). A warm bar lamp keeps its warmth with a higher value (M2-L look-dev room).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Post")
+	double WhiteBalanceTempK = 0.0;
 
 	// --- API ----------------------------------------------------------------------------------------------------------
 

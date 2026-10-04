@@ -1,0 +1,586 @@
+// RAW BREAK - M2-L table look-dev layers (Docs/ue-architecture.md 18.7; ue5-realism-plan 6.3 / 6.4; venue-dive-bar 3.1, 3.2, 6.4).
+// Included by the Custom nodes of Tools/unreal/editor/rb_make_materials.py. Owner: M2-L.
+//
+// Coordinates: the table parts are baked in the TABLE-LOCAL UE frame (FRbCoords: X = core x toward the foot, Y = -core y, Z up from
+// the cloth, centimetres) and attached to the table's ClothOrigin without rotation or scale, so the material's LocalPosition IS
+// that frame: wear that belongs to places on the table (break spot, pockets, rack, lanes, cabinet corners) is placed from it and
+// needs only the table's half length / width as parameters (every preset, any placement / yaw in the level). UVs are metres
+// (1 UV unit = 1 m; rail caps planar with U along the rail).
+//
+// Every layer is band-limited by the pixel footprint (RbOctaveWeight / coverage), so a grazing chin-on-cue view does not shimmer;
+// detail finer than a pixel turns into its average (tone / roughness), not into noise. Age (0..1) scales every wear layer: the
+// table materials carry their own Age scalar (the dive bar's 0.80, the tournament table ~0.15; they never read MPC_DB_Venue).
+
+#pragma once
+
+#include "/RawBreak/Private/RbCommon.ush"
+
+// ---- small helpers ----------------------------------------------------------------------------------------------------
+
+float2 RbHash22(int2 C, uint Salt)
+{
+	const uint H = RbPcgHash(asuint(C.x) + RbPcgHash(asuint(C.y) + Salt * 0x9E3779B9u));
+	return float2(float(H & 0xFFFFu), float(H >> 16u)) * (1.0 / 65536.0);
+}
+
+float RbHash1(float Seed, float Index)
+{
+	return RbHash2(int2(int(Seed * 131.0) + 7, int(Index) * 17 + 3));
+}
+
+// Distance from P to the segment A-B.
+float RbSegmentDistance(float2 P, float2 A, float2 B)
+{
+	const float2 Ab = B - A;
+	const float T = saturate(dot(P - A, Ab) / max(dot(Ab, Ab), 1e-8));
+	return length(P - (A + Ab * T));
+}
+
+// Coverage of a line of full width Width at distance D for a pixel footprint Fp (a thin line fades to its area share).
+float RbLineCoverage(float D, float Width, float Fp)
+{
+	const float W = max(Fp, 1e-5);
+	const float Soft = saturate((0.5 * Width + 0.5 * W - D) / W);
+	return Soft * saturate(Width / W);
+}
+
+float Rb2(float X)
+{
+	return X * X;
+}
+
+float RbGauss(float2 D, float2 Sigma)
+{
+	const float2 Q = D / Sigma;
+	return exp(-dot(Q, Q));
+}
+
+// ---- cloth (worsted 9-ft, napped bar cloth 7-ft) -----------------------------------------------------------------------
+
+// Pocket reference points of a table in the core frame [m] (corner points and side-pocket nose midpoints).
+float2 RbPocketPoint(int K, float Hl, float Hw)
+{
+	const float2 P[6] = {float2(-Hl, -Hw), float2(0.0, -Hw), float2(Hl, -Hw), float2(Hl, Hw), float2(0.0, Hw), float2(-Hl, Hw)};
+	return P[K];
+}
+
+// Wear layers of the bed cloth. LocalCm: LocalPosition (table-local UE cm); CamLocal: unit vector from the surface toward the camera
+// in the same frame; HalfLength / HalfWidth: the table's playing half length / width [m]; Napped 0 = worsted (no nap), 1 = napped
+// bar cloth (nap brushed toward the foot); NapSheen: brightness change with / against the nap; Seed: per-table variation.
+// In / out: the base cloth (albedo, roughness, tangent-space normal, fuzz amount and colour) of RbCloth* in RbSurfaces.ush.
+void RbClothWear(float3 LocalCm, float3 CamLocal, float HalfLength, float HalfWidth, float CushionWidth, float FaceBase, float Age, float Napped,
+	float NapSheen, float Seed, inout float3 Albedo, inout float Roughness, inout float3 NormalTS, inout float Fuzz, inout float3 FuzzColor)
+{
+	const float2 Q = float2(LocalCm.x, -LocalCm.y) * 0.01;   // core frame [m]
+	const float Z = LocalCm.z * 0.01;
+	const float Fp = RbFootprint(Q, 0.004);
+	const float Hl = HalfLength;
+	const float Hw = HalfWidth;
+	const float A = saturate(Age);
+	// Worn nap: the flattened fibres show the lighter, greyer backing (M2-L r5: the r4 lanes were invisible from 1.65 m).
+	const float3 Faded = lerp(Albedo, RbLuminance(Albedo).xxx * float3(0.92, 1.06, 0.95), 0.45) * 1.30;
+
+	// Creases (the cloth folds into the joints): where the bed meets the cushion faces, along the cushions' bottom (their faces'
+	// last millimetres) and where the cushion tops tuck under the rail at the cushion back. An occlusion the shadows are too coarse
+	// for; the pocket mouths have no cushion (no crease).
+	{
+		const float2 Aq = abs(Q);
+		float PocketGap = 1.0;
+		for (int K = 0; K < 6; ++K)
+		{
+			const float D = length(Q - RbPocketPoint(K, Hl, Hw));
+			PocketGap = min(PocketGap, smoothstep(K == 1 || K == 4 ? 0.065 : 0.075, K == 1 || K == 4 ? 0.09 : 0.11, D));
+		}
+		const float ToBase = min(Hl + FaceBase - Aq.x, Hw + FaceBase - Aq.y);     // on the bed, inside the cushion bases
+		const float OnBed = 1.0 - smoothstep(0.0005, 0.0015, Z);
+		const float BedCrease = OnBed * (ToBase > 0.0 ? exp(-ToBase / 0.0035) : 0.0);
+		const float Behind = max(Aq.x - Hl, Aq.y - Hw);                             // > 0 on the cushions
+		const float FaceFoot = (1.0 - OnBed) * (Behind > 0.0 ? exp(-Z / 0.004) : 0.0);
+		const float ToBack = min(Hl + CushionWidth - Aq.x, Hw + CushionWidth - Aq.y);
+		const float BackCrease = (1.0 - OnBed) * (Behind > 0.0 && ToBack > 0.0 ? exp(-ToBack / 0.0018) : 0.0);
+		const float Crease = saturate(PocketGap * (0.55 * BedCrease + 0.45 * FaceFoot) + 0.6 * BackCrease);
+		Albedo *= 1.0 - Crease;
+		Fuzz *= 1.0 - 0.7 * Crease;
+	}
+
+	// Break area (cue ball behind the head string) and the rack (apex on the foot spot).
+	const float2 HeadSpot = float2(-0.5 * Hl, 0.0);
+	const float2 FootSpot = float2(0.5 * Hl, 0.0);
+	const float BreakZone = RbGauss(Q - HeadSpot, float2(0.09, 0.24));
+	const float RackZone = RbGauss(Q - (FootSpot + float2(0.10, 0.0)), float2(0.16, 0.13));
+
+	// Worn lanes: the long string from the head string to the rack (break shots), the head-spot disc, the pocket approaches.
+	const float LongLane = (1.0 - smoothstep(0.05, 0.13, abs(Q.y))) * (1.0 - smoothstep(0.55 * Hl, 0.75 * Hl, abs(Q.x + 0.05 * Hl)));
+	float PocketNear = 0.0;
+	float PocketMouth = 0.0;
+	for (int K = 0; K < 6; ++K)
+	{
+		const float D = length(Q - RbPocketPoint(K, Hl, Hw));
+		PocketNear = max(PocketNear, exp(-(D * D) / (0.16 * 0.16)));
+		PocketMouth = max(PocketMouth, exp(-(D * D) / (0.075 * 0.075)));
+	}
+	const float Lane = A * saturate(0.75 * LongLane + 0.9 * BreakZone + 0.5 * PocketNear) * lerp(0.35, 1.0, Napped);
+
+	// Large and medium noise that breaks every mask up (no clean gradients on a used cloth).
+	const float N1 = RbFbm(Q * 7.0 + Seed * 3.1, 4, Fp * 7.0);           // ~14 cm
+	const float N2 = RbFbm(Q * 45.0 + Seed * 1.7, 3, Fp * 45.0);         // ~2 cm
+	const float Break = saturate(0.5 + 0.9 * N1 + 0.5 * N2);
+
+	// Worn nap: flattened fibres read lighter / less saturated (the backing shows), less fuzzy, a bit smoother; patchy along the
+	// ball paths (streaks along x at the fibre scale), not a smooth cloud.
+	const float N3 = RbFbm(float2(Q.x * 40.0, Q.y * 220.0) + Seed * 0.7, 3, Fp * 220.0);
+	const float Wear = Lane * Break * saturate(0.55 + 1.1 * N3);
+	Albedo = lerp(Albedo, Faded, 0.70 * Wear);
+	Fuzz *= 1.0 - 0.50 * Wear;
+	Roughness = saturate(Roughness - 0.05 * Wear);
+
+	// Cushion tracks: balls running along the cushions flatten a band of nap 1-4 cm from the nose line on every rail (not in the
+	// pocket mouths).
+	{
+		const float2 Aq = abs(Q);
+		const float D = min(Hl - Aq.x, Hw - Aq.y);                 // distance from the nearest nose line, > 0 on the bed
+		float Mouth = 1.0;
+		for (int K = 0; K < 6; ++K)
+		{
+			Mouth = min(Mouth, smoothstep(0.08, 0.16, length(Q - RbPocketPoint(K, Hl, Hw))));
+		}
+		const float Band = exp(-Rb2(D - 0.024) / Rb2(0.013)) * (D > 0.0 ? 1.0 : 0.0);
+		const float Track = A * Band * Mouth * saturate(0.35 + 1.0 * N2 + 0.6 * N1) * lerp(0.5, 1.0, Napped);
+		Albedo = lerp(Albedo, Faded, 0.45 * Track);
+		Fuzz *= 1.0 - 0.35 * Track;
+	}
+
+	// Break box: the cue ball is struck from the same few spots behind the head string, break after break (centre and the two
+	// "second diamond" spots of the 9-ball break): a burned, whitish patch of crushed fibres.
+	{
+		const float BreakBurn = A * saturate(RbGauss(Q - (HeadSpot + float2(-0.02, 0.0)), float2(0.05, 0.045))
+			+ 0.7 * RbGauss(Q - (HeadSpot + float2(-0.03, 0.62 * Hw)), float2(0.04, 0.035))
+			+ 0.7 * RbGauss(Q - (HeadSpot + float2(-0.03, -0.62 * Hw)), float2(0.04, 0.035))) * saturate(0.35 + 1.4 * N2 + 0.5 * N1);
+		const float3 Crushed = RbLuminance(Albedo).xxx * 1.9 + float3(0.03, 0.035, 0.03);
+		Albedo = lerp(Albedo, lerp(Faded, Crushed, 0.4), 0.55 * BreakBurn);
+		Fuzz *= 1.0 - 0.5 * BreakBurn;
+		Roughness = saturate(Roughness - 0.06 * BreakBurn);
+	}
+
+	// Pilling (napped): 1 mm fibre balls along the lanes and around the pockets; below a pixel they average into a lighter,
+	// rougher tone.
+	{
+		const float Cell = 0.0016;
+		const float2 G = Q / Cell;
+		const int2 Ci = int2(floor(G));
+		const float2 H = RbHash22(Ci, 11u);
+		const float2 C = (float2(Ci) + 0.25 + 0.5 * H) * Cell;
+		const float Density = Napped * A * saturate(0.8 * LongLane + 1.2 * PocketMouth + 0.6 * BreakZone) * Break;
+		const float Present = H.x < Density ? 1.0 : 0.0;
+		const float R = Cell * (0.25 + 0.15 * H.y);
+		const float2 D = Q - C;
+		const float Pill = Present * saturate(1.0 - dot(D, D) / (R * R));
+		const float Resolved = RbOctaveWeight(1.0 / Cell, Fp);
+		const float MeanShare = Density * 0.2;
+		const float Shape = lerp(MeanShare, Pill, Resolved);
+		Albedo = lerp(Albedo, Faded * 1.1, 0.5 * Shape);
+		const float2 Slope = Present * Resolved * (D / (R * R)) * 0.35 * R * step(dot(D, D), R * R);
+		NormalTS = normalize(float3(NormalTS.xy + Slope * float2(1.0, -1.0), NormalTS.z));
+		Roughness = saturate(Roughness + 0.04 * MeanShare);
+	}
+
+	// Ball burns: small whitish skid marks (crushed fibres) around the break spot and where the cue ball meets the rack.
+	{
+		const float2 CellSize = float2(0.020, 0.014);
+		const float2 G = Q / CellSize;
+		const int2 Ci = int2(floor(G));
+		const float2 H = RbHash22(Ci, 23u + uint(Seed));
+		const float2 H2 = RbHash22(Ci, 57u);
+		const float Density = A * saturate(1.1 * BreakZone + 0.6 * RackZone) * 0.55;
+		const float Present = H.x < Density ? 1.0 : 0.0;
+		const float2 C = (float2(Ci) + 0.3 + 0.4 * H2) * CellSize;
+		const float Len = 0.0035 + 0.0045 * H.y;
+		const float Wid = 0.0010 + 0.0008 * H2.y;
+		const float2 D = Q - C;
+		const float E = length(float2(D.x / Len, D.y / Wid));
+		const float Spot = Present * (1.0 - smoothstep(0.55, 1.0, E));
+		const float Resolved = RbOctaveWeight(1.0 / (2.0 * Wid), Fp);
+		const float Burn = lerp(Density * 0.08, Spot, Resolved);
+		const float3 White = RbLuminance(Albedo).xxx * 2.4 + float3(0.05, 0.06, 0.05);
+		Albedo = lerp(Albedo, White, 0.6 * Burn);
+		Fuzz *= 1.0 - 0.6 * Burn;
+		Roughness = saturate(Roughness - 0.08 * Burn);
+	}
+
+	// Rack impression: the triangle's frame presses a faint outline around the rack (apex 3.5 cm before the foot spot).
+	{
+		const float2 Apex = FootSpot - float2(0.035, 0.0);
+		const float2 B0 = Apex + float2(0.262, -0.151);
+		const float2 B1 = Apex + float2(0.262, 0.151);
+		const float D = min(min(RbSegmentDistance(Q, Apex, B0), RbSegmentDistance(Q, Apex, B1)), RbSegmentDistance(Q, B0, B1));
+		const float Line = A * RbLineCoverage(D, 0.005, Fp) * saturate(0.6 + 0.8 * N2);
+		Albedo = lerp(Albedo, Faded, 0.8 * Line);
+		Fuzz *= 1.0 - 0.6 * Line;
+	}
+
+	// Faint ball tracks: long, slightly curved lanes of flattened fibres crossing the bed (every table has them).
+	{
+		float Track = 0.0;
+		for (int I = 0; I < 10; ++I)
+		{
+			const float2 P0 = float2((RbHash1(Seed, I) * 2.0 - 1.0) * Hl, (RbHash1(Seed, I + 20) * 2.0 - 1.0) * Hw);
+			const float2 P1 = float2((RbHash1(Seed, I + 40) * 2.0 - 1.0) * Hl, (RbHash1(Seed, I + 60) * 2.0 - 1.0) * Hw);
+			const float D = RbSegmentDistance(Q + 0.004 * N1, P0, P1);
+			Track = max(Track, RbLineCoverage(D, 0.009, Fp) * (0.4 + 0.6 * RbHash1(Seed, I + 80)));
+		}
+		Track *= saturate(0.15 + A) * saturate(0.5 + N2);
+		Fuzz *= 1.0 - 0.18 * Track;
+		Albedo = lerp(Albedo, Faded, 0.12 * Track);
+	}
+
+	// Frayed pocket points: the cloth at the six pocket mouths is scuffed light and fuzzy.
+	{
+		const float Fray = A * PocketMouth * saturate(0.4 + 1.2 * N2);
+		Albedo = lerp(Albedo, Faded * 1.15, 0.45 * Fray);
+		Fuzz = lerp(Fuzz, Fuzz * 1.6 + 0.1, Fray);
+		Roughness = saturate(Roughness + 0.05 * Fray);
+	}
+
+	// Chalk: blue dust around the pockets and the break area, fainter everywhere, speckled; smudges near the corner pockets.
+	{
+		const float3 ChalkBlue = float3(0.26, 0.42, 0.70);
+		// r7: the corner dust must read from 1.65 m (R10: the bar cloth is visibly blue around the pockets).
+		const float Dust = A * saturate(0.9 * PocketNear + 0.6 * PocketMouth + 0.5 * BreakZone + 0.10) * saturate(0.35 + 0.9 * N1);
+		const float Speck = lerp(0.5, saturate(0.5 + 2.5 * RbGradientNoise(Q * 900.0 + Seed).x), RbOctaveWeight(900.0, Fp));
+		Albedo = lerp(Albedo, ChalkBlue, 0.34 * Dust * Speck);
+		float Smudge = 0.0;
+		for (int K = 0; K < 6; K += 1)
+		{
+			const float2 P = RbPocketPoint(K, Hl, Hw);
+			const float2 Off = float2(RbHash1(Seed, K + 100) - 0.5, RbHash1(Seed, K + 110) - 0.5) * 0.10;
+			const float2 C = P * (1.0 - 0.10 / max(length(P), 0.1)) + Off;
+			const float L = length((Q - C) * float2(1.0, 1.8)) / 0.026;
+			Smudge = max(Smudge, exp(-L * L) * (K == 1 || K == 4 ? 0.4 : 1.0));
+		}
+		Albedo = lerp(Albedo, ChalkBlue * 0.8, 0.55 * A * Smudge * saturate(0.3 + N2));
+		FuzzColor = lerp(FuzzColor, ChalkBlue, 0.15 * Dust);
+		// Miscue marks: short blue chalk smears from the cue tip, scattered over the head half, a few near the rack.
+		const float2 CellSize = float2(0.06, 0.05);
+		const int2 Ci = int2(floor(Q / CellSize));
+		const float2 H = RbHash22(Ci, 401u + uint(Seed));
+		const float2 H2 = RbHash22(Ci, 409u);
+		const float Where = saturate(0.25 + 0.9 * (1.0 - smoothstep(-0.2 * Hl, 0.3 * Hl, Q.x)) + 0.6 * RackZone);
+		const float Present = H.x < 0.10 * A * Where ? 1.0 : 0.0;
+		const float2 C = (float2(Ci) + 0.2 + 0.6 * H2) * CellSize;
+		const float Ang = H.y * RB_TWO_PI;
+		const float2 D0 = Q - C;
+		const float2 Dl = float2(cos(Ang) * D0.x + sin(Ang) * D0.y, -sin(Ang) * D0.x + cos(Ang) * D0.y);
+		const float E = length(Dl / float2(0.0045 + 0.004 * H2.y, 0.0012 + 0.0008 * H2.x));
+		const float Mark = Present * (1.0 - smoothstep(0.5, 1.0, E)) * saturate(0.5 + 2.0 * RbGradientNoise(Q * 700.0 + H2 * 40.0).x);
+		const float Resolved = RbOctaveWeight(1.0 / 0.003, Fp);
+		Albedo = lerp(Albedo, ChalkBlue * 0.9, 0.7 * lerp(0.1 * A * Where * 0.1, Mark, Resolved));
+	}
+
+	// Spot sticker on the foot spot (22 mm vinyl disc; on bar tables it is yellowed, scuffed by the rack and dirty at its edge).
+	{
+		const float R = 0.011;
+		const float Dd = length(Q - FootSpot);
+		const float Disc = RbAaStep(R - Dd, Fp, 1e-4);
+		const float Scuff = saturate(0.4 + 1.5 * RbFbm((Q - FootSpot) * 900.0 + Seed, 3, Fp * 900.0)) * A;
+		const float3 Vinyl = lerp(float3(0.62, 0.62, 0.60), float3(0.50, 0.45, 0.34), A) * (1.0 - 0.35 * Scuff);
+		const float EdgeDirt = RbLineCoverage(abs(Dd - R), 0.0012, Fp) * (0.3 + 0.6 * A);
+		Albedo = lerp(Albedo, Vinyl, Disc);
+		Albedo *= 1.0 - 0.5 * EdgeDirt;
+		Fuzz *= 1.0 - Disc;
+		Roughness = lerp(Roughness, 0.45 + 0.3 * Scuff, Disc);
+		NormalTS = normalize(lerp(NormalTS, float3(0.0, 0.0, 1.0), Disc));
+	}
+
+	// Stains (dive-bar age): spilled drinks dried into faint, uneven blotches with a slightly darker tide ring; near the rails
+	// (drinks stand on the rails), never a clean disc.
+	if (A > 0.4)
+	{
+		float Stain = 0.0;
+		float Ring = 0.0;
+		for (int I = 0; I < 3; ++I)
+		{
+			const float Side = RbHash1(Seed, I + 230) < 0.5 ? -1.0 : 1.0;
+			const float2 C = float2((RbHash1(Seed, I + 200) * 1.5 - 0.75) * Hl, Side * (0.55 + 0.35 * RbHash1(Seed, I + 210)) * Hw);
+			const float R = 0.02 + 0.035 * RbHash1(Seed, I + 220);
+			const float Wobble = 1.0 + 0.45 * RbFbm((Q - C) * 22.0 + I * 5.0, 3, Fp * 22.0);
+			const float E = length((Q - C) * float2(1.0, 1.25)) / (R * Wobble);
+			const float Inner = (1.0 - smoothstep(0.6, 1.0, E)) * saturate(0.55 + 0.9 * RbFbm((Q - C) * 60.0, 2, Fp * 60.0));
+			Stain = max(Stain, Inner);
+			Ring = max(Ring, RbLineCoverage(abs(E - 0.95) * R, 0.0018, Fp) * saturate(0.4 + RbFbm((Q - C) * 40.0 + 3.0, 2, Fp * 40.0)));
+		}
+		const float S = saturate((A - 0.4) / 0.4);
+		Albedo *= 1.0 - S * (0.16 * Stain + 0.20 * Ring);
+		Roughness = saturate(Roughness + S * 0.03 * Stain);
+		Fuzz *= 1.0 - S * 0.25 * Stain;
+	}
+
+	// Lint and loose fibres: very sparse, short fibres lying on the cloth, only slightly lighter than the cloth (a brushed table
+	// keeps few; they read only up close, never as scratches). Sub-pixel beyond ~1 m: no visible lift of the tone.
+	{
+		const float Cell = 0.02;
+		const int2 Ci = int2(floor(Q / Cell));
+		const float2 H = RbHash22(Ci, 301u + uint(Seed));
+		const float2 H2 = RbHash22(Ci, 307u);
+		const float Present = H.x < 0.004 + 0.022 * A ? 1.0 : 0.0;
+		const float2 P0 = (float2(Ci) + 0.2 + 0.6 * H2) * Cell;
+		const float Ang = H.y * RB_TWO_PI;
+		const float Bend = (H2.y - 0.5) * 0.002;
+		const float2 Dir = float2(cos(Ang), sin(Ang));
+		const float2 P1 = P0 + Dir * (0.0015 + 0.003 * H2.x) + float2(-Dir.y, Dir.x) * Bend;
+		const float Lint = Present * RbLineCoverage(RbSegmentDistance(Q, P0, P1), 0.00012, Fp);
+		const float3 LintColor = lerp(Albedo * 1.6 + 0.02, float3(0.30, 0.30, 0.31), 0.35);
+		Albedo = lerp(Albedo, LintColor, 0.35 * Lint);
+		// Brushing streaks in the fuzz (sheen stripes along the table at grazing angles).
+		Fuzz *= 1.0 + 0.22 * RbFbm(float2(Q.x * 3.0, Q.y * 120.0) + Seed, 3, Fp * 120.0);
+	}
+
+	// Subtle unevenness of the stretched cloth: faint low-frequency tone (brushing marks, humidity).
+	Albedo *= 1.0 + (0.025 + 0.05 * A) * N1;
+
+	// Napped (woollen) bar cloth reads as felt, not as a weave: its nap lies in small irregular tufts, so tone and sheen are mottled
+	// at 0.5-2 cm (M2-L r2: the bar cloth looked like painted plastic up close).
+	if (Napped > 0.0)
+	{
+		const float M1 = RbFbm(Q * 70.0 + Seed * 2.3, 3, Fp * 70.0);
+		const float M2 = RbFbm(Q * float2(180.0, 240.0) - Seed, 2, Fp * 240.0);
+		Albedo *= 1.0 + Napped * (0.06 * M1 + 0.035 * M2);
+		Fuzz *= 1.0 + Napped * (0.30 * M1 + 0.15 * M2);
+	}
+
+	// Nap (napped bar cloth): seen with the nap (fibres leaning away, toward the foot) the cloth is lighter and sheenier, against
+	// it darker and richer.
+	{
+		const float2 CamPlan = CamLocal.xy / max(length(CamLocal.xy), 1e-4);
+		const float With = -CamPlan.x; // camera at the head end looking toward the foot -> +1
+		const float Grazing = 1.0 - saturate(abs(CamLocal.z));
+		Fuzz *= 1.0 + Napped * NapSheen * With * (0.4 + 0.6 * Grazing);
+		Albedo *= 1.0 + Napped * NapSheen * 0.15 * With;
+	}
+	Fuzz = saturate(Fuzz);
+}
+
+// ---- laminate (bar table rail caps: black; coin-op cabinet: printed walnut) ---------------------------------------------
+
+// Wear of a laminate surface. UV [m] (rail caps: U along the rail, V across); LocalCm: table-local position [cm]; Burns / Rings /
+// Scratches: densities 0..1; CornerWear 0..1 with the cabinet's plan outline (HalfOuterCm, CornerRadiusCm) and BedHeightCm (floor
+// = -BedHeightCm): worn-through corners reveal the brown kraft core, kick grime and shoe scuffs near the floor.
+void RbLaminateWear(float2 UV, float3 LocalCm, float Age, float Burns, float Rings, float Scratches, float CornerWear, float2 HalfOuterCm,
+	float CornerRadiusCm, float BedHeightCm, float Seed, inout float3 Albedo, inout float Roughness, inout float3 NormalTS)
+{
+	const float A = saturate(Age);
+	const float Fp = RbFootprint(UV, 0.003);
+	const float3 Base = Albedo;
+	const float N1 = RbFbm(UV * 6.0 + Seed, 4, Fp * 6.0);
+	const float N2 = RbFbm(UV * 60.0 - Seed, 3, Fp * 60.0);
+
+	// Handling: greasy smudges and dull patches (roughness break-up), a faint haze of micro scratches.
+	Roughness = saturate(Roughness + A * (0.06 * N1 + 0.03 * N2 + 0.03));
+
+	// Scratches: short straight scratches mostly along the rail, lighter and rougher (they catch the light).
+	{
+		float S = 0.0;
+		const float Cell = 0.05;
+		const int2 Ci = int2(floor(UV / Cell));
+		for (int J = -1; J <= 1; ++J)
+		{
+			for (int I = -1; I <= 1; ++I)
+			{
+				const int2 C = Ci + int2(I, J);
+				const float2 H = RbHash22(C, 91u + uint(Seed));
+				const float2 H2 = RbHash22(C, 13u);
+				if (H.x > Scratches * A)
+				{
+					continue;
+				}
+				const float2 P0 = (float2(C) + H2) * Cell;
+				const float Angle = (H.y - 0.5) * (H2.x < 0.7 ? 0.6 : 3.1);
+				const float Len = 0.02 + 0.06 * H2.y;
+				const float2 P1 = P0 + float2(cos(Angle), sin(Angle)) * Len;
+				S = max(S, RbLineCoverage(RbSegmentDistance(UV, P0, P1), 0.00025, Fp) * (0.3 + 0.7 * H.y));
+			}
+		}
+		Albedo = lerp(Albedo, Albedo + 0.022, S);
+		Roughness = saturate(Roughness + 0.20 * S);
+	}
+
+	// Cigarette burns: across the rail, a charred core with a dull, discoloured melt halo and a shallow crater.
+	{
+		const float2 CellSize = float2(0.30, 0.12);
+		const int2 Ci = int2(floor(UV / CellSize));
+		const float2 H = RbHash22(Ci, 37u + uint(Seed));
+		const float2 H2 = RbHash22(Ci, 71u);
+		const float Present = H.x < Burns * A ? 1.0 : 0.0;
+		const float2 C = (float2(Ci) + float2(0.2 + 0.6 * H2.x, 0.25 + 0.5 * H2.y)) * CellSize;
+		const float Ang = (H.y - 0.5) * 0.7;
+		const float2 D0 = UV - C;
+		const float2 D = float2(cos(Ang) * D0.x + sin(Ang) * D0.y, -sin(Ang) * D0.x + cos(Ang) * D0.y);
+		const float2 Size = float2(0.0045 + 0.003 * H2.y, 0.011 + 0.010 * H.y);   // narrow along the rail, long across it
+		const float E = length(D / Size);
+		const float Core = Present * (1.0 - smoothstep(0.45, 0.65, E));
+		const float Halo = Present * (1.0 - smoothstep(0.65, 1.05, E)) * (1.0 - Core);
+		// On a printed / light laminate the char is darker than the surface; on black laminate the burn is a matte brown-grey smudge
+		// (charred, bubbled resin) a little LIGHTER than the gloss black, core and halo one blob (M2-L r5: a dark core in a light halo
+		// read as a ring / washer from 1-2 m).
+		const bool bBlack = RbLuminance(Base) < 0.06;
+		const float3 CoreColor = bBlack ? float3(0.042, 0.034, 0.027) : float3(0.010, 0.008, 0.007);
+		const float3 HaloColor = bBlack ? float3(0.034, 0.029, 0.024) : lerp(Base, float3(0.050, 0.040, 0.032), 0.8);
+		Albedo = lerp(Albedo, CoreColor, Core);
+		Albedo = lerp(Albedo, HaloColor, 0.7 * Halo);
+		Roughness = lerp(Roughness, 0.85, saturate(Core + Halo));
+		const float2 Slope = Present * (1.0 - smoothstep(0.3, 1.1, E)) * D / max(Size * Size * E, 1e-7) * 0.0012;
+		NormalTS = normalize(float3(NormalTS.xy - Slope * float2(1.0, -1.0) * RbOctaveWeight(1.0 / Size.x, Fp), NormalTS.z));
+	}
+
+	// Glass rings: partial circles of dried residue (whitish on black, darker on the print), dull.
+	{
+		const float2 CellSize = float2(0.26, 0.13);
+		const int2 Ci = int2(floor((UV + 0.07) / CellSize));
+		const float2 H = RbHash22(Ci, 113u + uint(Seed));
+		const float2 H2 = RbHash22(Ci, 5u);
+		const float Present = H.x < Rings * A ? 1.0 : 0.0;
+		const float2 C = (float2(Ci) + 0.5) * CellSize - 0.07 + (H2 - 0.5) * 0.05;
+		const float R = 0.033 + 0.010 * H.y;
+		const float2 D = UV - C;
+		const float Dist = length(D);
+		// Broken arcs (a wet glass base leaves a partial ring whose strength wanders around it), never a clean washer (M2-L r4).
+		const float Ang = atan2(D.y, D.x);
+		const float Arc = saturate(1.8 * RbGradientNoise(float2(Ang * 1.6 + H2.x * 9.0, 0.5)).x + 0.9 * RbGradientNoise(float2(Ang * 5.0, 3.5 + H.y)).x + 0.15);
+		const float Width = (0.0008 + 0.0012 * H2.y) * (0.6 + 0.8 * saturate(0.5 + RbGradientNoise(float2(Ang * 3.0, 7.0)).x));
+		const float Ring = Present * Arc * RbLineCoverage(abs(Dist - R), Width, Fp) * 0.30;
+		const float Inside = Present * (1.0 - smoothstep(R - 0.006, R, Dist)) * 0.20 * saturate(0.1 + 1.4 * N2);
+		const float Lum = RbLuminance(Base);
+		const float3 Residue = Lum < 0.1 ? float3(0.030, 0.029, 0.027) : Base * 0.82;
+		Albedo = lerp(Albedo, Residue, saturate(Ring + 0.25 * Inside));
+		Roughness = saturate(Roughness + 0.08 * Ring + 0.06 * Inside);
+	}
+
+	// Coin-op cabinet: worn-through vertical corners (hips, cues, mops) revealing the kraft core; kick grime and shoe scuffs low.
+	if (CornerWear > 0.0)
+	{
+		const float2 P = abs(LocalCm.xy);
+		const float2 Straight = HalfOuterCm - CornerRadiusCm;
+		const float Band = 2.5 + 1.5 * N1;
+		const float InCorner = saturate(min(P.x - (Straight.x - Band), P.y - (Straight.y - Band)) / 1.0);
+		const float ZFloor = LocalCm.z + BedHeightCm;   // height above the floor [cm]
+		const float Hips = smoothstep(35.0, 50.0, ZFloor) * (1.0 - smoothstep(66.0, 72.0, ZFloor));
+		const float Edge = saturate(InCorner * (0.4 + 0.8 * Hips) * CornerWear * A * 1.4 - 0.35 + 0.8 * N2);
+		const float Worn = smoothstep(0.45, 0.6, Edge);
+		const float3 Kraft = float3(0.30, 0.19, 0.10) * (0.85 + 0.3 * N2);
+		Albedo = lerp(Albedo, Kraft, Worn);
+		Roughness = lerp(Roughness, 0.85, Worn);
+		const float Kick = A * CornerWear * (1.0 - smoothstep(10.0, 34.0, ZFloor)) * saturate(0.5 + N1);
+		Albedo *= 1.0 - 0.45 * Kick;
+		Roughness = saturate(Roughness + 0.25 * Kick);
+		const float Scuff = A * CornerWear * (1.0 - smoothstep(20.0, 40.0, ZFloor)) *
+			saturate(RbGradientNoise(float2(LocalCm.x + LocalCm.y, LocalCm.z * 6.0) * 0.08 + Seed).x * 3.0 - 0.8);
+		Albedo = lerp(Albedo, float3(0.012, 0.011, 0.010), 0.7 * Scuff);
+	}
+}
+
+// ---- plastics (coin-op ABS castings, sights) ----------------------------------------------------------------------------
+
+// Satin plastic: orange-peel micro normal, scuffs (lighter, rougher), chips (small matte craters), grime. UV [m].
+void RbPlasticWear(float2 UV, float Age, float Chips, float Seed, inout float3 Albedo, inout float Roughness, inout float3 NormalTS)
+{
+	const float A = saturate(Age);
+	const float Fp = RbFootprint(UV, 0.002);
+	const float3 Peel = RbGradientNoise(UV * 700.0 + Seed);
+	const float PeelW = RbOctaveWeight(700.0, Fp);
+	NormalTS = normalize(float3(NormalTS.xy + Peel.yz * 0.012 * PeelW, NormalTS.z));
+	const float N1 = RbFbm(UV * 9.0 + Seed, 4, Fp * 9.0);
+	const float N2 = RbFbm(UV * 80.0 - Seed, 3, Fp * 80.0);
+	const float Scuff = A * saturate(N1 * 2.2 + N2 * 0.8 - 0.25);
+	// Scuffs stay subtle: a rough scuffed satin black under a close lamp spreads its highlight into a grey sheet (M2-L r6: the castings
+	// read as grey metal next to the black laminate).
+	Albedo = lerp(Albedo, Albedo * 1.4 + 0.006, 0.35 * Scuff);
+	Roughness = saturate(Roughness + 0.12 * Scuff + 0.05 * A * N2);
+	// Chips.
+	const float Cell = 0.03;
+	const int2 Ci = int2(floor(UV / Cell));
+	const float2 H = RbHash22(Ci, 149u + uint(Seed));
+	const float2 H2 = RbHash22(Ci, 211u);
+	const float Present = H.x < Chips * A ? 1.0 : 0.0;
+	const float2 C = (float2(Ci) + 0.2 + 0.6 * H2) * Cell;
+	const float R = 0.0008 + 0.0012 * H.y;
+	const float E = length(UV - C) / (R * (1.0 + 0.4 * RbGradientNoise((UV - C) * 900.0).x));
+	const float Chip = Present * (1.0 - smoothstep(0.8, 1.0, E));
+	Albedo = lerp(Albedo, Albedo * 1.4 + 0.008, Chip);
+	Roughness = lerp(Roughness, 0.9, Chip);
+	const float2 Slope = Chip * (UV - C) / max(R * R, 1e-8) * 0.4 * R;
+	NormalTS = normalize(float3(NormalTS.xy + Slope * RbOctaveWeight(1.0 / R, Fp), NormalTS.z));
+}
+
+// ---- metals (trim, hardware, levelers) ------------------------------------------------------------------------------------
+
+// Metal wear: fingerprints / smudges (roughness), pitting (chrome: dull dark specks), oxide dullness and grime with Age. UV [m].
+// Returns the F0 multiplier (pits and grime darken the reflectance).
+float RbMetalWear(float2 UV, float Age, float Pitting, float Seed, inout float Roughness)
+{
+	const float A = saturate(Age);
+	const float Fp = RbFootprint(UV, 0.002);
+	const float N1 = RbFbm(UV * 14.0 + Seed, 4, Fp * 14.0);
+	const float N2 = RbFbm(UV * 120.0 - Seed, 3, Fp * 120.0);
+	const float Smudge = saturate(0.4 + 1.6 * N1 + 0.5 * N2);
+	Roughness = saturate(Roughness + A * (0.12 * Smudge + 0.04));
+	const float Cell = 0.0015;
+	const int2 Ci = int2(floor(UV / Cell));
+	const float2 H = RbHash22(Ci, 173u);
+	const float Present = H.x < Pitting * A * 0.35 ? 1.0 : 0.0;
+	const float2 C = (float2(Ci) + 0.3 + 0.4 * H.yx) * Cell;
+	const float Pit = Present * (1.0 - smoothstep(0.2, 0.35, length(UV - C) / Cell));
+	const float Resolved = RbOctaveWeight(1.0 / Cell, Fp);
+	const float PitMean = Pitting * A * 0.35 * 0.1;
+	const float PitShare = lerp(PitMean, Pit, Resolved);
+	Roughness = lerp(Roughness, 0.7, PitShare);
+	return (1.0 - 0.6 * PitShare) * (1.0 - 0.12 * A * Smudge);
+}
+
+// ---- plexiglass (coin-op trap window) --------------------------------------------------------------------------------------
+
+// Scratched, grimy acrylic: roughness from scratch lines and wipe marks. UV [m].
+float RbPlexiRoughness(float2 UV, float Age, float BaseRoughness, float Seed)
+{
+	const float A = saturate(Age);
+	const float Fp = RbFootprint(UV, 0.002);
+	float S = 0.0;
+	const float Cell = 0.04;
+	const int2 Ci = int2(floor(UV / Cell));
+	for (int J = -1; J <= 1; ++J)
+	{
+		for (int I = -1; I <= 1; ++I)
+		{
+			const int2 C = Ci + int2(I, J);
+			const float2 H = RbHash22(C, 233u + uint(Seed));
+			const float2 H2 = RbHash22(C, 59u);
+			const float2 P0 = (float2(C) + H2) * Cell;
+			const float Angle = H.y * RB_PI;
+			const float2 P1 = P0 + float2(cos(Angle), sin(Angle)) * (0.01 + 0.05 * H.x);
+			S = max(S, RbLineCoverage(RbSegmentDistance(UV, P0, P1), 0.0003, Fp) * step(H.x, 0.8 * A));
+		}
+	}
+	const float Wipe = saturate(0.5 + 1.5 * RbFbm(float2(UV.x * 6.0, UV.y * 30.0) + Seed, 3, Fp * 30.0));
+	return saturate(BaseRoughness + A * (0.35 * S + 0.12 * Wipe));
+}
+
+// ---- rubber (cushion strips, pocket liners) --------------------------------------------------------------------------------
+
+// Old rubber blooms (a pale, chalky film) and picks up chalk; returns the albedo tint factor, roughness via inout. UV [m].
+float3 RbRubberWear(float2 UV, float Age, float3 Albedo, inout float Roughness)
+{
+	const float A = saturate(Age);
+	const float Fp = RbFootprint(UV, 0.002);
+	const float N = RbFbm(UV * 30.0, 4, Fp * 30.0);
+	const float Bloom = A * saturate(0.3 + 1.3 * N);
+	Roughness = saturate(Roughness + 0.12 * Bloom);
+	return lerp(Albedo, float3(0.050, 0.051, 0.054), 0.25 * Bloom);
+}
+
+// Cavity occlusion of the pocket interiors (liner collars, drop pockets, gully throats): the table body, the gully and the ball
+// return close the space below the slate, so the deep parts of a pocket see little of the lamp (the shadow maps only see the open
+// cylinder). A factor for albedo and F0 from the depth below the cloth (LocalCm.z < 0, table-local cm): 1 at the cloth, Floor deep
+// down, half way at DepthCm.
+float RbPocketCavity(float3 LocalCm, float DepthCm, float Floor)
+{
+	const float D = max(0.0, -LocalCm.z);
+	return lerp(Floor, 1.0, exp(-D / max(DepthCm, 0.1) * 0.6931));
+}

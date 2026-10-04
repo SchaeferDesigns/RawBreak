@@ -33,7 +33,12 @@ float3 RbClothAlbedo(float3 ClothColor, float Cavity, float Fibre, float2 UV, fl
 	const float Mottle = RbFbm(UV * 3.0, 4, Footprint * 3.0);            // ~30 cm dye / brushing variation
 	const float Yarn = (Fibre - 0.5) * 0.14 * Resolved;                   // yarn-to-yarn tone
 	const float Shade = lerp(0.92, lerp(0.74, 1.0, Cavity), Resolved);    // darker in the weave cavities
-	return ClothColor * Shade * (1.0 + Yarn + 0.05 * Mottle);
+	// M2-L: heathered fibre tone (yarns spun from slightly different fibres, ~3 mm clouds, resolved well beyond the weave) and faint
+	// brushing streaks along the table (the cloth is brushed head to foot) - what makes a cloth read as a fabric from 0.3-2 m.
+	const float Heather = RbFbm(UV * float2(260.0, 330.0) + 7.3, 3, Footprint * 330.0);
+	const float Streak = RbFbm(float2(UV.x * 4.0, UV.y * 160.0) + 2.1, 3, Footprint * 160.0);
+	const float Cloud = RbFbm(UV * 28.0 - 3.7, 3, Footprint * 28.0);     // ~3 cm density clouds
+	return ClothColor * Shade * (1.0 + Yarn + 0.05 * Mottle + 0.09 * Heather + 0.035 * Streak + 0.04 * Cloud);
 }
 
 // Fuzz (sheen) colour: the albedo slightly desaturated and lightened (plan 6.3: ~1.5x).

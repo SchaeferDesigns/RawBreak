@@ -12,6 +12,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/PackageName.h"
 #include "UObject/SoftObjectPath.h"
@@ -31,6 +32,64 @@ namespace RbTablePrivate
 			return nullptr;
 		}
 		return Cast<T>(Path.TryLoad());
+	}
+
+	// The table-family materials place their wear from the table-local position (Shaders/Private/RbTableLook.ush: break spot, lanes,
+	// pocket chalk, creases at the cushion bases, cabinet corners) and need the table's dimensions; the generated materials carry the
+	// committed presets' values (rb_make_materials.py: the 9-ft pro cloth, the 7-ft bar box's instances). A table whose dimensions
+	// differ from its material's (another preset) gets a transient dynamic instance with its own values, and a table other than the
+	// level's first (TableIndex > 0) its own wear seed, so two tables in a room never wear identically. Unchanged otherwise (the
+	// generated asset itself). M2-L review.
+	UMaterialInterface* MakeTableMaterial(ARbTable& Table, UMaterialInterface* Source, const RbTableMeshBuilder::FMaterialTableParameters& Params)
+	{
+		if (!Source)
+		{
+			return nullptr;
+		}
+		auto Differs = [](double Current, double Wanted) { return !FMath::IsNearlyEqual(Current, Wanted, 1e-4 * FMath::Max(1.0, FMath::Abs(Wanted))); };
+		TArray<TPair<FName, float>, TInlineAllocator<8>> Scalars;
+		TArray<TPair<FName, FLinearColor>, TInlineAllocator<2>> Vectors;
+		bool bDiffers = false;
+		for (const TPair<FName, double>& P : Params.Scalars)
+		{
+			float Current = 0.0f;
+			if (Source->GetScalarParameterValue(FHashedMaterialParameterInfo(P.Key), Current))
+			{
+				Scalars.Add({P.Key, static_cast<float>(P.Value)});
+				bDiffers = bDiffers || Differs(Current, P.Value);
+			}
+		}
+		for (const TPair<FName, FVector2D>& P : Params.Vectors)
+		{
+			FLinearColor Current;
+			if (Source->GetVectorParameterValue(FHashedMaterialParameterInfo(P.Key), Current))
+			{
+				Vectors.Add({P.Key, FLinearColor(static_cast<float>(P.Value.X), static_cast<float>(P.Value.Y), Current.B, Current.A)});
+				bDiffers = bDiffers || Differs(Current.R, P.Value.X) || Differs(Current.G, P.Value.Y);
+			}
+		}
+		static const FName SeedName(TEXT("Seed"));
+		float Seed = 0.0f;
+		const bool bOwnSeed = Table.TableIndex > 0 && Source->GetScalarParameterValue(FHashedMaterialParameterInfo(SeedName), Seed);
+		if (!bDiffers && !bOwnSeed)
+		{
+			return Source;
+		}
+		UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(Source, &Table);
+		Instance->SetFlags(RF_Transient);
+		for (const TPair<FName, float>& P : Scalars)
+		{
+			Instance->SetScalarParameterValue(P.Key, P.Value);
+		}
+		for (const TPair<FName, FLinearColor>& P : Vectors)
+		{
+			Instance->SetVectorParameterValue(P.Key, P.Value);
+		}
+		if (bOwnSeed)
+		{
+			Instance->SetScalarParameterValue(SeedName, Seed + 7.0f * static_cast<float>(Table.TableIndex));
+		}
+		return Instance;
 	}
 
 	// The table frame is translation + yaw only (Docs/ue-architecture.md 4: ClothOrigin = translation + yaw, scale 1): the physics
@@ -62,14 +121,20 @@ ARbTable::ARbTable()
 	ClothOrigin = CreateDefaultSubobject<USceneComponent>(TEXT("ClothOrigin"));
 	ClothOrigin->SetupAttachment(Root);
 
+	// M2-L: empty entries = the preset's default material (RbTableMeshBuilder::GetDefaultMaterialPath: the 9-ft pro table's cloth /
+	// walnut / leather, the coin-op table's bar cloth / laminate / ABS / chrome of venue-dive-bar 6.4). A level overrides a part by
+	// setting its entry.
 	PartMaterials.SetNum(static_cast<int32>(ERbTablePart::Count));
-	PartMaterials[static_cast<int32>(ERbTablePart::Bed)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatCloth));
-	PartMaterials[static_cast<int32>(ERbTablePart::CushionCloth)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatCloth));
-	PartMaterials[static_cast<int32>(ERbTablePart::RailCaps)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatRailWood));
-	PartMaterials[static_cast<int32>(ERbTablePart::Apron)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatRailWood));
-	PartMaterials[static_cast<int32>(ERbTablePart::PocketLiners)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatPocketLiner));
-	PartMaterials[static_cast<int32>(ERbTablePart::Sights)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatSight));
-	PartMaterials[static_cast<int32>(ERbTablePart::Legs)] = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(RbAssetPaths::MatRailWood));
+}
+
+FSoftObjectPath ARbTable::GetResolvedPartMaterialPath(ERbTablePart Part) const
+{
+	const int32 Index = static_cast<int32>(Part);
+	if (PartMaterials.IsValidIndex(Index) && !PartMaterials[Index].IsNull())
+	{
+		return PartMaterials[Index].ToSoftObjectPath();
+	}
+	return FSoftObjectPath(RbTableMeshBuilder::GetDefaultMaterialPath(Preset, Part));
 }
 
 const FRbTableContext& ARbTable::GetContext() const
@@ -85,9 +150,9 @@ FString ARbTable::MakeBuildKey() const
 	// M2: venue condition and lamp footprint (they change the context, not the meshes).
 	Key += FString::Printf(TEXT("|%d|%d|%d|%lld|%d|%d|%.12g|%.12g|%.12g|%.12g"), TableIndex, bUseVenueCondition ? 1 : 0, static_cast<int32>(VenueKind),
 		VenueSeed, bFirstCareerTable ? 1 : 0, bUseLampFootprint ? 1 : 0, LampFootprintMin.X, LampFootprintMin.Y, LampFootprintMax.X, LampFootprintMax.Y);
-	for (const TSoftObjectPtr<UMaterialInterface>& Material : PartMaterials)
+	for (int32 Index = 0; Index < static_cast<int32>(ERbTablePart::Count); ++Index)
 	{
-		Key += TEXT("|") + Material.ToSoftObjectPath().ToString();
+		Key += TEXT("|") + GetResolvedPartMaterialPath(static_cast<ERbTablePart>(Index)).ToString();
 	}
 	return Key;
 }
@@ -162,11 +227,27 @@ void ARbTable::RebuildMeshes()
 	PartComponents.SetNum(static_cast<int32>(ERbTablePart::Count));
 
 	TUniquePtr<FRbTableMeshSet> Runtime; // built only if some part has no baked asset
+	// The table's own material parameters (one instance per source material, shared by the parts that use it).
+	const RbTableMeshBuilder::FMaterialTableParameters MaterialParameters =
+		RbTableMeshBuilder::GetMaterialTableParameters(Context->Geometry, FRbTableMeshOptions());
+	TMap<UMaterialInterface*, UMaterialInterface*, TInlineSetAllocator<16>> TableMaterials;
+	const ERbTableBaseStyle Style = RbTableMeshBuilder::ResolveBaseStyle(Context->Spec, FRbTableMeshOptions());
 	for (int32 Index = 0; Index < static_cast<int32>(ERbTablePart::Count); ++Index)
 	{
 		const ERbTablePart Part = static_cast<ERbTablePart>(Index);
-		UMaterialInterface* Material =
-			PartMaterials.IsValidIndex(Index) ? RbTablePrivate::LoadIfExists<UMaterialInterface>(PartMaterials[Index].ToSoftObjectPath()) : nullptr;
+		if (!RbTableMeshBuilder::PartExpected(Style, Part))
+		{
+			// M2-L review: a part the base style never builds (the coin-op parts of a legs table) has no baked asset; without this
+			// skip its missing asset made every rebuild of a baked 9-ft table run the whole runtime BuildAll just to find it empty
+			// (and a stale asset of an earlier bake would have been shown).
+			continue;
+		}
+		UMaterialInterface* Material = RbTablePrivate::LoadIfExists<UMaterialInterface>(GetResolvedPartMaterialPath(Part));
+		if (Material)
+		{
+			UMaterialInterface** Found = TableMaterials.Find(Material);
+			Material = Found ? *Found : TableMaterials.Add(Material, RbTablePrivate::MakeTableMaterial(*this, Material, MaterialParameters));
+		}
 		UStaticMesh* Baked =
 			bUseBakedMeshes ? RbTablePrivate::LoadIfExists<UStaticMesh>(FSoftObjectPath(RbTableMeshBuilder::GetBakedMeshObjectPath(Preset, Part))) : nullptr;
 		const FName Name =
