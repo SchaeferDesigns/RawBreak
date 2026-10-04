@@ -1,0 +1,104 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {
+  "coin_entry": [
+   0.68,
+   -0.25,
+   0.58
+  ],
+  "marquee": [
+   0.63,
+   -0.0,
+   1.315
+  ],
+  "title_window": [
+   0.65,
+   -0.0,
+   0.905
+  ]
+ },
+ "asset_id": "Jukebox",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.7,
+  0.4,
+  1.47
+ ],
+ "bounds_min_m": [
+  0.0,
+  -0.4,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.7,
+  0.4,
+  1.47
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.4,
+  0.0
+ ],
+ "brand": "Marquee Phonograph Co. 'Starlite CD-100' (fictional, 8.1)",
+ "cast_shadow": true,
+ "collision_hulls": 2,
+ "collision_profile": "RbVenueBlock",
+ "element": "E10",
+ "emissive": {
+  "cycle_period_s": 7.5,
+  "marquee_cd_m2": 180,
+  "note": "L18 is M2-A's rect light; AfterHours idle panels 30 % is a level-side parameter",
+  "panels_cd_m2": 120,
+  "strips_cd_m2": 200
+ },
+ "external_inputs": [],
+ "family": "Jukebox",
+ "fbx": "SM_DB_Jukebox.fbx",
+ "front": "+X",
+ "generator": "db_jukebox.py",
+ "geometry_sha256": "b949ce28929d7bacd292b193182daf6c24f16e12030c874f9d430a171ac4f8d5",
+ "ledger_asset_id": "SM_DB_Jukebox",
+ "material_slots": [
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Chrome",
+  "MI_DB_Emissive_JukeboxPanels",
+  "MI_DB_Emissive_JukeboxMarquee",
+  "MI_DB_Alu_Trim",
+  "MI_DB_Emissive_JukeboxStrips",
+  "MI_DB_Plexi_Scratched",
+  "MI_DB_Emissive_LedRed"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "wall_plane_bottom_centre",
+ "placement_hint_ue_cm": {
+  "location": [
+   1130.0,
+   732.0,
+   0.0
+  ],
+  "note": "E10 X 10.90 - 11.70 on the right wall; front faces -Y",
+  "yaw_deg": -90.0
+ },
+ "priority": "hero",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "H12",
+ "target_dimensions_m": [
+  0.7,
+  0.8,
+  1.47
+ ],
+ "tolerance_m": 0.002,
+ "translucent": false,
+ "triangles": 5186,
+ "triangles_render": 5142,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Jukebox",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Jukebox/SM_DB_Jukebox",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Jukebox/T_DB_Jukebox_WM.png"
+}

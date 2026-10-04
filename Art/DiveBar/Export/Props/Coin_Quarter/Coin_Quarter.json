@@ -1,0 +1,64 @@
+{
+ "acoustic_material": "glass",
+ "anchors_ue_m": {},
+ "asset_id": "Coin_Quarter",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.01213,
+  0.01213,
+  0.00175
+ ],
+ "bounds_min_m": [
+  -0.01213,
+  -0.01213,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.01213,
+  0.01213,
+  0.00175
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.01213,
+  -0.01213,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "external_inputs": [],
+ "family": "Clutter",
+ "fbx": "SM_DB_Coin_Quarter.fbx",
+ "front": "+X",
+ "generator": "db_lathe_props.py",
+ "geometry_sha256": "55bd84bee93d297741cfeaefc70c797338fb5d9212eee331b0e2b1eadbdca1f8",
+ "ledger_asset_id": "SM_DB_Coin_Quarter",
+ "material_slots": [
+  "MI_DB_CuproNickel"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement": "prop_instances of db_backbar.py / the level's clutter scatter (M2-A)",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec": "US quarter 24.26 x 1.75 mm, 119 reeds",
+ "spec_id": "H07",
+ "target_dimensions_m": [
+  0.02426,
+  0.02426,
+  0.00175
+ ],
+ "tolerance_m": 0.0002,
+ "translucent": false,
+ "triangles": 3848,
+ "triangles_render": 3804,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Clutter",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Clutter/SM_DB_Coin_Quarter",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Coin_Quarter/T_DB_Coin_Quarter_WM.png"
+}

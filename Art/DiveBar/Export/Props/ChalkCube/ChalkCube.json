@@ -1,0 +1,66 @@
+{
+ "acoustic_material": "none",
+ "anchors_ue_m": {},
+ "asset_id": "ChalkCube",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.01125,
+  0.01125,
+  0.022
+ ],
+ "bounds_min_m": [
+  -0.01125,
+  -0.01125,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.01125,
+  0.01125,
+  0.022
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.01125,
+  -0.01125,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "cup_depth_m": 0.004,
+ "element": "H06",
+ "external_inputs": [],
+ "family": "Chalk",
+ "fbx": "SM_DB_ChalkCube.fbx",
+ "front": "+X",
+ "generator": "db_cue_rack.py",
+ "geometry_sha256": "1af305fd14709e3a13862b2edbf1a5e230112ee595fd3637cd0fb8d826a47c08",
+ "ledger_asset_id": "SM_DB_ChalkCube",
+ "material_slots": [
+  "MI_DB_Chalk_Blue",
+  "MI_DB_Label_Atlas"
+ ],
+ "nanite": true,
+ "notes": "one on each long rail, one on the C3 shelf, one under the table (M2-A)",
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "priority": "hero",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "H06",
+ "target_dimensions_m": [
+  0.022,
+  0.022,
+  0.022
+ ],
+ "tolerance_m": 0.002,
+ "translucent": false,
+ "triangles": 2056,
+ "triangles_render": 2044,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Chalk",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Chalk/SM_DB_ChalkCube",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/ChalkCube/T_DB_ChalkCube_WM.png"
+}

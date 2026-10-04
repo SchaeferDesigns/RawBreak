@@ -1,0 +1,186 @@
+{
+ "grid": 4,
+ "owner": "M2-B",
+ "sets": {
+  "Burns": {
+   "cell_px": 512,
+   "cells": {
+    "0": "cigarette_burn",
+    "1": "cigarette_burn",
+    "10": "sanded_burn",
+    "11": "sanded_burn",
+    "12": "melt_crater",
+    "13": "melt_crater",
+    "14": "melt_crater",
+    "15": "melt_crater",
+    "2": "cigarette_burn",
+    "3": "cigarette_burn",
+    "4": "cigarette_burn",
+    "5": "cigarette_burn",
+    "6": "cigarette_burn",
+    "7": "cigarette_burn",
+    "8": "sanded_burn",
+    "9": "sanded_burn"
+   },
+   "grid": 4,
+   "roughness_only_variant": false,
+   "size_m": 0.04,
+   "textures": {
+    "BC": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Burns_BC.png",
+    "N": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Burns_N.png",
+    "R": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Burns_R.png"
+   },
+   "use": "rail caps, bar-top edge, booth tables, window sill, stool vinyl"
+  },
+  "Chalk": {
+   "cell_px": 512,
+   "cells": {
+    "0": "chalk_smudge",
+    "1": "chalk_smudge",
+    "10": "chalk_fingerprint",
+    "11": "chalk_fingerprint",
+    "12": "chalk_fingerprint",
+    "13": "chalk_fingerprint",
+    "14": "chalk_fingerprint",
+    "15": "chalk_fingerprint",
+    "2": "chalk_smudge",
+    "3": "chalk_smudge",
+    "4": "chalk_smudge",
+    "5": "chalk_smudge",
+    "6": "chalk_smudge",
+    "7": "chalk_smudge",
+    "8": "chalk_fingerprint",
+    "9": "chalk_fingerprint"
+   },
+   "grid": 4,
+   "roughness_only_variant": false,
+   "size_m": 0.08,
+   "textures": {
+    "BC": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Chalk_BC.png",
+    "N": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Chalk_N.png",
+    "R": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Chalk_R.png"
+   },
+   "use": "rails, cue rack, chalkboard frame, wall by the rack, floor around the table"
+  },
+  "Rings": {
+   "cell_px": 512,
+   "cells": {
+    "0": "beer_ring_1",
+    "1": "beer_ring_2",
+    "10": "heat_ring",
+    "11": "heat_ring",
+    "12": "partial_ring",
+    "13": "partial_ring",
+    "14": "partial_ring",
+    "15": "partial_ring",
+    "2": "beer_ring_3",
+    "3": "beer_ring_1",
+    "4": "beer_ring_2",
+    "5": "beer_ring_3",
+    "6": "beer_ring_1",
+    "7": "beer_ring_2",
+    "8": "heat_ring",
+    "9": "heat_ring"
+   },
+   "grid": 4,
+   "roughness_only_variant": false,
+   "size_m": 0.11,
+   "textures": {
+    "BC": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Rings_BC.png",
+    "N": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Rings_N.png",
+    "R": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Rings_R.png"
+   },
+   "use": "bar top, rail caps, back ledge, C3 shelf, booth tables"
+  },
+  "Scuffs": {
+   "cell_px": 512,
+   "cells": {
+    "0": "heel_mark",
+    "1": "heel_mark",
+    "10": "kick_scuffs",
+    "11": "kick_scuffs",
+    "12": "cue_dings",
+    "13": "cue_dings",
+    "14": "cue_dings",
+    "15": "cue_dings",
+    "2": "heel_mark",
+    "3": "heel_mark",
+    "4": "heel_mark",
+    "5": "heel_mark",
+    "6": "heel_mark",
+    "7": "heel_mark",
+    "8": "kick_scuffs",
+    "9": "kick_scuffs"
+   },
+   "grid": 4,
+   "roughness_only_variant": false,
+   "size_m": 0.25,
+   "textures": {
+    "BC": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Scuffs_BC.png",
+    "N": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Scuffs_N.png",
+    "R": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Scuffs_R.png"
+   },
+   "use": "floor heel marks, bar die / booth base kicks, S10 wall band"
+  },
+  "Stains": {
+   "cell_px": 512,
+   "cells": {
+    "0": "dried_spill",
+    "1": "dried_spill",
+    "10": "dried_spill",
+    "11": "dried_spill",
+    "12": "drip_trail",
+    "13": "drip_trail",
+    "14": "drip_trail",
+    "15": "drip_trail",
+    "2": "dried_spill",
+    "3": "dried_spill",
+    "4": "dried_spill",
+    "5": "dried_spill",
+    "6": "dried_spill",
+    "7": "dried_spill",
+    "8": "dried_spill",
+    "9": "dried_spill"
+   },
+   "grid": 4,
+   "roughness_only_variant": true,
+   "size_m": 0.45,
+   "textures": {
+    "BC": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Stains_BC.png",
+    "N": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Stains_N.png",
+    "R": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Stains_R.png"
+   },
+   "use": "floor spills near the bar front and B2, drips on the paneling; roughness-only sticky variant"
+  },
+  "Water": {
+   "cell_px": 512,
+   "cells": {
+    "0": "leak_stain",
+    "1": "leak_stain",
+    "10": "leak_stain",
+    "11": "leak_stain",
+    "12": "leak_stain",
+    "13": "leak_stain",
+    "14": "leak_stain",
+    "15": "leak_stain",
+    "2": "leak_stain",
+    "3": "leak_stain",
+    "4": "leak_stain",
+    "5": "leak_stain",
+    "6": "leak_stain",
+    "7": "leak_stain",
+    "8": "leak_stain",
+    "9": "leak_stain"
+   },
+   "grid": 4,
+   "roughness_only_variant": false,
+   "size_m": 0.7,
+   "textures": {
+    "BC": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Water_BC.png",
+    "N": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Water_N.png",
+    "R": "Art/DiveBar/Textures/Decals/T_DB_DecalAtlas_Water_R.png"
+   },
+   "use": "ceiling tiles above the corridor opening and booth B1, drip on the paneling"
+  }
+ }
+}

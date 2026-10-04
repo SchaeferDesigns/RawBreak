@@ -1,0 +1,2906 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {},
+ "asset_id": "BackBar",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.66,
+  3.81,
+  2.6
+ ],
+ "bounds_min_m": [
+  0.0,
+  -3.81,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.66,
+  3.81,
+  2.6
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -3.81,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 20,
+ "collision_profile": "RbVenueBlock",
+ "coolers_blender_y_m": [
+  [
+   -3.44,
+   -1.61,
+   3
+  ],
+  [
+   1.66,
+   2.86,
+   2
+  ]
+ ],
+ "counter_top_z_m": 0.91,
+ "element": "E04",
+ "external_inputs": [],
+ "family": "Bar",
+ "fbx": "SM_DB_BackBar.fbx",
+ "front": "+X",
+ "generator": "db_backbar.py",
+ "geometry_sha256": "8c00509bb150fcd0ff9de499b93bdcb3cdefa686f4e80c25a6341d281e9959c8",
+ "ledger_asset_id": "SM_DB_BackBar",
+ "material_slots": [
+  "MI_DB_Plywood_Painted",
+  "MI_DB_Wood_Stained",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Emissive_CoolerPanel",
+  "MI_DB_Enamel_WhiteInt",
+  "MI_DB_Steel_Zinc",
+  "MI_DB_Aluminium",
+  "MI_DB_Label_Gloss",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Glass_Cooler",
+  "MI_DB_Steel_Stainless",
+  "MI_DB_Brass_Worn",
+  "MI_DB_Wood_PlankWall",
+  "MI_DB_Mirror_Aged",
+  "MI_DB_Glass_Shelf",
+  "MI_DB_Alu_Trim",
+  "MI_DB_Emissive_LedStrip",
+  "MI_DB_Paneling_Dark"
+ ],
+ "mirror_z_m": [
+  1.1,
+  2.2
+ ],
+ "nanite": true,
+ "notes": "L9/L10 LED strips, L11/L12 cooler lights, TV-1, N3 and the POS are M2-A's / later",
+ "owner": "M2-B",
+ "pivot": "wall_plane_bottom_centre",
+ "placement_hint_ue_cm": {
+  "location": [
+   564.0,
+   0.0,
+   0.0
+  ],
+  "note": "E04 X 1.83 - 9.45 against the left wall (Y = 0); local +X (front) -> venue +Y",
+  "yaw_deg": 90.0
+ },
+ "priority": "hero",
+ "prop_instances": [
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16328,
+    3.6337,
+    1.22371
+   ],
+   "yaw_deg": 21.44
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.17067,
+    3.53139,
+    1.22226
+   ],
+   "yaw_deg": 17.5
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16894,
+    3.40777,
+    1.22102
+   ],
+   "yaw_deg": -26.84
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16199,
+    3.28533,
+    1.22053
+   ],
+   "yaw_deg": -2.66
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16183,
+    3.17395,
+    1.22079
+   ],
+   "yaw_deg": 1.62
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16246,
+    3.06097,
+    1.22171
+   ],
+   "yaw_deg": 12.57
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16189,
+    2.95618,
+    1.22304
+   ],
+   "yaw_deg": -29.52
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.15682,
+    2.83676,
+    1.22489
+   ],
+   "yaw_deg": 9.62
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.17125,
+    2.74251,
+    1.22361
+   ],
+   "yaw_deg": 1.58
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16871,
+    2.64683,
+    1.22226
+   ],
+   "yaw_deg": -23.87
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.15994,
+    2.5384,
+    1.22114
+   ],
+   "yaw_deg": -5.3
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16533,
+    2.27408,
+    1.22088
+   ],
+   "yaw_deg": 34.99
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.16357,
+    2.12452,
+    1.22231
+   ],
+   "yaw_deg": -29.19
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_0_0",
+   "location_ue_m": [
+    0.1595,
+    2.0195,
+    1.22381
+   ],
+   "yaw_deg": -24.66
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.2119,
+    3.62725,
+    1.55381
+   ],
+   "yaw_deg": 18.34
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.20629,
+    3.52804,
+    1.55261
+   ],
+   "yaw_deg": 14.24
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.19499,
+    3.43306,
+    1.55176
+   ],
+   "yaw_deg": -27.66
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.1933,
+    3.32405,
+    1.55123
+   ],
+   "yaw_deg": -28.67
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.21261,
+    3.21753,
+    1.55123
+   ],
+   "yaw_deg": 16.16
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.20423,
+    3.12035,
+    1.5517
+   ],
+   "yaw_deg": 31.0
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.21156,
+    3.00867,
+    1.5527
+   ],
+   "yaw_deg": -17.24
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.20498,
+    2.73152,
+    1.55367
+   ],
+   "yaw_deg": -7.5
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.20088,
+    2.63558,
+    1.55253
+   ],
+   "yaw_deg": 13.02
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.20058,
+    2.50499,
+    1.55148
+   ],
+   "yaw_deg": 27.85
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.20482,
+    2.26427,
+    1.55152
+   ],
+   "yaw_deg": 30.11
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.21263,
+    2.15706,
+    1.55236
+   ],
+   "yaw_deg": 12.81
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.20679,
+    2.05087,
+    1.55357
+   ],
+   "yaw_deg": 29.01
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.10347,
+    3.65463,
+    1.55417
+   ],
+   "yaw_deg": -24.13
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.09715,
+    3.5413,
+    1.55276
+   ],
+   "yaw_deg": 5.78
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.09645,
+    3.44196,
+    1.55182
+   ],
+   "yaw_deg": 7.36
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.10724,
+    3.33125,
+    1.55124
+   ],
+   "yaw_deg": -15.08
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.11135,
+    3.18952,
+    1.55132
+   ],
+   "yaw_deg": -12.51
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.10188,
+    3.05834,
+    1.5522
+   ],
+   "yaw_deg": -12.86
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.10039,
+    2.9427,
+    1.55348
+   ],
+   "yaw_deg": -26.43
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.09271,
+    2.84545,
+    1.55479
+   ],
+   "yaw_deg": -13.32
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.10314,
+    2.7551,
+    1.55398
+   ],
+   "yaw_deg": 18.98
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.10873,
+    2.64427,
+    1.55263
+   ],
+   "yaw_deg": 16.96
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.09987,
+    2.52482,
+    1.5516
+   ],
+   "yaw_deg": -31.97
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_0_1",
+   "location_ue_m": [
+    0.09826,
+    2.10645,
+    1.5529
+   ],
+   "yaw_deg": 35.93
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.15329,
+    3.62997,
+    1.88345
+   ],
+   "yaw_deg": -21.01
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.16745,
+    3.43614,
+    1.88069
+   ],
+   "yaw_deg": -18.4
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.16217,
+    3.3383,
+    1.88
+   ],
+   "yaw_deg": 30.44
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_Hollenbeck",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.15492,
+    3.24943,
+    1.87989
+   ],
+   "yaw_deg": -24.2
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.16516,
+    3.16004,
+    1.88026
+   ],
+   "yaw_deg": 21.72
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_Hollenbeck",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.162,
+    3.07774,
+    1.88102
+   ],
+   "yaw_deg": 10.99
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.15678,
+    2.99571,
+    1.88212
+   ],
+   "yaw_deg": 5.44
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.16362,
+    2.9091,
+    1.88355
+   ],
+   "yaw_deg": -5.61
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.15445,
+    2.83343,
+    1.88494
+   ],
+   "yaw_deg": -9.08
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.15512,
+    2.73695,
+    1.88331
+   ],
+   "yaw_deg": 5.3
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.16081,
+    2.65934,
+    1.88205
+   ],
+   "yaw_deg": 34.88
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.16221,
+    2.58293,
+    1.88103
+   ],
+   "yaw_deg": -23.1
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.17062,
+    2.48556,
+    1.88017
+   ],
+   "yaw_deg": 30.91
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.15905,
+    2.40653,
+    1.87988
+   ],
+   "yaw_deg": -19.88
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_0_2",
+   "location_ue_m": [
+    0.15749,
+    2.3094,
+    1.88006
+   ],
+   "yaw_deg": -4.68
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.16786,
+    1.79167,
+    1.22427
+   ],
+   "yaw_deg": -33.67
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.15617,
+    1.67154,
+    1.22303
+   ],
+   "yaw_deg": 20.65
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.16261,
+    1.55718,
+    1.22217
+   ],
+   "yaw_deg": 9.79
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.15735,
+    1.45187,
+    1.22176
+   ],
+   "yaw_deg": 10.86
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.17168,
+    1.34195,
+    1.22178
+   ],
+   "yaw_deg": 4.04
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.17176,
+    1.24639,
+    1.22217
+   ],
+   "yaw_deg": -16.52
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.15761,
+    1.10847,
+    1.22326
+   ],
+   "yaw_deg": -26.96
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.16694,
+    0.86198,
+    1.224
+   ],
+   "yaw_deg": -27.46
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.15827,
+    0.74349,
+    1.22282
+   ],
+   "yaw_deg": 3.82
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.16947,
+    0.54685,
+    1.22176
+   ],
+   "yaw_deg": 12.89
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.15815,
+    0.44089,
+    1.22178
+   ],
+   "yaw_deg": 16.89
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.15245,
+    0.32634,
+    1.22226
+   ],
+   "yaw_deg": 17.09
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_0",
+   "location_ue_m": [
+    0.1628,
+    0.20365,
+    1.22326
+   ],
+   "yaw_deg": -17.34
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.20682,
+    1.78024,
+    1.55344
+   ],
+   "yaw_deg": -19.11
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.21262,
+    1.66797,
+    1.55136
+   ],
+   "yaw_deg": 26.9
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.21217,
+    1.57499,
+    1.55005
+   ],
+   "yaw_deg": 5.96
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.19833,
+    1.4808,
+    1.54925
+   ],
+   "yaw_deg": -17.4
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.19807,
+    1.37235,
+    1.54907
+   ],
+   "yaw_deg": 24.99
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.19642,
+    1.24956,
+    1.54984
+   ],
+   "yaw_deg": -12.69
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.20514,
+    1.14523,
+    1.55122
+   ],
+   "yaw_deg": -3.37
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.20665,
+    1.04824,
+    1.55297
+   ],
+   "yaw_deg": -8.42
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.19711,
+    0.9526,
+    1.55495
+   ],
+   "yaw_deg": -22.94
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.21104,
+    0.85202,
+    1.55298
+   ],
+   "yaw_deg": 31.17
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.2117,
+    0.54952,
+    1.54913
+   ],
+   "yaw_deg": 32.57
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.21115,
+    0.45267,
+    1.5491
+   ],
+   "yaw_deg": 3.5
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.19522,
+    0.3394,
+    1.54989
+   ],
+   "yaw_deg": 29.11
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.20757,
+    0.12285,
+    1.55338
+   ],
+   "yaw_deg": 10.17
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.10545,
+    1.76773,
+    1.55319
+   ],
+   "yaw_deg": -24.3
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.09616,
+    1.65441,
+    1.55114
+   ],
+   "yaw_deg": -23.34
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.10101,
+    1.56338,
+    1.54992
+   ],
+   "yaw_deg": -33.8
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.09324,
+    1.46413,
+    1.54917
+   ],
+   "yaw_deg": 7.21
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.09535,
+    1.18368,
+    1.55064
+   ],
+   "yaw_deg": -26.57
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.10676,
+    1.07263,
+    1.5525
+   ],
+   "yaw_deg": -12.23
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.10966,
+    0.96033,
+    1.55478
+   ],
+   "yaw_deg": 6.28
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.10683,
+    0.84968,
+    1.55293
+   ],
+   "yaw_deg": -22.71
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.10453,
+    0.73952,
+    1.55098
+   ],
+   "yaw_deg": 15.74
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.10142,
+    0.60257,
+    1.54942
+   ],
+   "yaw_deg": -2.12
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.10303,
+    0.32352,
+    1.55007
+   ],
+   "yaw_deg": 14.69
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.0932,
+    0.20542,
+    1.55181
+   ],
+   "yaw_deg": 12.48
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_1_1",
+   "location_ue_m": [
+    0.09204,
+    0.10674,
+    1.55371
+   ],
+   "yaw_deg": 33.45
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.16031,
+    1.65302,
+    1.88149
+   ],
+   "yaw_deg": 13.58
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.17165,
+    1.5573,
+    1.88036
+   ],
+   "yaw_deg": 11.29
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_Hollenbeck",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.16677,
+    1.47171,
+    1.87977
+   ],
+   "yaw_deg": -4.97
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.15256,
+    1.37637,
+    1.87964
+   ],
+   "yaw_deg": -27.56
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.15663,
+    1.18864,
+    1.881
+   ],
+   "yaw_deg": 9.56
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.16049,
+    1.10123,
+    1.88227
+   ],
+   "yaw_deg": 34.21
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.15301,
+    1.02053,
+    1.88367
+   ],
+   "yaw_deg": 2.53
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.1564,
+    0.93339,
+    1.88468
+   ],
+   "yaw_deg": 0.89
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.16943,
+    0.84337,
+    1.88302
+   ],
+   "yaw_deg": 0.07
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.1654,
+    0.75144,
+    1.88154
+   ],
+   "yaw_deg": 0.25
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.15984,
+    0.56406,
+    1.87975
+   ],
+   "yaw_deg": -3.4
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.16798,
+    0.4655,
+    1.87965
+   ],
+   "yaw_deg": -21.0
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.15602,
+    0.37943,
+    1.88005
+   ],
+   "yaw_deg": 33.96
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.15418,
+    0.29991,
+    1.88081
+   ],
+   "yaw_deg": 14.72
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_Hollenbeck",
+   "group": "shelf_1_2",
+   "location_ue_m": [
+    0.15794,
+    0.20945,
+    1.88206
+   ],
+   "yaw_deg": -32.48
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.16625,
+    -0.12847,
+    1.22327
+   ],
+   "yaw_deg": -22.4
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.15925,
+    -0.22848,
+    1.22142
+   ],
+   "yaw_deg": -18.99
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.15821,
+    -0.32404,
+    1.22006
+   ],
+   "yaw_deg": 20.26
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.15582,
+    -0.42559,
+    1.21922
+   ],
+   "yaw_deg": 12.84
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.16066,
+    -0.69121,
+    1.22031
+   ],
+   "yaw_deg": -11.79
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.15759,
+    -0.84227,
+    1.22279
+   ],
+   "yaw_deg": -3.83
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.16274,
+    -0.97518,
+    1.22447
+   ],
+   "yaw_deg": -15.16
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.15844,
+    -1.08108,
+    1.22234
+   ],
+   "yaw_deg": 16.02
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_2_0",
+   "location_ue_m": [
+    0.15579,
+    -1.75774,
+    1.22299
+   ],
+   "yaw_deg": 3.49
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.20883,
+    -0.1083,
+    1.55354
+   ],
+   "yaw_deg": 20.31
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.19687,
+    -0.21689,
+    1.55127
+   ],
+   "yaw_deg": -14.97
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.19598,
+    -0.33583,
+    1.54941
+   ],
+   "yaw_deg": -23.64
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.2069,
+    -0.43755,
+    1.54857
+   ],
+   "yaw_deg": 34.73
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.20618,
+    -0.54184,
+    1.5485
+   ],
+   "yaw_deg": 9.14
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.20173,
+    -0.87979,
+    1.55339
+   ],
+   "yaw_deg": -7.21
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.1965,
+    -0.99422,
+    1.55398
+   ],
+   "yaw_deg": -26.12
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.20241,
+    -1.09544,
+    1.55178
+   ],
+   "yaw_deg": -15.27
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.196,
+    -1.20947,
+    1.54982
+   ],
+   "yaw_deg": 3.17
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.2057,
+    -1.3026,
+    1.54881
+   ],
+   "yaw_deg": 8.06
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.19361,
+    -1.41427,
+    1.54843
+   ],
+   "yaw_deg": -32.77
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.20503,
+    -1.50845,
+    1.54886
+   ],
+   "yaw_deg": 7.2
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.19281,
+    -1.69742,
+    1.55154
+   ],
+   "yaw_deg": -24.14
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.10697,
+    -0.12728,
+    1.55312
+   ],
+   "yaw_deg": -4.8
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.09853,
+    -0.25069,
+    1.55066
+   ],
+   "yaw_deg": 9.01
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.10912,
+    -0.35824,
+    1.54916
+   ],
+   "yaw_deg": 17.56
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.09724,
+    -0.47812,
+    1.54844
+   ],
+   "yaw_deg": 9.95
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.09811,
+    -0.57423,
+    1.54865
+   ],
+   "yaw_deg": 32.59
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.11019,
+    -0.86639,
+    1.55309
+   ],
+   "yaw_deg": 10.08
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.09991,
+    -0.97257,
+    1.55448
+   ],
+   "yaw_deg": -9.04
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.10482,
+    -1.08129,
+    1.55207
+   ],
+   "yaw_deg": 28.67
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.10872,
+    -1.1674,
+    1.55046
+   ],
+   "yaw_deg": 13.67
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.11111,
+    -1.2574,
+    1.54923
+   ],
+   "yaw_deg": -23.13
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.09461,
+    -1.35395,
+    1.54852
+   ],
+   "yaw_deg": -38.95
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.11181,
+    -1.46813,
+    1.54859
+   ],
+   "yaw_deg": 11.78
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.09999,
+    -1.59321,
+    1.54979
+   ],
+   "yaw_deg": -16.09
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_2_1",
+   "location_ue_m": [
+    0.09737,
+    -1.701,
+    1.55161
+   ],
+   "yaw_deg": -10.09
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.16206,
+    -0.11392,
+    1.88424
+   ],
+   "yaw_deg": 9.41
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.15319,
+    -0.19692,
+    1.88339
+   ],
+   "yaw_deg": 23.19
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.15204,
+    -0.28975,
+    1.88261
+   ],
+   "yaw_deg": -3.03
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.15994,
+    -0.47887,
+    1.88185
+   ],
+   "yaw_deg": -31.99
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.1715,
+    -0.56962,
+    1.88194
+   ],
+   "yaw_deg": 28.62
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.1643,
+    -0.65703,
+    1.8823
+   ],
+   "yaw_deg": -28.59
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.15487,
+    -0.73639,
+    1.88285
+   ],
+   "yaw_deg": -1.03
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.15202,
+    -0.82693,
+    1.88367
+   ],
+   "yaw_deg": 33.86
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.15649,
+    -0.91995,
+    1.88467
+   ],
+   "yaw_deg": 29.29
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.16058,
+    -1.00133,
+    1.88443
+   ],
+   "yaw_deg": -33.48
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.15737,
+    -1.08784,
+    1.88353
+   ],
+   "yaw_deg": 28.54
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.17123,
+    -1.29892,
+    1.88204
+   ],
+   "yaw_deg": -9.09
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.17065,
+    -1.38385,
+    1.88185
+   ],
+   "yaw_deg": -31.22
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.16877,
+    -1.48241,
+    1.88196
+   ],
+   "yaw_deg": 34.3
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.16552,
+    -1.56578,
+    1.88232
+   ],
+   "yaw_deg": 7.75
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.15852,
+    -1.65738,
+    1.88298
+   ],
+   "yaw_deg": 24.49
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_2_2",
+   "location_ue_m": [
+    0.17071,
+    -1.75159,
+    1.88387
+   ],
+   "yaw_deg": 6.46
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.15359,
+    -2.02714,
+    1.22393
+   ],
+   "yaw_deg": 21.82
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.16065,
+    -2.12167,
+    1.22282
+   ],
+   "yaw_deg": -19.02
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.16032,
+    -2.26161,
+    1.22168
+   ],
+   "yaw_deg": 15.78
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.1683,
+    -2.37277,
+    1.22133
+   ],
+   "yaw_deg": -11.84
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.16653,
+    -2.45955,
+    1.22144
+   ],
+   "yaw_deg": 15.24
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.15968,
+    -2.54822,
+    1.22189
+   ],
+   "yaw_deg": -31.81
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.16865,
+    -2.65527,
+    1.22284
+   ],
+   "yaw_deg": 20.02
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.16355,
+    -2.77788,
+    1.22431
+   ],
+   "yaw_deg": 8.39
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.16361,
+    -3.10466,
+    1.22194
+   ],
+   "yaw_deg": -3.55
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.16613,
+    -3.23391,
+    1.22136
+   ],
+   "yaw_deg": 3.27
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.15409,
+    -3.35598,
+    1.22148
+   ],
+   "yaw_deg": 13.84
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_3_0",
+   "location_ue_m": [
+    0.16773,
+    -3.61603,
+    1.22372
+   ],
+   "yaw_deg": -20.07
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.19933,
+    -2.10037,
+    1.55153
+   ],
+   "yaw_deg": 34.91
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.21072,
+    -2.20479,
+    1.54975
+   ],
+   "yaw_deg": -3.72
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.20116,
+    -2.3171,
+    1.54865
+   ],
+   "yaw_deg": 15.13
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.20125,
+    -2.43412,
+    1.54854
+   ],
+   "yaw_deg": -29.82
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.2109,
+    -2.62154,
+    1.55055
+   ],
+   "yaw_deg": 16.48
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.20744,
+    -2.82293,
+    1.55483
+   ],
+   "yaw_deg": 5.11
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.19872,
+    -2.9179,
+    1.55296
+   ],
+   "yaw_deg": 6.34
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.20455,
+    -3.03077,
+    1.55068
+   ],
+   "yaw_deg": 28.18
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.20824,
+    -3.14283,
+    1.54912
+   ],
+   "yaw_deg": -19.95
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.20417,
+    -3.25087,
+    1.54847
+   ],
+   "yaw_deg": -27.98
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.19784,
+    -3.37046,
+    1.54883
+   ],
+   "yaw_deg": 9.79
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.20163,
+    -3.47888,
+    1.5501
+   ],
+   "yaw_deg": -10.64
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.21128,
+    -3.60125,
+    1.55239
+   ],
+   "yaw_deg": -4.17
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.1019,
+    -2.02377,
+    1.55316
+   ],
+   "yaw_deg": -23.48
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.10732,
+    -2.12438,
+    1.55107
+   ],
+   "yaw_deg": -21.78
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.10441,
+    -2.21399,
+    1.54963
+   ],
+   "yaw_deg": -10.98
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_AshbyRidge",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.10899,
+    -2.32384,
+    1.54861
+   ],
+   "yaw_deg": -12.17
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.09746,
+    -2.42346,
+    1.5485
+   ],
+   "yaw_deg": -16.41
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.0948,
+    -2.53227,
+    1.54928
+   ],
+   "yaw_deg": -15.87
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.10581,
+    -2.63706,
+    1.55082
+   ],
+   "yaw_deg": 36.51
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.1061,
+    -2.74837,
+    1.5531
+   ],
+   "yaw_deg": 8.38
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Ember",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.10835,
+    -2.86822,
+    1.5541
+   ],
+   "yaw_deg": -2.86
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_ElTordo",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.09629,
+    -2.97277,
+    1.55178
+   ],
+   "yaw_deg": -16.21
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Frostmint",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.10935,
+    -3.07637,
+    1.54994
+   ],
+   "yaw_deg": -1.52
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.11006,
+    -3.16621,
+    1.5489
+   ],
+   "yaw_deg": 1.39
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Dockhand",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.10804,
+    -3.28135,
+    1.54845
+   ],
+   "yaw_deg": -27.23
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Korvin",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.10806,
+    -3.4042,
+    1.54914
+   ],
+   "yaw_deg": -7.84
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.098,
+    -3.52434,
+    1.55086
+   ],
+   "yaw_deg": 37.42
+  },
+  {
+   "age_bias": 0.0,
+   "asset": "Bottle_Wexmoor",
+   "group": "shelf_3_1",
+   "location_ue_m": [
+    0.09948,
+    -3.64647,
+    1.5534
+   ],
+   "yaw_deg": -32.07
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.16558,
+    -2.03308,
+    1.88404
+   ],
+   "yaw_deg": -29.97
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.16287,
+    -2.12417,
+    1.88315
+   ],
+   "yaw_deg": 11.89
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.15525,
+    -2.35922,
+    1.88193
+   ],
+   "yaw_deg": -32.76
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.16867,
+    -2.4512,
+    1.88199
+   ],
+   "yaw_deg": -17.6
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.15893,
+    -2.70045,
+    1.88361
+   ],
+   "yaw_deg": -1.42
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.15678,
+    -2.93597,
+    1.88385
+   ],
+   "yaw_deg": -8.0
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.16257,
+    -3.01449,
+    1.8831
+   ],
+   "yaw_deg": 5.85
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.16474,
+    -3.28428,
+    1.88192
+   ],
+   "yaw_deg": 10.64
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.16531,
+    -3.36543,
+    1.88208
+   ],
+   "yaw_deg": 20.67
+  },
+  {
+   "age_bias": 0.25,
+   "asset": "Bottle_OldCastor",
+   "group": "shelf_3_2",
+   "location_ue_m": [
+    0.16497,
+    -3.58959,
+    1.88365
+   ],
+   "yaw_deg": -4.28
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    3.54396,
+    2.257
+   ],
+   "mug_number": 1,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -83.54
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    3.28474,
+    2.257
+   ],
+   "mug_number": 2,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -81.88
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    3.03415,
+    2.257
+   ],
+   "mug_number": 3,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -94.04
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    2.75326,
+    2.257
+   ],
+   "mug_number": 4,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -105.49
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    2.50402,
+    2.257
+   ],
+   "mug_number": 5,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -65.22
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    2.2082,
+    2.257
+   ],
+   "mug_number": 6,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -102.03
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    1.97338,
+    2.257
+   ],
+   "mug_number": 7,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -73.1
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    1.68308,
+    2.257
+   ],
+   "mug_number": 8,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -103.85
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    1.4247,
+    2.257
+   ],
+   "mug_number": 9,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -92.11
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    1.15466,
+    2.257
+   ],
+   "mug_number": 10,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -92.3
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    0.88641,
+    2.257
+   ],
+   "mug_number": 11,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -77.69
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    0.61534,
+    2.257
+   ],
+   "mug_number": 12,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -83.25
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    0.34033,
+    2.257
+   ],
+   "mug_number": 13,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -75.09
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    0.07689,
+    2.257
+   ],
+   "mug_number": 14,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -96.84
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_0",
+   "location_ue_m": [
+    0.14,
+    -0.17947,
+    2.257
+   ],
+   "mug_number": 15,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -73.26
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    3.53905,
+    2.41
+   ],
+   "mug_number": 16,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -80.9
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    3.30894,
+    2.41
+   ],
+   "mug_number": 17,
+   "note": "#17 WALT carries a black ribbon (S4)",
+   "ribbon": true,
+   "yaw_deg": -69.74
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    3.02239,
+    2.41
+   ],
+   "mug_number": 18,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -113.0
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    2.74921,
+    2.41
+   ],
+   "mug_number": 19,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -69.13
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    2.47587,
+    2.41
+   ],
+   "mug_number": 20,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -100.41
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    2.23334,
+    2.41
+   ],
+   "mug_number": 21,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -99.89
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    1.9588,
+    2.41
+   ],
+   "mug_number": 22,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -100.27
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    1.6908,
+    2.41
+   ],
+   "mug_number": 23,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -101.51
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    1.42429,
+    2.41
+   ],
+   "mug_number": 24,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -113.05
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    1.15946,
+    2.41
+   ],
+   "mug_number": 25,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -82.25
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    0.87108,
+    2.41
+   ],
+   "mug_number": 26,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -68.67
+  },
+  {
+   "asset": "Mug_B",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    0.60677,
+    2.41
+   ],
+   "mug_number": 27,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -102.22
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    0.36806,
+    2.41
+   ],
+   "mug_number": 28,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -79.22
+  },
+  {
+   "asset": "Mug_A",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    0.09979,
+    2.41
+   ],
+   "mug_number": 29,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -99.52
+  },
+  {
+   "asset": "Mug_C",
+   "group": "mug_rack_1",
+   "location_ue_m": [
+    0.09,
+    -0.1864,
+    2.41
+   ],
+   "mug_number": 30,
+   "note": "",
+   "ribbon": false,
+   "yaw_deg": -71.78
+  },
+  {
+   "asset": "Bottle_Korvin",
+   "group": "counter",
+   "location_ue_m": [
+    0.12,
+    1.24,
+    0.91
+   ],
+   "yaw_deg": -2.31
+  },
+  {
+   "asset": "Bottle_Dockhand",
+   "group": "counter",
+   "location_ue_m": [
+    0.12,
+    1.11,
+    0.91
+   ],
+   "yaw_deg": -0.53
+  },
+  {
+   "asset": "Bottle_Ember",
+   "group": "counter",
+   "location_ue_m": [
+    0.12,
+    0.98,
+    0.91
+   ],
+   "yaw_deg": -18.44
+  },
+  {
+   "asset": "Bottle_AshbyRidge",
+   "group": "counter",
+   "location_ue_m": [
+    0.12,
+    0.85,
+    0.91
+   ],
+   "yaw_deg": -27.85
+  }
+ ],
+ "prop_instances_note": "asset = the instanced asset id (SM_DB_<asset>), location_ue_m in the back bar's Unreal frame (pivot-relative, metres; M2-A's place_prop reads it); bottles stand on the sagged shelves",
+ "ray_tracing": true,
+ "shelf_top_z_m": [
+  1.225,
+  1.555,
+  1.885
+ ],
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.66,
+    7.62
+   ],
+   "spec_m": [
+    0.66,
+    7.62
+   ],
+   "tolerance_m": 0.002,
+   "what": "counter top",
+   "z_range_m": [
+    0.9,
+    0.911
+   ]
+  }
+ ],
+ "spec_id": "H09",
+ "target_dimensions_m": [
+  0.66,
+  7.62,
+  2.6
+ ],
+ "tolerance_m": 0.002,
+ "translucent": false,
+ "triangles": 49736,
+ "triangles_render": 49496,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Bar",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Bar/SM_DB_BackBar",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/BackBar/T_DB_BackBar_WM.png"
+}

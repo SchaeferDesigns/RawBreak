@@ -1,0 +1,71 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {},
+ "asset_id": "BoothTable",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.38,
+  0.535,
+  0.76
+ ],
+ "bounds_min_m": [
+  -0.38,
+  -0.535,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.38,
+  0.535,
+  0.76
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.38,
+  -0.535,
+  0.0
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 6,
+ "collision_profile": "RbVenueBlock",
+ "element": "E08",
+ "external_inputs": [],
+ "family": "Booths",
+ "fbx": "SM_DB_BoothTable.fbx",
+ "front": "+X",
+ "generator": "db_booth.py",
+ "geometry_sha256": "f8f4401b4181c8a5e0a637032b9ab59bc3f8e1066c76dfba0447a44cf6ec320d",
+ "ledger_asset_id": "SM_DB_BoothTable",
+ "material_slots": [
+  "MI_DB_Laminate_Walnut",
+  "MI_DB_Alu_Trim",
+  "MI_DB_Paint_BlackSteel",
+  "MI_DB_Rubber_Black"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "floor_center",
+ "placement_hint_ue_cm": {
+  "note": "set centres X 3.095 / 5.025 / 6.955, Y 6.785; long side (1.07) along venue Y",
+  "yaw_deg": 0.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_id": "M02",
+ "target_dimensions_m": [
+  0.76,
+  1.07,
+  0.76
+ ],
+ "tolerance_m": 0.01,
+ "top_z_m": 0.76,
+ "translucent": false,
+ "triangles": 852,
+ "triangles_render": 732,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Booths",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Booths/SM_DB_BoothTable",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/BoothTable/T_DB_BoothTable_WM.png"
+}

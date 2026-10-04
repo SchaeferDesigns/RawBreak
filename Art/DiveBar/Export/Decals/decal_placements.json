@@ -1,0 +1,1663 @@
+{
+ "decals": [
+  {
+   "cell": 0,
+   "decal_color_r": 0.03125,
+   "decal_size_cm": [
+    4.0,
+    7.62,
+    7.62
+   ],
+   "label": "DC_ChalkFloor_0_0",
+   "location_cm": [
+    1233.58,
+    467.86,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    202.241,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 7,
+   "decal_color_r": 0.46875,
+   "decal_size_cm": [
+    4.0,
+    7.46,
+    7.46
+   ],
+   "label": "DC_ChalkFloor_0_1",
+   "location_cm": [
+    1250.6,
+    462.61,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    69.036,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 1,
+   "decal_color_r": 0.09375,
+   "decal_size_cm": [
+    4.0,
+    7.06,
+    7.06
+   ],
+   "label": "DC_ChalkFloor_0_2",
+   "location_cm": [
+    1219.86,
+    456.84,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    114.335,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 7,
+   "decal_color_r": 0.46875,
+   "decal_size_cm": [
+    4.0,
+    7.51,
+    7.51
+   ],
+   "label": "DC_ChalkFloor_0_3",
+   "location_cm": [
+    1240.2,
+    461.47,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    47.386,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 6,
+   "decal_color_r": 0.40625,
+   "decal_size_cm": [
+    4.0,
+    9.36,
+    9.36
+   ],
+   "label": "DC_ChalkFloor_0_4",
+   "location_cm": [
+    1229.02,
+    457.69,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    214.459,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 1,
+   "decal_color_r": 0.09375,
+   "decal_size_cm": [
+    4.0,
+    10.85,
+    10.85
+   ],
+   "label": "DC_ChalkFloor_1_0",
+   "location_cm": [
+    1246.12,
+    618.11,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    67.061,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 0,
+   "decal_color_r": 0.03125,
+   "decal_size_cm": [
+    4.0,
+    9.38,
+    9.38
+   ],
+   "label": "DC_ChalkFloor_1_1",
+   "location_cm": [
+    1224.98,
+    634.2,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    164.55,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 7,
+   "decal_color_r": 0.46875,
+   "decal_size_cm": [
+    4.0,
+    9.19,
+    9.19
+   ],
+   "label": "DC_ChalkFloor_1_2",
+   "location_cm": [
+    1231.85,
+    633.66,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    19.337,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 4,
+   "decal_color_r": 0.28125,
+   "decal_size_cm": [
+    4.0,
+    8.13,
+    8.13
+   ],
+   "label": "DC_ChalkFloor_1_3",
+   "location_cm": [
+    1234.48,
+    617.23,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    349.415,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 2,
+   "decal_color_r": 0.15625,
+   "decal_size_cm": [
+    4.0,
+    10.08,
+    10.08
+   ],
+   "label": "DC_ChalkFloor_1_4",
+   "location_cm": [
+    1252.69,
+    642.13,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    299.235,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 5,
+   "decal_color_r": 0.34375,
+   "decal_size_cm": [
+    4.0,
+    7.68,
+    7.68
+   ],
+   "label": "DC_ChalkFloor_2_0",
+   "location_cm": [
+    1519.64,
+    450.14,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    200.514,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 3,
+   "decal_color_r": 0.21875,
+   "decal_size_cm": [
+    4.0,
+    10.49,
+    10.49
+   ],
+   "label": "DC_ChalkFloor_2_1",
+   "location_cm": [
+    1514.92,
+    453.13,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    299.247,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 2,
+   "decal_color_r": 0.15625,
+   "decal_size_cm": [
+    4.0,
+    6.27,
+    6.27
+   ],
+   "label": "DC_ChalkFloor_2_2",
+   "location_cm": [
+    1526.35,
+    444.98,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    44.097,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 5,
+   "decal_color_r": 0.34375,
+   "decal_size_cm": [
+    4.0,
+    8.35,
+    8.35
+   ],
+   "label": "DC_ChalkFloor_2_3",
+   "location_cm": [
+    1516.84,
+    451.95,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    31.743,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 7,
+   "decal_color_r": 0.46875,
+   "decal_size_cm": [
+    4.0,
+    9.71,
+    9.71
+   ],
+   "label": "DC_ChalkFloor_2_4",
+   "location_cm": [
+    1499.2,
+    448.72,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    142.599,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 5,
+   "decal_color_r": 0.34375,
+   "decal_size_cm": [
+    4.0,
+    10.23,
+    10.23
+   ],
+   "label": "DC_ChalkFloor_3_0",
+   "location_cm": [
+    1523.62,
+    632.84,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    119.994,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 4,
+   "decal_color_r": 0.28125,
+   "decal_size_cm": [
+    4.0,
+    6.19,
+    6.19
+   ],
+   "label": "DC_ChalkFloor_3_1",
+   "location_cm": [
+    1509.9,
+    622.5,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    185.816,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 2,
+   "decal_color_r": 0.15625,
+   "decal_size_cm": [
+    4.0,
+    9.18,
+    9.18
+   ],
+   "label": "DC_ChalkFloor_3_2",
+   "location_cm": [
+    1502.9,
+    644.0,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    119.028,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 0,
+   "decal_color_r": 0.03125,
+   "decal_size_cm": [
+    4.0,
+    7.48,
+    7.48
+   ],
+   "label": "DC_ChalkFloor_3_3",
+   "location_cm": [
+    1524.44,
+    633.83,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    82.681,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 6,
+   "decal_color_r": 0.40625,
+   "decal_size_cm": [
+    4.0,
+    8.43,
+    8.43
+   ],
+   "label": "DC_ChalkFloor_3_4",
+   "location_cm": [
+    1531.06,
+    638.08,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    212.785,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 6,
+   "decal_color_r": 0.40625,
+   "decal_size_cm": [
+    4.0,
+    9.01,
+    9.01
+   ],
+   "label": "DC_ChalkFloorSide_0",
+   "location_cm": [
+    1368.85,
+    462,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    155.353,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 6,
+   "decal_color_r": 0.40625,
+   "decal_size_cm": [
+    4.0,
+    9.89,
+    9.89
+   ],
+   "label": "DC_ChalkFloorSide_1",
+   "location_cm": [
+    1375.58,
+    624,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    289.847,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 2,
+   "decal_color_r": 0.15625,
+   "decal_size_cm": [
+    4.0,
+    6.22,
+    6.22
+   ],
+   "label": "DC_ChalkFloorSide_2",
+   "location_cm": [
+    1235.26,
+    543,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_Floor_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    32.087,
+    0.0
+   ],
+   "set": "Chalk",
+   "surface": "floor",
+   "variant": "Floor"
+  },
+  {
+   "cell": 6,
+   "decal_color_r": 0.40625,
+   "decal_size_cm": [
+    4.0,
+    9.34,
+    9.34
+   ],
+   "label": "DC_Heel_Bar_0",
+   "location_cm": [
+    569.75,
+    301.87,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    108.251,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 3,
+   "decal_color_r": 0.21875,
+   "decal_size_cm": [
+    4.0,
+    13.12,
+    13.12
+   ],
+   "label": "DC_Heel_Bar_1",
+   "location_cm": [
+    380.86,
+    242.92,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    93.864,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 2,
+   "decal_color_r": 0.15625,
+   "decal_size_cm": [
+    4.0,
+    10.49,
+    10.49
+   ],
+   "label": "DC_Heel_Bar_2",
+   "location_cm": [
+    890.1,
+    242.51,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    63.289,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 5,
+   "decal_color_r": 0.34375,
+   "decal_size_cm": [
+    4.0,
+    9.13,
+    9.13
+   ],
+   "label": "DC_Heel_Bar_3",
+   "location_cm": [
+    631.14,
+    277.0,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    53.723,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 3,
+   "decal_color_r": 0.21875,
+   "decal_size_cm": [
+    4.0,
+    11.96,
+    11.96
+   ],
+   "label": "DC_Heel_Bar_4",
+   "location_cm": [
+    788.54,
+    262.78,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    124.586,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 4,
+   "decal_color_r": 0.28125,
+   "decal_size_cm": [
+    4.0,
+    14.45,
+    14.45
+   ],
+   "label": "DC_Heel_Bar_5",
+   "location_cm": [
+    699.83,
+    279.68,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    23.38,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 4,
+   "decal_color_r": 0.28125,
+   "decal_size_cm": [
+    4.0,
+    13.24,
+    13.24
+   ],
+   "label": "DC_Heel_Bar_6",
+   "location_cm": [
+    459.49,
+    296.1,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    191.817,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 5,
+   "decal_color_r": 0.34375,
+   "decal_size_cm": [
+    4.0,
+    14.98,
+    14.98
+   ],
+   "label": "DC_Heel_Bar_7",
+   "location_cm": [
+    673.18,
+    274.03,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    321.735,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 6,
+   "decal_color_r": 0.40625,
+   "decal_size_cm": [
+    4.0,
+    11.61,
+    11.61
+   ],
+   "label": "DC_Heel_Bar_8",
+   "location_cm": [
+    301.09,
+    265.23,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    48.415,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 5,
+   "decal_color_r": 0.34375,
+   "decal_size_cm": [
+    4.0,
+    10.15,
+    10.15
+   ],
+   "label": "DC_Heel_Table_0",
+   "location_cm": [
+    1533.6,
+    576.87,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    15.122,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 4,
+   "decal_color_r": 0.28125,
+   "decal_size_cm": [
+    4.0,
+    12.96,
+    12.96
+   ],
+   "label": "DC_Heel_Table_1",
+   "location_cm": [
+    1259.32,
+    617.4,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    181.262,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 4,
+   "decal_color_r": 0.28125,
+   "decal_size_cm": [
+    4.0,
+    12.54,
+    12.54
+   ],
+   "label": "DC_Heel_Table_2",
+   "location_cm": [
+    1485.79,
+    445.79,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    229.376,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 5,
+   "decal_color_r": 0.34375,
+   "decal_size_cm": [
+    4.0,
+    9.81,
+    9.81
+   ],
+   "label": "DC_Heel_Table_3",
+   "location_cm": [
+    1214.49,
+    529.96,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    11.707,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 6,
+   "decal_color_r": 0.40625,
+   "decal_size_cm": [
+    4.0,
+    10.7,
+    10.7
+   ],
+   "label": "DC_Heel_Table_4",
+   "location_cm": [
+    1480.6,
+    459.05,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    25.199,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 3,
+   "decal_color_r": 0.21875,
+   "decal_size_cm": [
+    4.0,
+    13.62,
+    13.62
+   ],
+   "label": "DC_Heel_Table_5",
+   "location_cm": [
+    1309.93,
+    444.75,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    174.737,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 4,
+   "decal_color_r": 0.28125,
+   "decal_size_cm": [
+    4.0,
+    10.73,
+    10.73
+   ],
+   "label": "DC_Heel_Table_6",
+   "location_cm": [
+    1206.24,
+    514.93,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    348.187,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 6,
+   "decal_color_r": 0.40625,
+   "decal_size_cm": [
+    4.0,
+    10.89,
+    10.89
+   ],
+   "label": "DC_Heel_Table_7",
+   "location_cm": [
+    1440.79,
+    442.01,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    155.046,
+    0.0
+   ],
+   "set": "Scuffs",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 10,
+   "decal_color_r": 0.65625,
+   "decal_size_cm": [
+    4.0,
+    27.5,
+    27.5
+   ],
+   "label": "DC_Spill_0",
+   "location_cm": [
+    520,
+    262,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Stains_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    200.509,
+    0.0
+   ],
+   "set": "Stains",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 1,
+   "decal_color_r": 0.09375,
+   "decal_size_cm": [
+    4.0,
+    22.5,
+    22.5
+   ],
+   "label": "DC_Spill_1",
+   "location_cm": [
+    760,
+    250,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Stains_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    61.163,
+    0.0
+   ],
+   "set": "Stains",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 8,
+   "decal_color_r": 0.53125,
+   "decal_size_cm": [
+    4.0,
+    20.0,
+    20.0
+   ],
+   "label": "DC_Spill_2",
+   "location_cm": [
+    870,
+    300,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Stains_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    332.927,
+    0.0
+   ],
+   "set": "Stains",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 3,
+   "decal_color_r": 0.21875,
+   "decal_size_cm": [
+    4.0,
+    25.0,
+    25.0
+   ],
+   "label": "DC_Spill_3",
+   "location_cm": [
+    505,
+    590,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Stains_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    180.146,
+    0.0
+   ],
+   "set": "Stains",
+   "surface": "floor",
+   "variant": ""
+  },
+  {
+   "cell": 2,
+   "decal_color_r": 0.15625,
+   "decal_size_cm": [
+    4.0,
+    35.0,
+    35.0
+   ],
+   "label": "DC_Sticky_0",
+   "location_cm": [
+    650,
+    300,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Stains_Sticky_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    273.06,
+    0.0
+   ],
+   "set": "Stains",
+   "surface": "floor",
+   "variant": "Sticky"
+  },
+  {
+   "cell": 8,
+   "decal_color_r": 0.53125,
+   "decal_size_cm": [
+    4.0,
+    35.0,
+    35.0
+   ],
+   "label": "DC_Sticky_1",
+   "location_cm": [
+    980,
+    420,
+    0.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Stains_Sticky_01",
+   "rotation_pyr_deg": [
+    -90.0,
+    81.932,
+    0.0
+   ],
+   "set": "Stains",
+   "surface": "floor",
+   "variant": "Sticky"
+  },
+  {
+   "cell": 8,
+   "decal_color_r": 0.53125,
+   "decal_size_cm": [
+    5.0,
+    14.04,
+    14.04
+   ],
+   "label": "DC_KickDie_0",
+   "location_cm": [
+    368.01,
+    213.0,
+    16.94
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    0.0,
+    -90.0,
+    -1.017
+   ],
+   "set": "Scuffs",
+   "surface": "+Y",
+   "variant": ""
+  },
+  {
+   "cell": 8,
+   "decal_color_r": 0.53125,
+   "decal_size_cm": [
+    5.0,
+    12.38,
+    12.38
+   ],
+   "label": "DC_KickDie_1",
+   "location_cm": [
+    325.9,
+    213.0,
+    18.29
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    0.0,
+    -90.0,
+    1.627
+   ],
+   "set": "Scuffs",
+   "surface": "+Y",
+   "variant": ""
+  },
+  {
+   "cell": 10,
+   "decal_color_r": 0.65625,
+   "decal_size_cm": [
+    5.0,
+    12.91,
+    12.91
+   ],
+   "label": "DC_KickDie_2",
+   "location_cm": [
+    733.33,
+    213.0,
+    20.43
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    0.0,
+    -90.0,
+    11.99
+   ],
+   "set": "Scuffs",
+   "surface": "+Y",
+   "variant": ""
+  },
+  {
+   "cell": 10,
+   "decal_color_r": 0.65625,
+   "decal_size_cm": [
+    5.0,
+    12.54,
+    12.54
+   ],
+   "label": "DC_KickDie_3",
+   "location_cm": [
+    295.8,
+    213.0,
+    12.7
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    0.0,
+    -90.0,
+    -18.259
+   ],
+   "set": "Scuffs",
+   "surface": "+Y",
+   "variant": ""
+  },
+  {
+   "cell": 11,
+   "decal_color_r": 0.71875,
+   "decal_size_cm": [
+    5.0,
+    13.39,
+    13.39
+   ],
+   "label": "DC_KickDie_4",
+   "location_cm": [
+    448.18,
+    213.0,
+    15.29
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    0.0,
+    -90.0,
+    3.111
+   ],
+   "set": "Scuffs",
+   "surface": "+Y",
+   "variant": ""
+  },
+  {
+   "cell": 9,
+   "decal_color_r": 0.59375,
+   "decal_size_cm": [
+    5.0,
+    13.11,
+    13.11
+   ],
+   "label": "DC_KickDie_5",
+   "location_cm": [
+    606.33,
+    213.0,
+    16.84
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_01",
+   "rotation_pyr_deg": [
+    0.0,
+    -90.0,
+    10.329
+   ],
+   "set": "Scuffs",
+   "surface": "+Y",
+   "variant": ""
+  },
+  {
+   "cell": 13,
+   "decal_color_r": 0.84375,
+   "decal_size_cm": [
+    3.0,
+    13.67,
+    13.67
+   ],
+   "label": "DC_Dings_R_0",
+   "location_cm": [
+    1275.0,
+    732.0,
+    93.77
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_Dings_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    -1.49
+   ],
+   "set": "Scuffs",
+   "surface": "-Y",
+   "variant": "Dings"
+  },
+  {
+   "cell": 12,
+   "decal_color_r": 0.78125,
+   "decal_size_cm": [
+    3.0,
+    14.76,
+    14.76
+   ],
+   "label": "DC_Dings_R_1",
+   "location_cm": [
+    1318.0,
+    732.0,
+    89.83
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_Dings_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    4.307
+   ],
+   "set": "Scuffs",
+   "surface": "-Y",
+   "variant": "Dings"
+  },
+  {
+   "cell": 15,
+   "decal_color_r": 0.96875,
+   "decal_size_cm": [
+    3.0,
+    14.24,
+    14.24
+   ],
+   "label": "DC_Dings_R_2",
+   "location_cm": [
+    1452.0,
+    732.0,
+    86.63
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_Dings_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    -5.148
+   ],
+   "set": "Scuffs",
+   "surface": "-Y",
+   "variant": "Dings"
+  },
+  {
+   "cell": 14,
+   "decal_color_r": 0.90625,
+   "decal_size_cm": [
+    3.0,
+    14.42,
+    14.42
+   ],
+   "label": "DC_Dings_R_3",
+   "location_cm": [
+    1488.0,
+    732.0,
+    87.11
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_Dings_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    -2.439
+   ],
+   "set": "Scuffs",
+   "surface": "-Y",
+   "variant": "Dings"
+  },
+  {
+   "cell": 15,
+   "decal_color_r": 0.96875,
+   "decal_size_cm": [
+    3.0,
+    11.63,
+    11.63
+   ],
+   "label": "DC_Dings_B_0",
+   "location_cm": [
+    1646.0,
+    505.0,
+    84.58
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_Dings_01",
+   "rotation_pyr_deg": [
+    0.0,
+    0.0,
+    6.731
+   ],
+   "set": "Scuffs",
+   "surface": "-X",
+   "variant": "Dings"
+  },
+  {
+   "cell": 12,
+   "decal_color_r": 0.78125,
+   "decal_size_cm": [
+    3.0,
+    11.01,
+    11.01
+   ],
+   "label": "DC_Dings_B_1",
+   "location_cm": [
+    1646.0,
+    548.0,
+    94.57
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_Dings_01",
+   "rotation_pyr_deg": [
+    0.0,
+    0.0,
+    6.933
+   ],
+   "set": "Scuffs",
+   "surface": "-X",
+   "variant": "Dings"
+  },
+  {
+   "cell": 12,
+   "decal_color_r": 0.78125,
+   "decal_size_cm": [
+    3.0,
+    12.69,
+    12.69
+   ],
+   "label": "DC_Dings_B_2",
+   "location_cm": [
+    1646.0,
+    590.0,
+    93.94
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Scuffs_Dings_01",
+   "rotation_pyr_deg": [
+    0.0,
+    0.0,
+    0.738
+   ],
+   "set": "Scuffs",
+   "surface": "-X",
+   "variant": "Dings"
+  },
+  {
+   "cell": 15,
+   "decal_color_r": 0.96875,
+   "decal_size_cm": [
+    3.0,
+    4.78,
+    4.78
+   ],
+   "label": "DC_ChalkPrint_0",
+   "location_cm": [
+    1324,
+    732.0,
+    128
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    274.047
+   ],
+   "set": "Chalk",
+   "surface": "-Y",
+   "variant": ""
+  },
+  {
+   "cell": 13,
+   "decal_color_r": 0.84375,
+   "decal_size_cm": [
+    3.0,
+    3.57,
+    3.57
+   ],
+   "label": "DC_ChalkPrint_1",
+   "location_cm": [
+    1327,
+    732.0,
+    96
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    156.525
+   ],
+   "set": "Chalk",
+   "surface": "-Y",
+   "variant": ""
+  },
+  {
+   "cell": 9,
+   "decal_color_r": 0.59375,
+   "decal_size_cm": [
+    3.0,
+    3.78,
+    3.78
+   ],
+   "label": "DC_ChalkPrint_2",
+   "location_cm": [
+    1436,
+    732.0,
+    140
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    327.525
+   ],
+   "set": "Chalk",
+   "surface": "-Y",
+   "variant": ""
+  },
+  {
+   "cell": 12,
+   "decal_color_r": 0.78125,
+   "decal_size_cm": [
+    3.0,
+    3.85,
+    3.85
+   ],
+   "label": "DC_ChalkPrint_3",
+   "location_cm": [
+    1433,
+    732.0,
+    110
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    124.861
+   ],
+   "set": "Chalk",
+   "surface": "-Y",
+   "variant": ""
+  },
+  {
+   "cell": 8,
+   "decal_color_r": 0.53125,
+   "decal_size_cm": [
+    3.0,
+    4.95,
+    4.95
+   ],
+   "label": "DC_ChalkPrint_4",
+   "location_cm": [
+    1380,
+    732.0,
+    166
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    55.152
+   ],
+   "set": "Chalk",
+   "surface": "-Y",
+   "variant": ""
+  },
+  {
+   "cell": 9,
+   "decal_color_r": 0.59375,
+   "decal_size_cm": [
+    3.0,
+    3.71,
+    3.71
+   ],
+   "label": "DC_ChalkPrint_5",
+   "location_cm": [
+    1300,
+    732.0,
+    110
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Chalk_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    30.285
+   ],
+   "set": "Chalk",
+   "surface": "-Y",
+   "variant": ""
+  },
+  {
+   "cell": 1,
+   "decal_color_r": 0.09375,
+   "decal_size_cm": [
+    6.0,
+    45.0,
+    45.0
+   ],
+   "label": "DC_Leak_0",
+   "location_cm": [
+    1590,
+    90,
+    274.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Water_01",
+   "rotation_pyr_deg": [
+    90.0,
+    252.985,
+    0.0
+   ],
+   "set": "Water",
+   "surface": "ceiling",
+   "variant": ""
+  },
+  {
+   "cell": 0,
+   "decal_color_r": 0.03125,
+   "decal_size_cm": [
+    6.0,
+    30.0,
+    30.0
+   ],
+   "label": "DC_Leak_1",
+   "location_cm": [
+    1540,
+    150,
+    274.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Water_01",
+   "rotation_pyr_deg": [
+    90.0,
+    322.242,
+    0.0
+   ],
+   "set": "Water",
+   "surface": "ceiling",
+   "variant": ""
+  },
+  {
+   "cell": 3,
+   "decal_color_r": 0.21875,
+   "decal_size_cm": [
+    6.0,
+    40.0,
+    40.0
+   ],
+   "label": "DC_Leak_2",
+   "location_cm": [
+    300,
+    640,
+    274.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Water_01",
+   "rotation_pyr_deg": [
+    90.0,
+    135.361,
+    0.0
+   ],
+   "set": "Water",
+   "surface": "ceiling",
+   "variant": ""
+  },
+  {
+   "cell": 15,
+   "decal_color_r": 0.96875,
+   "decal_size_cm": [
+    3.0,
+    22.5,
+    36.0
+   ],
+   "label": "DC_Drip_Paneling",
+   "location_cm": [
+    1005.0,
+    732.0,
+    95.0
+   ],
+   "material": "/Game/Generated/Venues/DiveBar/Decals/MI_DB_Decal_Stains_01",
+   "rotation_pyr_deg": [
+    0.0,
+    90.0,
+    0.0
+   ],
+   "set": "Stains",
+   "surface": "-Y",
+   "variant": ""
+  }
+ ],
+ "frame": "venue V (UE world, cm)",
+ "note": "spawn an ADecalActor per entry: DecalMaterial = material, DecalSize = decal_size_cm, DecalColor = (decal_color_r, 0, 0, 1), tags RbDB_Decal + RbDB_Decal_<set>; generated by Tools/unreal/editor/rb_dev_m2b.py",
+ "owner": "M2-B"
+}

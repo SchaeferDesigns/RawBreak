@@ -1,0 +1,65 @@
+{
+ "acoustic_material": "none",
+ "anchors_ue_m": {},
+ "asset_id": "LampBulb_A19",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.03,
+  0.03,
+  0.078
+ ],
+ "bounds_min_m": [
+  -0.03,
+  -0.03,
+  -0.03
+ ],
+ "bounds_with_hulls_max_m": [
+  0.03,
+  0.03,
+  0.078
+ ],
+ "bounds_with_hulls_min_m": [
+  -0.03,
+  -0.03,
+  -0.03
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 0,
+ "collision_profile": "RbVenueProp",
+ "element": "E14",
+ "external_inputs": [],
+ "family": "Lighting",
+ "fbx": "SM_DB_LampBulb_A19.fbx",
+ "front": "+X",
+ "generator": "db_lamp.py",
+ "geometry_sha256": "45d0c73c7e1e7bbea0454a02236acbc4640a313bccdc4eb155fc4f1a79c30ca2",
+ "ledger_asset_id": "SM_DB_LampBulb_A19",
+ "material_slots": [
+  "MI_DB_Emissive_Bulb2700",
+  "MI_DB_Aluminium"
+ ],
+ "nanite": true,
+ "notes": "place at TableLamp_OldCastor anchors bulb_L1..L3; L3 = MI_DB_Emissive_Bulb3000",
+ "owner": "M2-B",
+ "pivot": "glass_centre",
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": false,
+ "spec_id": "H03",
+ "target_dimensions_m": [
+  0.06,
+  0.06,
+  0.108
+ ],
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 1116,
+ "triangles_render": 1116,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Lighting",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Lighting/SM_DB_LampBulb_A19",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": ""
+}

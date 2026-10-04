@@ -1,0 +1,106 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {
+  "bull": [
+   0.3,
+   -0.0,
+   1.73
+  ]
+ },
+ "asset_id": "DartMachine",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "board_face_x_m": 0.3,
+ "bounds_max_m": [
+  0.66,
+  0.33,
+  2.13
+ ],
+ "bounds_min_m": [
+  0.0,
+  -0.33,
+  0.0
+ ],
+ "bounds_with_hulls_max_m": [
+  0.66,
+  0.33,
+  2.13
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.33,
+  0.0
+ ],
+ "bull_z_m": 1.73,
+ "cast_shadow": true,
+ "collision_hulls": 3,
+ "collision_profile": "RbVenueBlock",
+ "element": "E09",
+ "external_inputs": [],
+ "family": "Darts",
+ "fbx": "SM_DB_DartMachine.fbx",
+ "front": "+X",
+ "generator": "db_dart.py",
+ "geometry_sha256": "07b7ce29203943f91b150a729eab8a0663beb77b0f81a820fc3c8447e1491d7b",
+ "ledger_asset_id": "SM_DB_DartMachine",
+ "material_slots": [
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Chrome",
+  "MI_DB_Steel_Stainless",
+  "MI_DB_Plastic_Red",
+  "MI_DB_Plastic_Blue",
+  "MI_DB_Emissive_LedRed",
+  "MI_DB_Plastic_White",
+  "MI_DB_Emissive_DartScore",
+  "MI_DB_Emissive_DartMarquee"
+ ],
+ "nanite": true,
+ "notes": "number ring blank in M2; throw-line tape is a floor decal (M2-A)",
+ "owner": "M2-B",
+ "pivot": "wall_plane_bottom_centre",
+ "placement_hint_ue_cm": {
+  "location": [
+   890.0,
+   732.0,
+   0.0
+  ],
+  "note": "E09 X 8.57 - 9.23 on the right wall; front faces -Y",
+  "yaw_deg": -90.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.3,
+    1.73
+   ],
+   "spec_m": [
+    0.3,
+    1.73
+   ],
+   "tolerance_m": 0.002,
+   "what": "board face x / bull z"
+  }
+ ],
+ "spec_id": "M03",
+ "target_dimensions_m": [
+  0.66,
+  0.66,
+  2.13
+ ],
+ "throw_line_m": 2.44,
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 6764,
+ "triangles_render": 6728,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Darts",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Darts/SM_DB_DartMachine",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/DartMachine/T_DB_DartMachine_WM.png"
+}

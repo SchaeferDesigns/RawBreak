@@ -1,0 +1,97 @@
+{
+ "acoustic_material": "plastic",
+ "anchors_ue_m": {},
+ "asset_id": "Sign_NoSmoking",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "bounds_max_m": [
+  0.0057,
+  0.1015,
+  1.677
+ ],
+ "bounds_min_m": [
+  0.0,
+  -0.1015,
+  1.423
+ ],
+ "bounds_with_hulls_max_m": [
+  0.006,
+  0.1015,
+  1.677
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.1015,
+  1.423
+ ],
+ "cast_shadow": true,
+ "centre_z_m": 1.55,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueProp",
+ "element": "S5",
+ "external_inputs": [],
+ "face_m": [
+  0.203,
+  0.254
+ ],
+ "family": "Signs",
+ "fbx": "SM_DB_Sign_NoSmoking.fbx",
+ "front": "+X",
+ "generator": "db_signs.py",
+ "geometry_sha256": "ec68179f2b5f16e46181310c1ece7b59b5bfaa9864cefb3a382660f320b6987b",
+ "kind": "plastic",
+ "label": "sign_no_smoking",
+ "ledger_asset_id": "SM_DB_Sign_NoSmoking",
+ "material_slots": [
+  "MI_DB_Label_Gloss",
+  "MI_DB_Plastic_White",
+  "MI_DB_Steel_Zinc"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "wall_plane_floor",
+ "placement_hint_ue_cm": {
+  "location": [
+   0.0,
+   520.0,
+   0.0
+  ],
+  "note": "front wall beside the entrance door E02 (Y 5.64 - 6.55), faces +X",
+  "yaw_deg": 0.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": [
+    0.203,
+    0.254,
+    1.55
+   ],
+   "spec_m": [
+    0.203,
+    0.254,
+    1.55
+   ],
+   "tolerance_m": 0.002,
+   "what": "printed face width x height / centre height"
+  }
+ ],
+ "spec_id": "S5",
+ "target_dimensions_m": [
+  0.0057,
+  0.203,
+  0.254
+ ],
+ "tolerance_m": 0.01,
+ "translucent": false,
+ "triangles": 308,
+ "triangles_render": 296,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Signs",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Signs/SM_DB_Sign_NoSmoking",
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/Sign_NoSmoking/T_DB_Sign_NoSmoking_WM.png"
+}

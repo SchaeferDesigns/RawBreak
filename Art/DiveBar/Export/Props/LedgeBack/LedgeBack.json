@@ -1,0 +1,85 @@
+{
+ "acoustic_material": "wood_panel",
+ "anchors_ue_m": {},
+ "asset_id": "LedgeBack",
+ "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
+ "board_m": 0.038,
+ "bounds_max_m": [
+  0.2,
+  0.75,
+  1.0702
+ ],
+ "bounds_min_m": [
+  0.0,
+  -0.75,
+  0.852
+ ],
+ "bounds_with_hulls_max_m": [
+  0.2,
+  0.75,
+  1.0702
+ ],
+ "bounds_with_hulls_min_m": [
+  0.0,
+  -0.75,
+  0.852
+ ],
+ "cast_shadow": true,
+ "collision_hulls": 1,
+ "collision_profile": "RbVenueBlock",
+ "element": "E16",
+ "external_inputs": [],
+ "family": "Ledges",
+ "fbx": "SM_DB_LedgeBack.fbx",
+ "front": "+X",
+ "generator": "db_ledges.py",
+ "geometry_sha256": "46fe8156f4b74e54b0bdd25fa0592d109d66fa4bf68ed9c8916f2499decbfef8",
+ "ledger_asset_id": "SM_DB_LedgeBack",
+ "material_slots": [
+  "MI_DB_Wood_Ledge",
+  "MI_DB_Paint_BlackSteel",
+  "MI_DB_Steel_Zinc"
+ ],
+ "nanite": true,
+ "owner": "M2-B",
+ "pivot": "wall_plane_bottom_centre",
+ "placement_hint_ue_cm": {
+  "location": [
+   1646.0,
+   635.0,
+   0.0
+  ],
+  "note": "E16 X 16.26 - 16.46, Y 5.60 - 7.10 on the back wall; front faces -X",
+  "yaw_deg": 180.0
+ },
+ "priority": "mid",
+ "prop_instances": [],
+ "ray_tracing": true,
+ "spec_checks": [
+  {
+   "measured_m": 1.0702,
+   "spec_m": 1.07,
+   "tolerance_m": 0.004,
+   "what": "top z"
+  }
+ ],
+ "spec_id": "E16",
+ "target_dimensions_m": [
+  0.2,
+  1.5,
+  0.2182
+ ],
+ "tolerance_m": 0.01,
+ "top_z_m": 1.07,
+ "translucent": false,
+ "triangles": 840,
+ "triangles_render": 828,
+ "ue_dir": "/Game/Generated/Venues/DiveBar/Props/Ledges",
+ "ue_mesh": "/Game/Generated/Venues/DiveBar/Props/Ledges/SM_DB_LedgeBack",
+ "underside_z_m": 1.032,
+ "uv_channels": {
+  "0": "world scale (1 UV = 1 m) / label atlas cells",
+  "1": "unique (wear mask)"
+ },
+ "wear_mask": "Art/DiveBar/Textures/LedgeBack/T_DB_LedgeBack_WM.png"
+}
