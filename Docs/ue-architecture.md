@@ -1690,4 +1690,20 @@ Branch `integ/m3` = `main` + the reviewed packages in the order of 19.2 (L, V, H
 
 ### 19.12 Plan step results
 
-Filled by the plan step's stub commit (below).
+Commit "M3 plan: stubs ..." on `main` (after the plan commit `945b20d`):
+
+| Area | Files |
+|---|---|
+| Core contract (M3-INT) | `Core/RbTypes.h/.cpp` (`ERbMatchMode::VsAi`, `ERbAiProfile`, `ERbBridgeType`, `ERbCallPolicy`, conversions + URL names, complete), `Core/RbAssetPaths.h` (`BodyDir`, `MannequinDir`, `AiDir`, tags `RbWaitSpot`, `RbChalkCube`, `RbOpponent`), `RawBreak.Build.cs` (`AnimationCore`, `AnimGraphRuntime`, `MediaAssets`), `DefaultGame.ini` (`/Game/Characters` always cooked), new test `RawBreak.Unit.Contracts.M3Enums` (enum mirrors, URL round trips, roster, unique tags, the moved rules configuration) |
+| M3-H stubs | new `Body/RbBodyTypes.h`, `Body/RbBodyRigComponent.h/.cpp` (the rig API of 19.3; stores inputs, idles); `Input/RbInputSetup` + Call (C, held), Declare (X), Chalk (G) - 19 actions, `Unit.Input.MappingContext` updated; `ARbPlayerController` creates `URbCallShotComponent` and calls its `BindInput` |
+| M3-O stubs | new `Ai/RbAiPlannerService` (refuses; `PlanBlocking` = the serial `rb::ai::PlanShot`, complete), `Ai/RbOpponentCharacter` (capsule, body rig in third person, brain, tag), `Ai/RbAiOpponentComponent` (binds, idles), `Ai/RbOpponentRoster` (six profiles by profile name); `RbMatchDirector`: `FRbMatchSetup::Opponent` / `Calls`, `ERbShooterKind` + `GetShooterKind` (complete), `IsAiToAct`, `MakeStrokeContextFor`, `RequestSpot`, `ChooseBreaker`, `ChalkTip`, `SetInstantAutoChalk` (stubs), `OnDeclarationChanged` (broadcast by `SetCalledShot` / `SetShotKind`), `StartMatch` -> `RbMatchRules::MakeMatchConfig`, `SubmitStroke` takes the commit's stance fields (behaviour-neutral: a default commit carries the M2 defaults) |
+| M3-G stubs | new `Modes/RbMatchRules.h/.cpp` (the M2 configuration moved unchanged), `Modes/RbCallShotComponent.h/.cpp` (binds nothing yet) |
+| Pipeline (M3-INT / V) | `rb_make_all.py` runs `rb_import_body.py` (new stub, M3-H) before `rb_make_player.py`; `db_build_all.py` runs `body/bd_build_all.py` (new stub, M3-H) and is M3-V's from now on; `rbue.py`: the M3 ownership table + blocks (`owners --package M3-H|M3-O|M3-G|M3-V|M3-L`, integration-owned files `M3-INT`), the selftest checks every generator on disk against the regeneration lists, ledger source `epic` / licence `UE-EULA` |
+
+| Check | Result |
+|---|---|
+| Build | `rbue.py build` (editor) and `rbue.py build --target RawBreak` (game): 0 errors, 0 compiler warnings |
+| Unity | `rbue.py unity`: 0 collisions, 0 latent (RawBreak: 109 .cpp in 6 blobs) |
+| Selftest | `rbue.py selftest` OK (M3 owners incl. the blocks, generators on disk vs the lists, the Epic ledger rows) |
+| UE tests | `rbue.py test --filter RawBreak. --sound` (after `rb_dev_m2e.py` rebuilt the git-ignored `L_TwoTables`): **286 / 286 (286 found and completed, TEST COMPLETE. EXIT CODE: 0, 305 s; no working-tree change)** = M2's 285 + `Contracts.M3Enums` |
+| Core | BilliardsCore untouched by the plan step (938 / 938 on `main`, not re-run) |

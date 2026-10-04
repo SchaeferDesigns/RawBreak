@@ -107,6 +107,19 @@ struct FRbMatchSetup
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") bool bPressure = true;
 	// HumanParams::NoiseScale (Imperfections slider Sim 1 / Scaled 0.6 / Low 0.3 / Off 0). ?Noise=
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") double NoiseScale = 1.0;
+	// --- M3 (Docs/ue-architecture.md 19.3) ---
+	// The AI opponent of a VsAi match (rules player 1). ?Opponent=
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") ERbAiProfile Opponent = ERbAiProfile::BarRegular;
+	// How shots are called (M3-G's RbMatchRules::MakeMatchConfig maps it onto the rules' CallMode). ?Calls=
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match") ERbCallPolicy Calls = ERbCallPolicy::Casual;
+};
+
+// M3 (19.3): who shoots for a rules player.
+UENUM(BlueprintType)
+enum class ERbShooterKind : uint8
+{
+	Human,
+	Ai,
 };
 
 // What the overlay shows about the last shot (plain data, filled after rules evaluation).
@@ -129,6 +142,9 @@ struct FRbLastShotSummary
 };
 
 DECLARE_MULTICAST_DELEGATE(FRbOnMatchChanged);
+// M3 (19.3): a declaration (call, push-out, safety) of the current shot was accepted (SetCalledShot / SetShotKind): the opponent
+// acknowledges (M3-O), the overlay shows it (M3-G).
+DECLARE_MULTICAST_DELEGATE_TwoParams(FRbOnDeclarationChanged, int32 /*RulesPlayer*/, const rb::rules::ShotDeclaration& /*Declaration*/);
 
 UCLASS()
 class RAWBREAK_API URbMatchDirector : public UObject
@@ -258,6 +274,29 @@ public:
 	ARbBallSet* GetBallSet() const { return Balls.Get(); }
 	ARbCue* GetCue() const { return Cue.Get(); }
 
+	// --- M3 additions (Docs/ue-architecture.md 19.3 / 19.5; owner M3-O; FROZEN for M3-G and M3-H, additions allowed) --------------
+
+	// Who shoots for a rules player: VsAi = rules player 1 is the AI (FRbMatchSetup::Opponent), everything else human.
+	ERbShooterKind GetShooterKind(int32 Player) const;
+	// The AI must act now (shoot, place, decide an option, lag, choose the breaker, request the spot).
+	bool IsAiToAct() const;
+	// SampleHand / ExecuteStroke inputs of a rules player (the AI's own attributes, equipment and noise stream).
+	FRbStrokeContext MakeStrokeContextFor(int32 Player) const;
+	// Rules 4.4 (ShotConstraints::MayRequestSpot): rb::rules::RequestSpot, sync, re-arm the turn. The human's Q (M3-G), the AI's
+	// DecisionKind::RequestSpot (M3-O). False if not allowed now.
+	bool RequestSpot();
+	// MatchPhase::LagWinnerChooses: the lag winner names the breaker (rules player 0 / 1). False if not in that phase.
+	bool ChooseBreaker(int32 Breaker);
+	// One visible chalking of a rules player's tip (the body's twists, HF-22): Twists twists with the sweep quality [0, 1] (the habit
+	// for automatic chalking). Returns the twists applied (0 if refused). The tip state changes only through this while a body chalks.
+	int32 ChalkTip(int32 Player, int32 Twists, double Sweep);
+	// true (default, M1 / M2 behaviour): PerformChalking at the start of every visit, instantly. A body that chalks visibly switches
+	// it off (M3-H for the player, M3-O for the opponent).
+	void SetInstantAutoChalk(bool bInstant) { bInstantAutoChalk = bInstant; }
+	bool IsInstantAutoChalk() const { return bInstantAutoChalk; }
+
+	FRbOnDeclarationChanged OnDeclarationChanged;
+
 	// UObject
 	virtual UWorld* GetWorld() const override;
 
@@ -348,6 +387,7 @@ private:
 	int32 SelectedOption = 0;
 	bool bReplayActive = false;
 	bool bRecordReplays = true;
+	bool bInstantAutoChalk = true; // M3 (19.3)
 	FString LastError;
 
 	// Lag

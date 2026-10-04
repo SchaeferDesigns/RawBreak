@@ -97,6 +97,14 @@ namespace RbAssetPaths
 	// Audio (M2-C): generated sound waves, submixes, attenuation / concurrency settings (audio.md 8.5, generated subset).
 	inline const TCHAR* const AudioDir = TEXT("/Game/Generated/Audio");                               // M2-C
 
+	// --- M3 additions (Docs/ue-architecture.md 19.3; owners in brackets) --------------------------------------------
+	// The body rig (M3-H): generated body content (materials, region masks, cuffs) and the Epic template mannequin, copied UNCHANGED
+	// from the UE 5.8 template resources to the template feature pack's own path so its internal references stay valid (UE EULA).
+	inline const TCHAR* const BodyDir = TEXT("/Game/Generated/Body");                                 // M3-H
+	inline const TCHAR* const MannequinDir = TEXT("/Game/Characters/Mannequins");                     // M3-H (Epic template content)
+	// The AI opponent (M3-O): generated content of the opponent (if any).
+	inline const TCHAR* const AiDir = TEXT("/Game/Generated/Ai");                                     // M3-O
+
 	// Actor / component tags shared between packages.
 	namespace Tag
 	{
@@ -114,6 +122,16 @@ namespace RbAssetPaths
 		inline const FName BallReturnVolume(TEXT("RbBallReturn"));
 		// The single ARbVenueInfo of a venue level (M2-A).
 		inline const FName VenueInfo(TEXT("RbVenueInfo"));
+
+		// --- M3 (Docs/ue-architecture.md 19.3) ---
+		// Opponent waiting spots (TargetPoint actors; the venue generators place them: dive bar W1 / W2 M3-V, test room M3-L); the
+		// AI opponent (M3-O) waits at the one nearest to its table while the player shoots.
+		inline const FName WaitSpot(TEXT("RbWaitSpot"));
+		// A movable chalk cube the body may pick up for chalking (on the player's table rails; M3-V / M3-L place and tag them, M3-H
+		// uses them, falling back to a cube it spawns on the nearest rail).
+		inline const FName ChalkCube(TEXT("RbChalkCube"));
+		// The AI opponent actor (ARbOpponentCharacter, M3-O).
+		inline const FName Opponent(TEXT("RbOpponent"));
 	}
 
 	// Collision profiles / channels of Config/DefaultEngine.ini [/Script/Engine.CollisionProfile] (venue-dive-bar 13.5).

@@ -54,6 +54,12 @@ public class RawBreak : ModuleRules
 			// and RHIGetGPUFrameCycles / GRHIAdapterName (RHI), the values `stat unit` shows.
 			"RenderCore",
 			"RHI",
+			// M3 (Docs/ue-architecture.md 19.3): the body rig's procedural IK in C++ (M3-H: AnimationCore's TwoBoneIK, AnimGraphRuntime's
+			// bone-control helpers; no Control Rig graphs - they cannot be authored headless reliably) and the dive bar's TV broadcast
+			// (M3-V: a UMediaPlayer / UMediaTexture opened at runtime; the WmfMedia / ImgMedia players are engine plugins enabled by default).
+			"AnimationCore",
+			"AnimGraphRuntime",
+			"MediaAssets",
 		});
 	}
 }

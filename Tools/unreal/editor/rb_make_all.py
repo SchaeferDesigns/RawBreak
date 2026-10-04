@@ -41,6 +41,7 @@ GENERATORS = [
 	("rb_import_table.py", "M2-L"),                  # table bodies / coin-op cabinet exported by Tools/blender/table
 	("rb_bake_ball.py", "M2-E (UE-2)"),
 	("rb_bake_cue.py", "M2-F (UE-4)"),
+	("rb_import_body.py", "M3-H"),                   # M3 (19.3): the Epic template mannequin + the body rig's materials / masks
 	("rb_make_player.py", "M2-F"),                   # carrying hand of the diegetic ball in hand
 	("rb_make_audio.py", "M2-C"),                    # submixes, attenuation, concurrency, reverb IRs
 	("rb_make_test_room.py", "M2-L (UE-8)"),

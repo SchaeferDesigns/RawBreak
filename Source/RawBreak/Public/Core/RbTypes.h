@@ -60,6 +60,7 @@ enum class ERbMatchMode : uint8
 {
 	Practice, // one human shoots every turn; the rules still run (fouls shown, ball in hand, rack over -> new rack)
 	HotSeat,  // two humans alternate at one PC (local, same pawn; hot-seat guests at 50 in every attribute, HF Q4)
+	VsAi,     // M3 (Docs/ue-architecture.md 19.5): the human (rules player 0) against an AI opponent (rules player 1, FRbMatchSetup::Opponent)
 };
 
 // Camera presets of ue5-realism-plan 4.1 (Eyes = default, decisions 2026-09-25).
@@ -140,4 +141,55 @@ namespace RbTypes
 	RAWBREAK_API rb::human::VenueKind ToCore(ERbVenueKind Kind);
 	// Level of a venue (RbAssetPaths).
 	RAWBREAK_API const TCHAR* MapFor(ERbVenue Venue);
+}
+
+// --- M3 additions (Docs/ue-architecture.md 19.3; integration-owned contract, frozen for M3-H / M3-O / M3-G) ---------------------
+
+namespace rb::human { enum class AiProfileId : std::uint8_t; enum class BridgeType : std::uint8_t; }
+
+// The six AI opponent profiles (human-factors 5.5) = rb::human::AiProfileId, same order. URL ?Opponent=<ToString name>.
+UENUM(BlueprintType)
+enum class ERbAiProfile : uint8
+{
+	Tourist,
+	BarRegular,
+	LeaguePlayer,
+	LocalHustler,
+	RoadPlayer,   // HF 5.5 "Pro"
+	TouringPro,
+	Count UMETA(Hidden)
+};
+
+// Bridge types (human-factors HF-12, ue5-realism-plan 5.3) = rb::human::BridgeType, same order. The stroke situation's bridge: the
+// player's from the body's bridge solver (M3-H), the AI's from the planner (M3-O); ExecuteStroke uses it (m_br0, V_b0).
+UENUM(BlueprintType)
+enum class ERbBridgeType : uint8
+{
+	Closed,
+	Open,
+	Rail,
+	Elevated,
+	Mechanical,
+};
+
+// How shots are called in a match (M3-G's RbMatchRules maps it onto rb::rules::CallMode; ui-ux 9.4). URL ?Calls=Casual|EveryShot.
+UENUM(BlueprintType)
+enum class ERbCallPolicy : uint8
+{
+	Casual,    // CallMode::ObviousAssist: only non-obvious shots are called (the M2 casual default)
+	EveryShot, // CallMode::Explicit where the WPA preset calls shots (8-ball, 10-ball, 14.1); 9-ball has no calls
+};
+
+namespace RbTypes
+{
+	RAWBREAK_API rb::human::AiProfileId ToCore(ERbAiProfile Profile);
+	RAWBREAK_API ERbAiProfile FromCore(rb::human::AiProfileId Id);
+	RAWBREAK_API rb::human::BridgeType ToCore(ERbBridgeType Bridge);
+	RAWBREAK_API ERbBridgeType FromCore(rb::human::BridgeType Bridge);
+	// "Tourist", "BarRegular", "LeaguePlayer", "LocalHustler", "RoadPlayer", "TouringPro" (URL / log names, not UI text).
+	RAWBREAK_API const TCHAR* ToString(ERbAiProfile Profile);
+	// Case-insensitive inverse of ToString(ERbAiProfile). False (Out unchanged) for an unknown name.
+	RAWBREAK_API bool ParseAiProfile(const FString& Name, ERbAiProfile& Out);
+	RAWBREAK_API const TCHAR* ToString(ERbCallPolicy Policy);
+	RAWBREAK_API bool ParseCallPolicy(const FString& Name, ERbCallPolicy& Out);
 }

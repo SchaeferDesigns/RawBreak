@@ -5,6 +5,7 @@
 #include "Game/RbGameMode.h"
 #include "Game/RbMatchDirector.h"
 #include "Input/RbInputSetup.h"
+#include "Modes/RbCallShotComponent.h"
 #include "Replay/RbReplaySubsystem.h"
 #include "UI/RbOverlayComponent.h"
 #include "UI/Core/RbUiSubsystem.h"
@@ -23,6 +24,7 @@ ARbPlayerController::ARbPlayerController()
 {
 	CheatClass = URbCheatManager::StaticClass();
 	Overlay = CreateDefaultSubobject<URbOverlayComponent>(TEXT("Overlay"));
+	CallShot = CreateDefaultSubobject<URbCallShotComponent>(TEXT("CallShot")); // M3 (19.3): behaviour M3-G
 	bShowMouseCursor = false;
 }
 
@@ -63,6 +65,11 @@ void ARbPlayerController::SetupInputComponent()
 	Input->BindAction(InputSetup->CycleOption, ETriggerEvent::Triggered, this, &ARbPlayerController::OnCycleOption);
 	// Esc (M2): the Pause action - leaves a replay, else opens / closes the pause menu (IA_Pause triggers while paused).
 	Input->BindAction(InputSetup->Pause, ETriggerEvent::Triggered, this, &ARbPlayerController::OnPause);
+	// M3 (19.3): the call component binds Call / Declare / CycleOption on this input component itself (M3-G).
+	if (CallShot)
+	{
+		CallShot->BindInput(Input, InputSetup);
+	}
 	RegisterMappingContext(); // SetPlayer (the local player is set) may run after BeginPlay
 }
 

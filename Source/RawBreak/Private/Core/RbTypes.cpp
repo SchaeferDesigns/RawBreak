@@ -2,6 +2,8 @@
 
 #include "Core/RbAssetPaths.h"
 
+#include "rb/Human/AiProfiles.h"
+#include "rb/Human/Skill.h"
 #include "rb/Human/Venue.h"
 
 namespace RbTypes
@@ -111,5 +113,114 @@ namespace RbTypes
 		case ERbVenue::DiveBar: return RbAssetPaths::DiveBarMap;
 		}
 		return RbAssetPaths::M1TestRoomMap;
+	}
+
+	// --- M3 additions (Docs/ue-architecture.md 19.3) ---
+
+	rb::human::AiProfileId ToCore(ERbAiProfile Profile)
+	{
+		switch (Profile)
+		{
+		case ERbAiProfile::Tourist: return rb::human::AiProfileId::Tourist;
+		case ERbAiProfile::BarRegular: return rb::human::AiProfileId::BarRegular;
+		case ERbAiProfile::LeaguePlayer: return rb::human::AiProfileId::LeaguePlayer;
+		case ERbAiProfile::LocalHustler: return rb::human::AiProfileId::LocalHustler;
+		case ERbAiProfile::RoadPlayer: return rb::human::AiProfileId::RoadPlayer;
+		case ERbAiProfile::TouringPro: return rb::human::AiProfileId::TouringPro;
+		case ERbAiProfile::Count: break;
+		}
+		return rb::human::AiProfileId::BarRegular;
+	}
+
+	ERbAiProfile FromCore(rb::human::AiProfileId Id)
+	{
+		switch (Id)
+		{
+		case rb::human::AiProfileId::Tourist: return ERbAiProfile::Tourist;
+		case rb::human::AiProfileId::BarRegular: return ERbAiProfile::BarRegular;
+		case rb::human::AiProfileId::LeaguePlayer: return ERbAiProfile::LeaguePlayer;
+		case rb::human::AiProfileId::LocalHustler: return ERbAiProfile::LocalHustler;
+		case rb::human::AiProfileId::RoadPlayer: return ERbAiProfile::RoadPlayer;
+		case rb::human::AiProfileId::TouringPro: return ERbAiProfile::TouringPro;
+		}
+		return ERbAiProfile::BarRegular;
+	}
+
+	rb::human::BridgeType ToCore(ERbBridgeType Bridge)
+	{
+		switch (Bridge)
+		{
+		case ERbBridgeType::Closed: return rb::human::BridgeType::Closed;
+		case ERbBridgeType::Open: return rb::human::BridgeType::Open;
+		case ERbBridgeType::Rail: return rb::human::BridgeType::Rail;
+		case ERbBridgeType::Elevated: return rb::human::BridgeType::Elevated;
+		case ERbBridgeType::Mechanical: return rb::human::BridgeType::Mechanical;
+		}
+		return rb::human::BridgeType::Closed;
+	}
+
+	ERbBridgeType FromCore(rb::human::BridgeType Bridge)
+	{
+		switch (Bridge)
+		{
+		case rb::human::BridgeType::Closed: return ERbBridgeType::Closed;
+		case rb::human::BridgeType::Open: return ERbBridgeType::Open;
+		case rb::human::BridgeType::Rail: return ERbBridgeType::Rail;
+		case rb::human::BridgeType::Elevated: return ERbBridgeType::Elevated;
+		case rb::human::BridgeType::Mechanical: return ERbBridgeType::Mechanical;
+		}
+		return ERbBridgeType::Closed;
+	}
+
+	const TCHAR* ToString(ERbAiProfile Profile)
+	{
+		switch (Profile)
+		{
+		case ERbAiProfile::Tourist: return TEXT("Tourist");
+		case ERbAiProfile::BarRegular: return TEXT("BarRegular");
+		case ERbAiProfile::LeaguePlayer: return TEXT("LeaguePlayer");
+		case ERbAiProfile::LocalHustler: return TEXT("LocalHustler");
+		case ERbAiProfile::RoadPlayer: return TEXT("RoadPlayer");
+		case ERbAiProfile::TouringPro: return TEXT("TouringPro");
+		case ERbAiProfile::Count: break;
+		}
+		return TEXT("Unknown");
+	}
+
+	bool ParseAiProfile(const FString& Name, ERbAiProfile& Out)
+	{
+		for (int32 Index = 0; Index < static_cast<int32>(ERbAiProfile::Count); ++Index)
+		{
+			const ERbAiProfile Profile = static_cast<ERbAiProfile>(Index);
+			if (Name.Equals(ToString(Profile), ESearchCase::IgnoreCase))
+			{
+				Out = Profile;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const TCHAR* ToString(ERbCallPolicy Policy)
+	{
+		switch (Policy)
+		{
+		case ERbCallPolicy::Casual: return TEXT("Casual");
+		case ERbCallPolicy::EveryShot: return TEXT("EveryShot");
+		}
+		return TEXT("Unknown");
+	}
+
+	bool ParseCallPolicy(const FString& Name, ERbCallPolicy& Out)
+	{
+		for (const ERbCallPolicy Policy : {ERbCallPolicy::Casual, ERbCallPolicy::EveryShot})
+		{
+			if (Name.Equals(ToString(Policy), ESearchCase::IgnoreCase))
+			{
+				Out = Policy;
+				return true;
+			}
+		}
+		return false;
 	}
 }

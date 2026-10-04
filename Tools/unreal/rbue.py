@@ -14,7 +14,7 @@ Every Unreal step of the project runs through this script so that no human ever 
   package   cooked, staged Win64 build (M2-A10)          rbue.py package [--config Development] [--label M2]
   ledger    check / merge the licence ledger             rbue.py ledger [--merge] [--check]
   core      build + run the BilliardsCore tests (CMake)  rbue.py core [--slow] [--config Debug] [-- MOT_ -Integ_]
-  owners    18.2 file-ownership check of a package       rbue.py owners --package M2-F --branch m2f   |   rbue.py owners --who <path>
+  owners    file-ownership check of a package (M3: 19.2)  rbue.py owners --package M3-H --branch ue/m3-h   |   rbue.py owners --who <path>
   unity     names two .cpp of a module both define       rbue.py unity [--module RawBreak] [--rev <commit>] [--strict]   (unity-build collisions)
   selftest  checks of this script's pure helpers         rbue.py selftest
 
@@ -539,11 +539,14 @@ LEDGER = REPO / "Docs/licenses/asset-ledger.csv"
 LEDGER_FRAGMENTS = REPO / "Docs/licenses/ledger"
 LEDGER_COLUMNS = ["asset_id", "used_by", "source", "source_ref", "author", "licence", "licence_url", "date", "account", "sha256",
 	"modified", "ai_generated", "steam_ai_disclosure", "trademark_check", "notes"]
-LEDGER_SOURCES = {"polyhaven", "ambientcg", "meshy", "higgsfield", "own", "font", "fab", "stock-reference"}
-LEDGER_LICENCES = {"CC0-1.0", "Meshy-paid-owned", "Higgsfield-owned", "OFL-1.1", "Apache-2.0", "Fab-Standard", "Unsplash/Pexels-reference-only", "own"}
+# M3 (Docs/ue-architecture.md 19.1 / 19.3): `epic` = Epic-licensed engine / template content (the UE 5.8 template mannequin of the body
+# rig), usable in Unreal projects under the UE EULA only.
+LEDGER_SOURCES = {"polyhaven", "ambientcg", "meshy", "higgsfield", "own", "font", "fab", "stock-reference", "epic"}
+LEDGER_LICENCES = {"CC0-1.0", "Meshy-paid-owned", "Higgsfield-owned", "OFL-1.1", "Apache-2.0", "Fab-Standard", "Unsplash/Pexels-reference-only", "own",
+	"UE-EULA"}
 # source -> the only licence it may carry (sources not listed accept any licence of LEDGER_LICENCES)
 LEDGER_SOURCE_LICENCE = {"polyhaven": "CC0-1.0", "ambientcg": "CC0-1.0", "meshy": "Meshy-paid-owned", "higgsfield": "Higgsfield-owned",
-	"stock-reference": "Unsplash/Pexels-reference-only", "own": "own"}
+	"stock-reference": "Unsplash/Pexels-reference-only", "own": "own", "epic": "UE-EULA"}
 NON_COMMERCIAL = re.compile(r"(?i)(\bNC\b|-NC\b|\bND\b|-ND\b|non-?commercial|no-?deriv)")
 
 
@@ -585,7 +588,7 @@ def ledger_errors(name: str, header: list[str], rows: list[dict], allow_ai: bool
 		if ai not in ("y", "n"):
 			errors.append(f"{where}: ai_generated must be y or n")
 		elif ai == "y" and not allow_ai:
-			errors.append(f"{where}: ai_generated = y, but M2 allows no AI-generated asset (Meshy / Higgsfield come in DB-5)")
+			errors.append(f"{where}: ai_generated = y, but M2 / M3 allow no AI-generated asset (Meshy / Higgsfield come in DB-5)")
 		if source in ("meshy", "higgsfield") and ai != "y":
 			errors.append(f"{where}: {source} output must be ai_generated = y (Steam disclosure)")
 		if ai == "y" and (row.get("steam_ai_disclosure") or "").strip().lower() != "y":
@@ -647,14 +650,17 @@ def cmd_ledger(a: argparse.Namespace) -> int:
 	return 1 if errors else 0
 
 
-# --- file ownership of the M2 packages (Docs/ue-architecture.md 18.2; the architect's merge check, 18.12) ------------------------
+# --- file ownership of the M3 packages (Docs/ue-architecture.md 19.2; M2's table: 18.2, in the git history) ------------------------
 #
-# Every M2 package edits only the files it owns; everything else is a request in its report. `rbue.py owners` checks a package
-# branch (or the working tree) against this table before the architect merges it. A path belongs to the package whose pattern
+# Every M3 package edits only the files it owns; everything else is a request in its report. `rbue.py owners` checks a package
+# branch (or the working tree) against this table before the integrator merges it. A path belongs to the package whose pattern
 # matches it most specifically: an exact path beats any glob, otherwise the longer literal prefix (the text before the first
-# wildcard) wins, so "Game/RbTestRoom.*" (M2-L) beats "Game/**" (M2-E). Patterns: '**' any depth, '*' / '?' inside one path
-# segment, '{a,b}' alternatives. Blocks: parts of shared files owned by another package than the file (18.2 exceptions).
+# wildcard) wins, so "Game/RbTestRoom.*" (M3-L) beats "Game/**" (M3-O). Patterns: '**' any depth, '*' / '?' inside one path
+# segment, '{a,b}' alternatives. Blocks: parts of shared files owned by another package than the file (19.2 exceptions).
+# M3 has no architect package: INTEGRATION ("M3-INT") owns the shared files, frozen during M3 (changed by the plan step and the
+# integration round only).
 
+INTEGRATION = "M3-INT"
 _SRC = "Source/RawBreak/{Public,Private}/"
 _UNIT = "Source/RawBreak/Private/Tests/"
 _PIE = "Source/RawBreakEditor/Private/Tests/"
@@ -671,57 +677,52 @@ def _package_common(key: str, package: str) -> list[str]:
 
 
 OWNERS: dict[str, list[str]] = {
-	"M2-F": [f"{_SRC}{d}/**" for d in ("Input", "Player", "Camera", "Cue")] + [
+	"M3-H": [f"{_SRC}{d}/**" for d in ("Body", "Input", "Player", "Camera", "Cue")] + [
 		f"{_SRC}Math/RbStrokeMath.*", "Source/RawBreak/Private/Math/RbCameraMath_Camera.cpp",
 		"Source/RawBreakEditor/Private/RbAssetBake_Player.cpp", "Source/RawBreakEditor/Private/RbAssetBake_Cue.cpp",
-		f"{_ED}rb_make_player.py", f"{_ED}rb_bake_cue.py", "Tools/feel/**", "Config/DefaultInput.ini",
-		"Content/Generated/Player/**", "Content/Generated/Cues/**"]
+		f"{_ED}rb_make_player.py", f"{_ED}rb_bake_cue.py", f"{_ED}rb_import_body.py", "Tools/unreal/capture_body.py", "Tools/blender/body/**",
+		"Tools/feel/**", "Art/Body/**", "Config/DefaultInput.ini", "Content/Generated/{Player,Cues,Body}/**", "Content/Characters/**"]
 		+ _tests(["RbStrokeTests", "RbStrokeMathTests", "RbRawInputTests", "RbCameraRigTests", "RbCameraMathTests", "RbCueTests", "RbFeelTests",
-			"RbHumanMotionTests", "RbBallInHandTests"], ["RbFeelFlowTest"]) + _package_common("m2f", "M2-F"),
-	"M2-L": [f"{_SRC}Table/**", "Source/RawBreakEditor/Private/RbAssetBake_Table.cpp", "Shaders/Private/*.ush",
+			"RbHumanMotionTests", "RbBallInHandTests", "RbBodyTests"], ["RbFeelFlowTest", "RbBodyFlowTest"]) + _package_common("m3h", "M3-H"),
+	"M3-O": [f"{_SRC}{d}/**" for d in ("Ai", "Game", "Balls", "Simulation", "Replay", "Interaction", "Audio")] + [
+		f"{_SRC}Dev/RbCheatManager.*", "Source/RawBreakAudioDsp/**", "Tools/audio/**", "Source/RawBreakEditor/Private/RbAssetBake_Ball.cpp",
+		f"{_ED}rb_bake_ball.py", f"{_ED}rb_make_physics.py", f"{_ED}rb_make_audio.py", f"{_ED}rb_dev_m2e.py",
+		"Content/Generated/{Physics,Balls,Audio,Ai}/**", "Docs/audio/**", "Docs/specs/audio.md", f"{_UNIT}RbAudio*.cpp", f"{_PIE}RbAudio*.cpp"]
+		+ _tests(["RbBallTests", "RbPlaybackTests", "RbMatchTests", "RbSimulationTests", "RbLooseBallTests", "RbMultiTableTests", "RbAiTests"],
+			["RbMatchFlowTest", "RbReplayTest", "RbM1FlowTest", "RbM1RackTest", "RbLooseBallFunctionalTest", "RbMultiTableFunctionalTest", "RbAiMatchTest"])
+		+ _package_common("m3o", "M3-O"),
+	"M3-G": [f"{_SRC}{d}/**" for d in ("Modes", "UI", "Settings")] + [
+		f"{_ED}rb_make_title.py", f"{_ED}rb_dev_m2d.py", "Content/Generated/Maps/L_Title*", "Content/Generated/UI/**", "Docs/specs/ui-ux.md"]
+		+ _tests(["RbSettingsTests", "RbOverlayTests", "RbUiTests", "RbModesTests"], ["RbMenuFlowTest", "RbModesFlowTest"]) + _package_common("m3g", "M3-G"),
+	"M3-V": [f"{_SRC}Venue/**", "Tools/blender/rbbl.py", "Tools/blender/common/**", "Tools/blender/divebar/**", "Art/DiveBar/**", "Tools/art/**",
+		"Art/Fonts/**", f"{_ED}rb_import_divebar.py", f"{_ED}rb_make_divebar.py", f"{_ED}rb_make_divebar_fx.py", f"{_ED}rb_make_divebar_materials.py",
+		f"{_ED}rb_dev_m2b.py", "Tools/unreal/capture_divebar.py", "Tools/unreal/perf_divebar.py", "Shaders/Private/Venue/*.ush",
+		"Config/DefaultScalability.ini", "Content/Generated/Maps/L_DiveBar*", "Content/Generated/Venues/**", "Docs/images/divebar/**",
+		"Docs/perf/m3/**", "Docs/specs/venue-dive-bar.md", f"{_PIE}RbDiveBar*.cpp"]
+		+ _tests(["RbVenueTests"], []) + _package_common("m3v", "M3-V"),
+	"M3-L": [f"{_SRC}Table/**", "Source/RawBreakEditor/Private/RbAssetBake_Table.cpp", "Shaders/Private/*.ush",
 		"Source/RawBreak/Private/Math/RbCameraMath_Render.cpp", f"{_SRC}Game/RbTestRoom.*", f"{_SRC}Dev/RbLookDevCamera.*",
 		f"{_ED}rb_make_materials.py", f"{_ED}rb_bake_table.py", f"{_ED}rb_import_table.py", f"{_ED}rb_make_test_room.py", f"{_ED}rb_m1_layout.py",
-		"Tools/unreal/capture_m1.py", "Tools/unreal/capture_table.py", "Tools/blender/table/**", "Art/Tables/**",
-		"Content/Generated/Tables/**", "Content/Generated/Materials/**", "Content/Generated/Maps/L_M1_TestRoom*",
-		"Docs/images/m1/**", "Docs/references/table-lookdev.md"]
-		+ _tests(["RbTableTests", "RbRenderMathTests", "RbRoomTests", "RbTableLookTests"], []) + _package_common("m2l", "M2-L"),
-	"M2-A": [f"{_SRC}Venue/**", "Tools/blender/rbbl.py", "Tools/blender/common/**",
-		"Tools/blender/divebar/{db_axis_test,db_arch,db_neon,cue_sweep_check}.py",
-		"Art/DiveBar/{layout,lights,calibration}.json", "Art/DiveBar/neon/**", "Art/DiveBar/Export/{AxisTest,Arch,Neon}/**",
-		f"{_ED}rb_import_divebar.py", f"{_ED}rb_make_divebar.py", f"{_ED}rb_make_divebar_fx.py", "Tools/unreal/capture_divebar.py",
-		"Content/Generated/Maps/L_DiveBar*", "Content/Generated/Venues/DiveBar/{Arch,Lighting,FX}/**", "Docs/images/divebar/**",
-		f"{_PIE}RbDiveBar*.cpp"]
-		+ _tests(["RbVenueTests"], []) + _package_common("m2a", "M2-A"),
-	"M2-B": ["Tools/blender/divebar/{db_bar,db_backbar,db_booth,db_stool,db_ledges,db_lamp,db_cue_rack,db_jukebox,db_dart,"
-		"db_lathe_props,db_props_common,db_decals,db_signs}.py", "Art/DiveBar/Export/**", "Art/DiveBar/Textures/**", "Art/DiveBar/cc0_inputs*",
-		"Tools/art/**", "Art/Fonts/**", f"{_ED}rb_make_divebar_materials.py", "Shaders/Private/Venue/*.ush",
-		"Content/Generated/Venues/DiveBar/{Props,Materials,Textures,Decals}/**"] + _package_common("m2b", "M2-B"),
-	"M2-C": ["Source/RawBreakAudioDsp/**", f"{_SRC}Audio/**", "Tools/audio/**", f"{_ED}rb_make_audio.py", "Content/Generated/Audio/**",
-		"Docs/audio/m2/**", f"{_UNIT}RbAudio*.cpp", f"{_PIE}RbAudio*.cpp"] + _package_common("m2c", "M2-C"),
-	"M2-D": [f"{_SRC}UI/**", f"{_SRC}Settings/**", "Config/DefaultScalability.ini", f"{_ED}rb_make_title.py",
-		"Content/Generated/Maps/L_Title*", "Content/Generated/UI/**"]
-		+ _tests(["RbSettingsTests", "RbOverlayTests", "RbUiTests"], ["RbMenuFlowTest"]) + _package_common("m2d", "M2-D"),
-	"M2-E": [f"{_SRC}{d}/**" for d in ("Balls", "Game", "Interaction", "Replay", "Simulation")] + [
-		f"{_SRC}Dev/RbCheatManager.*", "Source/RawBreakEditor/Private/RbAssetBake_Ball.cpp", f"{_ED}rb_bake_ball.py", f"{_ED}rb_make_physics.py",
-		"Content/Generated/Physics/**", "Content/Generated/Balls/**"]
-		+ _tests(["RbBallTests", "RbPlaybackTests", "RbMatchTests", "RbSimulationTests", "RbLooseBallTests", "RbMultiTableTests"],
-			["RbMatchFlowTest", "RbReplayTest", "RbM1FlowTest", "RbM1RackTest", "RbLooseBallFunctionalTest", "RbMultiTableFunctionalTest"])
-		+ _package_common("m2e", "M2-E"),
-	"M2-0": ["RawBreak.uproject", "Source/*.Target.cs", "Source/RawBreak/RawBreak.Build.cs", "Source/RawBreakEditor/RawBreakEditor.Build.cs",
+		f"{_ED}rb_dev_m2l.py", "Tools/unreal/capture_m1.py", "Tools/unreal/capture_table.py", "Tools/blender/table/**", "Art/Tables/**",
+		"Content/Generated/{Tables,Materials}/**", "Content/Generated/Maps/L_M1_TestRoom*", "Docs/images/m1/**", "Docs/references/table-lookdev.md"]
+		+ _tests(["RbTableTests", "RbRenderMathTests", "RbRoomTests", "RbTableLookTests"], []) + _package_common("m3l", "M3-L"),
+	INTEGRATION: ["RawBreak.uproject", "Source/*.Target.cs", "Source/RawBreak/RawBreak.Build.cs", "Source/RawBreakEditor/RawBreakEditor.Build.cs",
 		"Source/RawBreakAudioDsp/RawBreakAudioDsp.Build.cs", "Source/RawBreakShaders/RawBreakShaders.Build.cs",
 		"Source/BilliardsCore/BilliardsCore.Build.cs", "Config/DefaultEngine.ini", "Config/DefaultGame.ini", f"{_SRC}Core/**",
 		"Source/RawBreak/Public/RawBreak.h", "Source/RawBreak/Private/RawBreakModule.cpp", f"{_SRC}Dev/RbHeadlessCaptureSubsystem.*",
-		f"{_UNIT}RbTestFlags.h", f"{_UNIT}RbCoordsTests.cpp", f"{_UNIT}RbContractTests.cpp", f"{_PIE}RbPieSmokeTest.cpp",
-		"Source/RawBreakEditor/**", "Tools/unreal/rbue.py", f"{_ED}rb_common.py", f"{_ED}rb_make_all.py", f"{_ED}rb_pipeline_proof.py",
-		f"{_ED}rb_bake_selftest.py", "Tools/blender/divebar/db_build_all.py", "Docs/licenses/asset-ledger.csv", ".gitignore", "Docs/perf/**",
-		"Docs/images/dev/m20/**", "Docs/ue-architecture.md"],
+		"Source/RawBreak/Public/Math/RbCameraMath.h", f"{_UNIT}RbTestFlags.h", f"{_UNIT}RbCoordsTests.cpp", f"{_UNIT}RbContractTests.cpp",
+		f"{_PIE}RbPieSmokeTest.cpp", f"{_PIE}RbM2IntegrationTest.cpp", f"{_PIE}RbM3IntegrationTest.cpp", "Source/RawBreakEditor/**",
+		"Tools/unreal/rbue.py", f"{_ED}rb_common.py", f"{_ED}rb_make_all.py", f"{_ED}rb_pipeline_proof.py", f"{_ED}rb_bake_selftest.py",
+		"Docs/licenses/asset-ledger.csv", "Docs/licenses/ledger/M2-*.csv", ".gitignore", "Docs/perf/m2/**", "Docs/images/m2/**",
+		"Docs/images/m3/**", "Docs/images/dev/m2*/**", "Docs/ue-architecture.md"],
 }
 
-# Shared files with a block owned by another package: (file, block owner, regex of the block; MULTILINE | DOTALL).
+# Shared files with a block owned by another package than the file: (file, block owner, regex of the block; MULTILINE | DOTALL).
 OWNER_BLOCKS: list[tuple[str, str, str]] = [
-	("Config/DefaultEngine.ini", "M2-C", r"^; --- audio block.*?^; --- end of the audio block[^\n]*$"),
-	("Source/RawBreak/Public/Core/RbTypes.h", "M2-L", r"(?:^//[^\n]*\n)*^UENUM\([^)]*\)\s*\n^enum class ERbTablePart\b.*?^\};"),
-	("Source/RawBreak/Private/Core/RbTypes.cpp", "M2-L", r"^\tconst TCHAR\* ToString\(ERbTablePart Part\)\n\t\{.*?^\t\}$"),
+	("Config/DefaultEngine.ini", "M3-O", r"^; --- audio block.*?^; --- end of the audio block[^\n]*$"),
+	("Config/DefaultEngine.ini", "M3-V", r"^\[/Script/Engine\.RendererSettings\][^\n]*\n.*?(?=^\[)"),
+	("Source/RawBreak/Public/Core/RbTypes.h", "M3-L", r"(?:^//[^\n]*\n)*^UENUM\([^)]*\)\s*\n^enum class ERbTablePart\b.*?^\};"),
+	("Source/RawBreak/Private/Core/RbTypes.cpp", "M3-L", r"^\tconst TCHAR\* ToString\(ERbTablePart Part\)\n\t\{.*?^\t\}$"),
 ]
 
 
@@ -1344,42 +1345,57 @@ def cmd_selftest(a: argparse.Namespace) -> int:
 		failures.append("ledger with a missing column was accepted")
 	check("ledger ai allowed from DB-5", ledger_errors("t", LEDGER_COLUMNS, [{**good, "source": "meshy", "licence": "Meshy-paid-owned",
 		"ai_generated": "y", "steam_ai_disclosure": "y"}], True), [])
+	check("ledger Epic template content (M3)", ledger_errors("t", LEDGER_COLUMNS, [{**good, "asset_id": "SKM_Manny_Simple", "source": "epic",
+		"licence": "UE-EULA", "author": "Epic Games"}], False), [])
+	if not ledger_errors("t", LEDGER_COLUMNS, [{**good, "source": "epic", "licence": "CC0-1.0"}], False):
+		failures.append("ledger epic row with a CC0 licence was accepted")
 
-	# Ownership (18.2).
+	# Ownership (19.2).
 	expected_owner = {
-		"Source/RawBreak/Private/Input/RbAimResponse.cpp": "M2-F", "Source/RawBreak/Private/Math/RbStrokeMath.cpp": "M2-F",
-		"Config/DefaultInput.ini": "M2-F", "Source/RawBreak/Private/Tests/RbFeelTests.cpp": "M2-F",
-		"Source/RawBreak/Public/Game/RbTestRoom.h": "M2-L", "Source/RawBreak/Private/Dev/RbLookDevCamera.cpp": "M2-L",
-		"Source/RawBreakEditor/Private/RbAssetBake_Table.cpp": "M2-L", "Shaders/Private/RbBall.ush": "M2-L",
-		"Content/Generated/Maps/L_M1_TestRoom.umap": "M2-L", "Art/Tables/tablespec_seven_foot_bar.json": "M2-L",
-		"Source/RawBreak/Private/Venue/RbVenueInfo.cpp": "M2-A", "Tools/blender/divebar/db_arch.py": "M2-A",
-		"Art/DiveBar/Export/AxisTest/SM_DB_AxisTest.fbx": "M2-A", "Content/Generated/Maps/L_DiveBar_Lighting.umap": "M2-A",
-		"Content/Generated/Venues/DiveBar/Arch/SM_DB_Wall.uasset": "M2-A", "Source/RawBreakEditor/Private/Tests/RbDiveBarRackTest.cpp": "M2-A",
-		"Tools/blender/divebar/db_stool.py": "M2-B", "Tools/blender/divebar/db_signs.py": "M2-B", "Art/DiveBar/Export/Stool_A/Stool_A.json": "M2-B", "Shaders/Private/Venue/RbVenueWear.ush": "M2-B",
-		"Content/Generated/Venues/DiveBar/Props/SM_DB_Stool_A.uasset": "M2-B", "Docs/licenses/ledger/M2-B.csv": "M2-B", "Tools/art/fetch_cc0.py": "M2-B",
-		"Source/RawBreakAudioDsp/Private/RbAudio/RbImpactSynth.cpp": "M2-C", "Source/RawBreak/Private/Tests/RbAudioDspTests.cpp": "M2-C",
-		"Source/RawBreak/Public/UI/Core/RbUiSubsystem.h": "M2-D", "Content/Generated/Maps/L_Title.umap": "M2-D", "Config/DefaultScalability.ini": "M2-D",
-		"Source/RawBreak/Private/Game/RbGameMode.cpp": "M2-E", "Source/RawBreak/Private/Dev/RbCheatManager.cpp": "M2-E",
-		"Source/RawBreakEditor/Private/Tests/RbM1RackTest.cpp": "M2-E", "Tools/unreal/editor/rb_dev_m2e.py": "M2-E",
-		"Source/RawBreak/Public/Core/RbAssetPaths.h": "M2-0", "Source/RawBreakAudioDsp/RawBreakAudioDsp.Build.cs": "M2-0",
-		"Source/RawBreakEditor/Private/RbAssetBake_Common.cpp": "M2-0", "Source/RawBreak/Private/Dev/RbHeadlessCaptureSubsystem.cpp": "M2-0",
-		"Tools/blender/divebar/db_build_all.py": "M2-0", "Source/RawBreakEditor/Private/Tests/RbPieSmokeTest.cpp": "M2-0",
-		"Source/BilliardsCore/Private/rb/Physics/Solver.cpp": "", "Source/RawBreak/Public/Math/RbCameraMath.h": "", "Docs/decisions.md": "",
+		"Source/RawBreak/Private/Input/RbAimResponse.cpp": "M3-H", "Source/RawBreak/Private/Math/RbStrokeMath.cpp": "M3-H",
+		"Config/DefaultInput.ini": "M3-H", "Source/RawBreak/Private/Tests/RbFeelTests.cpp": "M3-H",
+		"Source/RawBreak/Public/Body/RbBodyRigComponent.h": "M3-H", "Content/Characters/Mannequins/Meshes/SKM_Manny_Simple.uasset": "M3-H",
+		"Tools/blender/body/bd_build_all.py": "M3-H", "Tools/unreal/editor/rb_import_body.py": "M3-H",
+		"Source/RawBreak/Public/Game/RbTestRoom.h": "M3-L", "Source/RawBreak/Private/Dev/RbLookDevCamera.cpp": "M3-L",
+		"Source/RawBreakEditor/Private/RbAssetBake_Table.cpp": "M3-L", "Shaders/Private/RbBall.ush": "M3-L",
+		"Content/Generated/Maps/L_M1_TestRoom.umap": "M3-L", "Art/Tables/tablespec_seven_foot_bar.json": "M3-L",
+		"Source/RawBreak/Private/Venue/RbVenueInfo.cpp": "M3-V", "Tools/blender/divebar/db_arch.py": "M3-V",
+		"Art/DiveBar/Export/AxisTest/SM_DB_AxisTest.fbx": "M3-V", "Content/Generated/Maps/L_DiveBar_Lighting.umap": "M3-V",
+		"Content/Generated/Venues/DiveBar/Arch/SM_DB_Wall.uasset": "M3-V", "Source/RawBreakEditor/Private/Tests/RbDiveBarRackTest.cpp": "M3-V",
+		"Tools/blender/divebar/db_stool.py": "M3-V", "Tools/blender/divebar/db_build_all.py": "M3-V", "Shaders/Private/Venue/RbVenueWear.ush": "M3-V",
+		"Content/Generated/Venues/DiveBar/Props/SM_DB_Stool_A.uasset": "M3-V", "Docs/licenses/ledger/M3-V.csv": "M3-V", "Tools/art/fetch_cc0.py": "M3-V",
+		"Config/DefaultScalability.ini": "M3-V", "Docs/perf/m3/divebar_1440p.json": "M3-V",
+		"Source/RawBreakAudioDsp/Private/RbAudio/RbImpactSynth.cpp": "M3-O", "Source/RawBreak/Private/Tests/RbAudioDspTests.cpp": "M3-O",
+		"Source/RawBreak/Private/Game/RbGameMode.cpp": "M3-O", "Source/RawBreak/Private/Dev/RbCheatManager.cpp": "M3-O",
+		"Source/RawBreakEditor/Private/Tests/RbM1RackTest.cpp": "M3-O", "Tools/unreal/editor/rb_dev_m2e.py": "M3-O",
+		"Source/RawBreak/Public/Ai/RbAiPlannerService.h": "M3-O", "Docs/specs/audio.md": "M3-O",
+		"Source/RawBreak/Public/UI/Core/RbUiSubsystem.h": "M3-G", "Content/Generated/Maps/L_Title.umap": "M3-G",
+		"Source/RawBreak/Private/Modes/RbMatchRules.cpp": "M3-G", "Source/RawBreak/Private/Settings/RbGameUserSettings.cpp": "M3-G",
+		"Source/RawBreak/Public/Core/RbAssetPaths.h": INTEGRATION, "Source/RawBreakAudioDsp/RawBreakAudioDsp.Build.cs": INTEGRATION,
+		"Source/RawBreakEditor/Private/RbAssetBake_Common.cpp": INTEGRATION, "Source/RawBreak/Private/Dev/RbHeadlessCaptureSubsystem.cpp": INTEGRATION,
+		"Source/RawBreakEditor/Private/Tests/RbPieSmokeTest.cpp": INTEGRATION, "Source/RawBreak/Public/Math/RbCameraMath.h": INTEGRATION,
+		"Source/RawBreakEditor/Private/Tests/RbM2IntegrationTest.cpp": INTEGRATION, "Docs/licenses/ledger/M2-B.csv": INTEGRATION,
+		"Source/BilliardsCore/Private/rb/Physics/Solver.cpp": "", "Docs/decisions.md": "",
 	}
 	for path, want in expected_owner.items():
 		check(f"owner {path}", owner_of(path)[0], want)
 
-	# Every content generator a package owns is in the architect's regeneration lists, and every listed one has an owner (M2-A2:
-	# a clean Content/Generated is rebuilt by `rbbl.py all` + rb_make_all.py; a generator missing there silently drops its assets
-	# - review: M2-A's rb_make_divebar_fx.py was owned but not run, so the dust motes / light function vanished on regeneration).
-	owned = {pattern for package, pattern, _, _ in _OWNER_RULES if package != "M2-0"}
+	# Every content generator - every one that exists on disk and every one a package owns by name - is in the regeneration lists, and
+	# every listed one has an owner (M2-A2 / M3-A2: a clean Content/Generated is rebuilt by `rbbl.py all` + rb_make_all.py; a generator
+	# missing there silently drops its assets - M2 review: M2-A's rb_make_divebar_fx.py was owned but not run). M3 owns the Blender
+	# folders by glob, so the files on disk are the reference.
+	owned = {pattern for package, pattern, _, _ in _OWNER_RULES if package != INTEGRATION}
 	ue_listed = generator_list(REPO / f"{_ED}rb_make_all.py")
 	ue_owned = {p[len(_ED):] for p in owned if re.fullmatch(r"Tools/unreal/editor/rb_(make|bake|import)_\w+\.py", p)}
-	check("rb_make_all.py runs every owned UE generator", sorted(ue_owned - set(ue_listed)), [])
+	ue_on_disk = {f.name for f in (REPO / _ED).glob("rb_*.py") if re.fullmatch(r"rb_(make|bake|import)_\w+\.py", f.name)} - {"rb_make_all.py", "rb_bake_selftest.py"}
+	check("rb_make_all.py runs every UE generator (owned or on disk)", sorted((ue_owned | ue_on_disk) - set(ue_listed)), [])
 	check("rb_make_all.py generators have owners", [s for s in ue_listed if not owner_of(_ED + s)[0]], [])
 	bl_listed = generator_list(REPO / "Tools/blender/divebar/db_build_all.py")
-	bl_owned = {p[len("Tools/blender/"):] for p in owned if re.fullmatch(r"Tools/blender/divebar/db_\w+\.py", p)} - {"divebar/db_props_common.py"}
-	check("db_build_all.py runs every owned Blender generator", sorted(bl_owned - set(bl_listed)), [])
+	bl_owned = {p[len("Tools/blender/"):] for p in owned if re.fullmatch(r"Tools/blender/divebar/db_\w+\.py", p)}
+	bl_on_disk = ({f"divebar/{f.name}" for f in (REPO / "Tools/blender/divebar").glob("db_*.py")}
+		| {f"{d}/{f.name}" for d in ("table", "body") for f in (REPO / "Tools/blender" / d).glob("*_build_all.py")})
+	bl_missing = (bl_owned | bl_on_disk) - {"divebar/db_props_common.py", "divebar/db_build_all.py"} - set(bl_listed)
+	check("db_build_all.py runs every Blender generator (owned or on disk)", sorted(bl_missing), [])
 	check("db_build_all.py generators have owners", [s for s in bl_listed if not owner_of("Tools/blender/" + s)[0]], [])
 	try:
 		ties = [f"{p}: {owner_of(p)[1]}" for p in _git("ls-files").splitlines() if owner_of(p)[0] == "?"]
@@ -1389,18 +1405,20 @@ def cmd_selftest(a: argparse.Namespace) -> int:
 
 	# Shared-file blocks: an edit inside the block belongs to the block's owner only.
 	engine = (REPO / "Config/DefaultEngine.ini").read_text(encoding="utf-8")
-	check("engine ini: audio block edit", touched_owners("Config/DefaultEngine.ini", engine, engine.replace("AudioMaxChannels=96", "AudioMaxChannels=128")), {"M2-C"})
-	check("engine ini: renderer edit", touched_owners("Config/DefaultEngine.ini", engine, engine.replace("r.VirtualTextures=True", "r.VirtualTextures=False")), {"M2-0"})
-	check("engine ini: both", touched_owners("Config/DefaultEngine.ini", engine, engine.replace("AudioMaxChannels=96", "AudioMaxChannels=128")
-		.replace("r.VirtualTextures=True", "r.VirtualTextures=False")), {"M2-0", "M2-C"})
+	check("engine ini: audio block edit", touched_owners("Config/DefaultEngine.ini", engine, engine.replace("AudioMaxChannels=96", "AudioMaxChannels=128")), {"M3-O"})
+	check("engine ini: renderer section edit", touched_owners("Config/DefaultEngine.ini", engine, engine.replace("r.VirtualTextures=True", "r.VirtualTextures=False")), {"M3-V"})
+	check("engine ini: both blocks", touched_owners("Config/DefaultEngine.ini", engine, engine.replace("AudioMaxChannels=96", "AudioMaxChannels=128")
+		.replace("r.VirtualTextures=True", "r.VirtualTextures=False")), {"M3-O", "M3-V"})
+	check("engine ini: maps edit", touched_owners("Config/DefaultEngine.ini", engine, engine.replace("GameDefaultMap=/Game/Generated/Maps/L_Title.L_Title",
+		"GameDefaultMap=/Game/Generated/Maps/L_DiveBar.L_DiveBar")), {INTEGRATION})
 	types_h = (REPO / "Source/RawBreak/Public/Core/RbTypes.h").read_text(encoding="utf-8")
 	check("RbTypes.h: table part appended", touched_owners("Source/RawBreak/Public/Core/RbTypes.h", types_h,
-		types_h.replace("\tCount UMETA(Hidden)\n};", "\tCabinet,      // test\n\tCount UMETA(Hidden)\n};", 1)), {"M2-L"})
-	check("RbTypes.h: venue added", touched_owners("Source/RawBreak/Public/Core/RbTypes.h", types_h, types_h.replace("\tDiveBar,  //", "\tPoolHall,\n\tDiveBar,  //", 1)), {"M2-0"})
+		types_h.replace("\tCount UMETA(Hidden)\n};", "\tCabinet,      // test\n\tCount UMETA(Hidden)\n};", 1)), {"M3-L"})
+	check("RbTypes.h: venue added", touched_owners("Source/RawBreak/Public/Core/RbTypes.h", types_h, types_h.replace("\tDiveBar,  //", "\tPoolHall,\n\tDiveBar,  //", 1)), {INTEGRATION})
 	types_cpp = (REPO / "Source/RawBreak/Private/Core/RbTypes.cpp").read_text(encoding="utf-8")
 	check("RbTypes.cpp: ToString case", touched_owners("Source/RawBreak/Private/Core/RbTypes.cpp", types_cpp,
-		types_cpp.replace("\t\tcase ERbTablePart::Count: break;", "\t\tcase ERbTablePart::Legs: return TEXT(\"Legs\");\n\t\tcase ERbTablePart::Count: break;", 1)), {"M2-L"})
-	check("new file of another package", touched_owners("Source/RawBreak/Private/UI/New.cpp", None, "x"), {"M2-D"})
+		types_cpp.replace("\t\tcase ERbTablePart::Count: break;", "\t\tcase ERbTablePart::Legs: return TEXT(\"Legs\");\n\t\tcase ERbTablePart::Count: break;", 1)), {"M3-L"})
+	check("new file of another package", touched_owners("Source/RawBreak/Private/UI/New.cpp", None, "x"), {"M3-G"})
 
 	for line in failures:
 		print(f"[rbue] selftest FAIL {line}")

@@ -13,6 +13,8 @@
 //   Pause (Esc)           M2: stops a running replay, else URbUiSubsystem::TogglePauseMenu (M2-D). Replaces M1's legacy Esc key
 //                         binding (the Pause action of URbInputSetup triggers while the game is paused).
 //   CycleOption (Q / E)   the director's highlighted decision option -1 / +1
+//   M3 (plan step, Docs/ue-architecture.md 19.3): the controller owns URbCallShotComponent (M3-G), which binds Call (C), Declare (X)
+//   and CycleOption (pocket cycling while down, the spot request in hand) itself in SetupInputComponent (BindInput).
 // Mouse: captured, hidden, game-only input (the raw-input thread of the stroke needs the high-precision mouse mode); the mouse axes
 // are neutral (M2-F, P3: raw counts in the Look action, NeutraliseMouseAxes). Pausing: the pause menu (M2-D) uses SetPause /
 // SetInputMode from its own code; the stroke component notices the paused world and drops a held stroke (18.2).
@@ -22,6 +24,7 @@
 
 #include "RbPlayerController.generated.h"
 
+class URbCallShotComponent;
 class URbInputSetup;
 class URbMatchDirector;
 class URbOverlayComponent;
@@ -39,6 +42,8 @@ public:
 
 	const URbInputSetup* GetInputSetup() const { return InputSetup; }
 	URbOverlayComponent* GetOverlay() const { return Overlay; }
+	// M3 (19.3): the diegetic shot call / declarations / spot request (M3-G).
+	URbCallShotComponent* GetCallShot() const { return CallShot; }
 
 	// Action handlers (the Enhanced Input bindings call these; tests and dev tools call them directly).
 	void HandleGlance(bool bHeld);
@@ -81,4 +86,7 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "RawBreak|UI")
 	TObjectPtr<URbOverlayComponent> Overlay;
+
+	UPROPERTY(VisibleAnywhere, Category = "RawBreak|Modes")
+	TObjectPtr<URbCallShotComponent> CallShot;
 };

@@ -2,8 +2,9 @@
 Docs/ue-architecture.md 18.7 / 18.8, venue-dive-bar 13.1. Paths are relative to Tools/blender/.
 
 Each generator runs in this Blender process with its own sys.argv (rb_bl.reset_scene() at its start); a missing generator is
-skipped with a warning (--strict fails), a failing one stops the run. The list is the architect's (packages never edit it); a
-package that adds a generator reports it and the architect adds the line. Owners in the second column.
+skipped with a warning (--strict fails), a failing one stops the run. M2: the list was the architect's; M3 (Docs/ue-architecture.md
+19.2): the file is M3-V's, which adds / removes only its own lines (the table and body lines belong to M3-L / M3-H). Owners in the
+second column.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ GENERATORS = [
 	("divebar/db_arch.py", "M2-A"),           # shell from Art/DiveBar/layout.json (walls, ceiling, soffit, columns, doors, openings)
 	("divebar/db_neon.py", "M2-A"),           # neon tubes from Art/DiveBar/neon/*.svg (lighting element; proxy lights in the level)
 	("table/tb_build_all.py", "M2-L"),        # table bodies / coin-op cabinet from the rbsim --geometry JSONs in Art/Tables
+	("body/bd_build_all.py", "M3-H"),         # M3 (Docs/ue-architecture.md 19.3): body cuffs / region-mask helpers (missing = skipped)
 	("divebar/db_bar.py", "M2-B"),            # H08 bar counter
 	("divebar/db_backbar.py", "M2-B"),        # H09 back bar, shelves, mirror, mug rack
 	("divebar/db_booth.py", "M2-B"),          # M02 booths + booth tables

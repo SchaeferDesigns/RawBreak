@@ -305,7 +305,7 @@ bool FRbInputMapping::RunTest(const FString& Parameters)
 		const bool bMapped = Mappings.ContainsByPredicate([Action](const FEnhancedActionKeyMapping& M) { return M.Action == Action; });
 		TestTrue(*FString::Printf(TEXT("%s mapped"), *GetNameSafe(Action)), Action && bMapped);
 	}
-	TestEqual(TEXT("16 actions (M2: + Pause)"), Setup->GetAllActions().Num(), 16);
+	TestEqual(TEXT("19 actions (M2: + Pause; M3: + Call, Declare, Chalk)"), Setup->GetAllActions().Num(), 19);
 
 	auto KeysOf = [&Mappings](const UInputAction* Action)
 	{

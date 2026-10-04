@@ -11,9 +11,9 @@
 // (every action mapped, no key bound twice in the context).
 //
 // Trigger conventions for the pawn / controller bindings (UE-5b):
-//   held actions (Stroke, Commit, FineAim, Settle, Glance): no trigger = implicit "Down": Triggered every frame while held,
+//   held actions (Stroke, Commit, FineAim, Settle, Glance, Call): no trigger = implicit "Down": Triggered every frame while held,
 //     Completed on release -> bind Triggered (value true) and Completed (value false);
-//   pressed actions (GetDown, ToggleOverlay, ToggleDebug, Replay, Confirm, CycleOption): UInputTriggerPressed ->
+//   pressed actions (GetDown, ToggleOverlay, ToggleDebug, Replay, Confirm, CycleOption, Declare, Chalk): UInputTriggerPressed ->
 //     bind Triggered (fires once per press);
 //   TipOffset: UInputTriggerPulse (a step on press, then repeated every 0.12 s while held) -> bind Triggered, one step each;
 //   axes (Move, Look, Elevation): no trigger -> bind Triggered (Look = raw Mouse2D counts, + Y = mouse moved forward).
@@ -87,6 +87,9 @@ URbInputSetup* URbInputSetup::CreateDefault(UObject* Outer)
 	Setup->CycleOption = MakeAction(Setup, TEXT("IA_CycleOption"), EInputActionValueType::Axis1D);
 	Setup->Pause = MakeAction(Setup, TEXT("IA_Pause"), EInputActionValueType::Boolean);
 	Setup->Pause->bTriggerWhenPaused = true; // M2: the pause menu closes with the same key
+	Setup->Call = MakeAction(Setup, TEXT("IA_Call"), EInputActionValueType::Boolean);       // M3 (19.3)
+	Setup->Declare = MakeAction(Setup, TEXT("IA_Declare"), EInputActionValueType::Boolean); // M3
+	Setup->Chalk = MakeAction(Setup, TEXT("IA_Chalk"), EInputActionValueType::Boolean);     // M3
 
 	UInputMappingContext* C = Setup->Context;
 
@@ -135,10 +138,16 @@ URbInputSetup* URbInputSetup::CreateDefault(UObject* Outer)
 	MapPressed(C, Setup->CycleOption, EKeys::Q, Setup, true); // -1
 	MapPressed(C, Setup->CycleOption, EKeys::E, Setup);       // +1
 	MapPressed(C, Setup->Pause, EKeys::Escape, Setup);         // M2: replay back / pause menu
+
+	// M3 (Docs/ue-architecture.md 19.3; ui-ux 9.4 / 9.5 / 9.12): the shot call (held), the push-out / safety declaration, chalking.
+	C->MapKey(Setup->Call, EKeys::C);
+	MapPressed(C, Setup->Declare, EKeys::X, Setup);
+	MapPressed(C, Setup->Chalk, EKeys::G, Setup);
 	return Setup;
 }
 
 TArray<UInputAction*> URbInputSetup::GetAllActions() const
 {
-	return {Move, Look, GetDown, Stroke, Commit, Elevation, TipOffset, FineAim, Settle, Glance, ToggleOverlay, ToggleDebug, Replay, Confirm, CycleOption, Pause};
+	return {Move, Look, GetDown, Stroke, Commit, Elevation, TipOffset, FineAim, Settle, Glance, ToggleOverlay, ToggleDebug, Replay, Confirm, CycleOption, Pause,
+		Call, Declare, Chalk};
 }

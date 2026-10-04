@@ -4,6 +4,7 @@
 #include "Balls/RbBallSet.h"
 #include "Balls/RbShotPlaybackComponent.h"
 #include "Cue/RbCue.h"
+#include "Modes/RbMatchRules.h"
 #include "Player/RbStrokeComponent.h"
 #include "Replay/RbReplaySubsystem.h"
 #include "Simulation/RbSimulationSubsystem.h"
@@ -238,28 +239,8 @@ bool URbMatchDirector::StartMatch(const FRbMatchSetup& InSetup)
 	HumanParams = rb::human::HumanParams{};
 	HumanParams.NoiseScale = FMath::Max(0.0, Setup.NoiseScale);
 
-	const bool bPractice = Setup.Mode == ERbMatchMode::Practice;
-	const int32 Race = FMath::Max(1, Setup.RaceTo);
-	Config = rb::rules::MatchConfig{};
-	Config.Game = RbTypes::ToCore(Setup.Discipline);
-	Config.Rules = rb::rules::MakeRulesConfig(RbTypes::RulesPresetFor(Setup.Discipline));
-	Config.Rules.Input = rb::rules::InputMode::Assisted; // M1: no body / bridge hand (rules.md 16 item 22, review R-11)
-	// Practice and hot-seat are casual play: calls use the casual default ObviousAssist (rules.md 4.5) instead of the ranked
-	// Explicit of the WPA presets (8-ball, 10-ball, 14.1). M1 has no call input, and Explicit would refuse every shot after the
-	// break that carries no call (CallRequired); explicit calls made through SetCalledShot are still honoured.
-	if (Config.Rules.Calls == rb::rules::CallMode::Explicit)
-	{
-		Config.Rules.Calls = rb::rules::CallMode::ObviousAssist;
-	}
-	Config.RaceTo = bPractice ? TNumericLimits<int32>::Max() : Race; // practice: a won rack racks again
-	if (Config.Game == rb::rules::Discipline::StraightPool)
-	{
-		Config.TargetPoints = bPractice ? TNumericLimits<int32>::Max() : Race; // ?Race= counts points in 14.1
-		Config.Rules.TargetPoints = Config.TargetPoints;
-	}
-	Config.Seed = MatchSeed;
-	Config.RackGaps = rb::kRackGapWoodenRack;
-	Config.Table = TableContext->RulesTable;
+	// The rules configuration of the setup (M3 plan step: M3-G's RbMatchRules, the M2 logic moved there unchanged; 19.3 / 19.6).
+	Config = RbMatchRules::MakeMatchConfig(Setup, MatchSeed, TableContext->RulesTable);
 
 	State = rb::rules::MatchState{};
 	rb::rules::StartMatch(Config, State);
@@ -285,8 +266,11 @@ bool URbMatchDirector::StartMatch(const FRbMatchSetup& InSetup)
 		CueActor->SetDrive(ERbCueDrive::Hidden);
 	}
 
+	const bool bPractice = Setup.Mode == ERbMatchMode::Practice;
+	const int32 Race = FMath::Max(1, Setup.RaceTo);
 	UE_LOG(LogRawBreak, Log, TEXT("RbMatchDirector: %s %s, race %d, lag %d, seed %llu, attribute %.0f, noise %.2f"),
-		bPractice ? TEXT("practice") : TEXT("hot-seat"), DisciplineName(Setup.Discipline), Race, Setup.bLag ? 1 : 0, MatchSeed,
+		bPractice ? TEXT("practice") : (Setup.Mode == ERbMatchMode::VsAi ? TEXT("vs-ai") : TEXT("hot-seat")), DisciplineName(Setup.Discipline), Race,
+		Setup.bLag ? 1 : 0, MatchSeed,
 		Shooters[0].Attributes.Steadiness, HumanParams.NoiseScale);
 
 	EnterRulesPhase();
@@ -482,6 +466,48 @@ bool URbMatchDirector::CanShootNow() const
 	}
 	return Phase == ERbDirectorPhase::AwaitStroke && (!IsCueBallInHand() || bCueBallPlaced) &&
 		TableState.Balls[rb::kCueBallId].InPlay;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// M3 additions (Docs/ue-architecture.md 19.3 / 19.5; owner M3-O). Plan-step stubs: GetShooterKind is complete, the rest refuses /
+// returns the defaults until M3-O implements them.
+// ---------------------------------------------------------------------------------------------------------------------
+
+ERbShooterKind URbMatchDirector::GetShooterKind(int32 Player) const
+{
+	return (Setup.Mode == ERbMatchMode::VsAi && Player == 1) ? ERbShooterKind::Ai : ERbShooterKind::Human;
+}
+
+bool URbMatchDirector::IsAiToAct() const
+{
+	return false; // TODO(M3-O): the AI's shot / placement / option / lag / breaker choice / spot request (19.5)
+}
+
+FRbStrokeContext URbMatchDirector::MakeStrokeContextFor(int32 Player) const
+{
+	(void)Player;
+	return MakeStrokeContext(); // TODO(M3-O): the given rules player's shooter state (the AI's own attributes, equipment, noise)
+}
+
+bool URbMatchDirector::RequestSpot()
+{
+	Refuse(TEXT("RequestSpot: not implemented yet (M3-O)")); // TODO(M3-O): rb::rules::RequestSpot, sync, re-arm (rules 4.4)
+	return false;
+}
+
+bool URbMatchDirector::ChooseBreaker(int32 Breaker)
+{
+	(void)Breaker;
+	Refuse(TEXT("ChooseBreaker: not implemented yet (M3-O)")); // TODO(M3-O): rb::rules::ChooseBreaker in LagWinnerChooses
+	return false;
+}
+
+int32 URbMatchDirector::ChalkTip(int32 Player, int32 Twists, double Sweep)
+{
+	(void)Player;
+	(void)Twists;
+	(void)Sweep;
+	return 0; // TODO(M3-O): ApplyChalkTwist x Twists on the rules player's TipState (HF-22; the body's visible twists)
 }
 
 bool URbMatchDirector::IsReplayAllowed() const
@@ -701,6 +727,7 @@ void URbMatchDirector::SetCalledShot(int32 Ball, int32 Pocket)
 		return;
 	}
 	Declaration = D;
+	OnDeclarationChanged.Broadcast(ActiveRulesPlayer(), Declaration); // M3 (19.3)
 	OnMatchChanged.Broadcast();
 }
 
@@ -719,6 +746,7 @@ void URbMatchDirector::SetShotKind(rb::rules::ShotKind Kind)
 		return;
 	}
 	Declaration = D;
+	OnDeclarationChanged.Broadcast(ActiveRulesPlayer(), Declaration); // M3 (19.3)
 	OnMatchChanged.Broadcast();
 }
 
@@ -740,6 +768,14 @@ bool URbMatchDirector::SubmitStroke(const FRbStrokeCommit& Commit)
 	{
 		Context.Situation.ElevationFloor = Stroke->GetAim().ElevationFloor;
 	}
+	// M3 plan step (19.2 / 19.3): the stance fields of the situation come from the stroke that was rendered - the stroke component's
+	// bridge solver and IK (M3-H) or the AI's planner decision (M3-O). A default commit carries the M2 defaults (closed bridge,
+	// 0.20 / 0.80 m, comfortable stance, full cue), so nothing changes until a package fills them.
+	Context.Situation.Bridge = Commit.Context.Situation.Bridge;
+	Context.Situation.BridgeLength = Commit.Context.Situation.BridgeLength;
+	Context.Situation.BridgeToGrip = Commit.Context.Situation.BridgeToGrip;
+	Context.Situation.StanceDifficulty = Commit.Context.Situation.StanceDifficulty;
+	Context.Situation.ShortCue = Commit.Context.Situation.ShortCue;
 
 	const int32 Struck = StruckBallId();
 	rb::human::BallObstacle Obstacles[rb::kMaxBalls];

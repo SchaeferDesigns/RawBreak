@@ -20,6 +20,12 @@
 #include "Modules/ModuleManager.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 
+#include "Ai/RbOpponentRoster.h"
+#include "Game/RbMatchDirector.h"
+#include "Modes/RbMatchRules.h"
+
+#include "rb/Human/AiProfiles.h"
+#include "rb/Human/Skill.h"
 #include "rb/Human/Venue.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -232,6 +238,66 @@ bool FRbContractVenues::RunTest(const FString& Parameters)
 		TestFalse(FString::Printf(TEXT("tag %s unique"), *T.ToString()), Unique.Contains(T));
 		Unique.Add(T);
 	}
+	return true;
+}
+
+// M3 plan step (Docs/ue-architecture.md 19.3): the shared enums mirror the core ones, the URL names round-trip, the roster lists the
+// six profiles, the new tags are unique, and the moved rules configuration is the M2 one.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbContractM3Enums, "RawBreak.Unit.Contracts.M3Enums", RB_UNIT_TEST_FLAGS)
+bool FRbContractM3Enums::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("six AI profiles"), static_cast<int32>(ERbAiProfile::Count), rb::human::kAiProfileCount);
+	for (int32 Index = 0; Index < static_cast<int32>(ERbAiProfile::Count); ++Index)
+	{
+		const ERbAiProfile Profile = static_cast<ERbAiProfile>(Index);
+		TestEqual(FString::Printf(TEXT("profile %d mirrors AiProfileId"), Index), static_cast<int32>(RbTypes::ToCore(Profile)), Index);
+		TestTrue(FString::Printf(TEXT("profile %d round trip"), Index), RbTypes::FromCore(RbTypes::ToCore(Profile)) == Profile);
+		ERbAiProfile Parsed = ERbAiProfile::Count;
+		TestTrue(FString::Printf(TEXT("parse %s"), RbTypes::ToString(Profile)),
+			RbTypes::ParseAiProfile(FString(RbTypes::ToString(Profile)).ToLower(), Parsed) && Parsed == Profile);
+		TestTrue(FString::Printf(TEXT("roster entry %d"), Index), RbOpponentRoster::Get(Profile).Profile == Profile);
+	}
+	ERbAiProfile Unchanged = ERbAiProfile::TouringPro;
+	TestFalse(TEXT("unknown profile refused"), RbTypes::ParseAiProfile(TEXT("NineBall"), Unchanged));
+	TestTrue(TEXT("refused parse leaves the value"), Unchanged == ERbAiProfile::TouringPro);
+	TestEqual(TEXT("roster size"), RbOpponentRoster::GetAll().Num(), static_cast<int32>(ERbAiProfile::Count));
+
+	for (const ERbBridgeType Bridge : {ERbBridgeType::Closed, ERbBridgeType::Open, ERbBridgeType::Rail, ERbBridgeType::Elevated, ERbBridgeType::Mechanical})
+	{
+		TestEqual(TEXT("bridge mirrors BridgeType"), static_cast<int32>(RbTypes::ToCore(Bridge)), static_cast<int32>(Bridge));
+		TestTrue(TEXT("bridge round trip"), RbTypes::FromCore(RbTypes::ToCore(Bridge)) == Bridge);
+	}
+	TestTrue(TEXT("default stroke situation = closed bridge"), RbTypes::FromCore(rb::human::StrokeSituation{}.Bridge) == ERbBridgeType::Closed);
+
+	for (const ERbCallPolicy Policy : {ERbCallPolicy::Casual, ERbCallPolicy::EveryShot})
+	{
+		ERbCallPolicy Parsed = Policy == ERbCallPolicy::Casual ? ERbCallPolicy::EveryShot : ERbCallPolicy::Casual;
+		TestTrue(FString::Printf(TEXT("parse %s"), RbTypes::ToString(Policy)), RbTypes::ParseCallPolicy(RbTypes::ToString(Policy), Parsed) && Parsed == Policy);
+	}
+
+	using namespace RbAssetPaths;
+	const FName Tags[] = {Tag::PlayerTable, Tag::DiveBarCeiling, Tag::LooseBall, Tag::BallReturnVolume, Tag::VenueInfo, Tag::WaitSpot, Tag::ChalkCube,
+		Tag::Opponent};
+	TSet<FName> Unique;
+	for (const FName& T : Tags)
+	{
+		TestFalse(FString::Printf(TEXT("tag %s unique"), *T.ToString()), Unique.Contains(T));
+		Unique.Add(T);
+	}
+
+	// The configuration moved out of the director: practice / hot-seat calls stay casual (M2), the race and the seed are kept.
+	FRbMatchSetup Setup;
+	Setup.Mode = ERbMatchMode::HotSeat;
+	Setup.Discipline = ERbDiscipline::EightBall;
+	Setup.RaceTo = 3;
+	const rb::rules::MatchConfig Config = RbMatchRules::MakeMatchConfig(Setup, 77, rb::rules::RulesTable{});
+	TestTrue(TEXT("8-ball"), Config.Game == rb::rules::Discipline::EightBall);
+	TestTrue(TEXT("hot-seat calls stay ObviousAssist"), Config.Rules.Calls == rb::rules::CallMode::ObviousAssist);
+	TestTrue(TEXT("assisted input"), Config.Rules.Input == rb::rules::InputMode::Assisted);
+	TestEqual(TEXT("race"), Config.RaceTo, 3);
+	TestTrue(TEXT("seed"), Config.Seed == 77ull);
+	Setup.Mode = ERbMatchMode::Practice;
+	TestEqual(TEXT("practice: no race"), RbMatchRules::MakeMatchConfig(Setup, 1, rb::rules::RulesTable{}).RaceTo, TNumericLimits<int32>::Max());
 	return true;
 }
 
