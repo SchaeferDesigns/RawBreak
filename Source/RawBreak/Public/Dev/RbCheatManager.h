@@ -78,6 +78,12 @@ public:
 	// Queued pause of Seconds before the next queued command (scripts: let a shot settle before a capture state).
 	UFUNCTION(Exec) void RbWait(float Seconds);
 
+	// --- additions (M2-E) ----------------------------------------------------------------------------------
+
+	// Balls off the table: logs every loose ball ("RbLooseBall: table=.. ball=.. at (..) ..."), or returns every one to its table.
+	UFUNCTION(Exec) void RbLooseBalls();
+	UFUNCTION(Exec) void RbReturnBalls();
+
 	// The line RbDumpState logs (tests).
 	FString MakeStateLine() const;
 

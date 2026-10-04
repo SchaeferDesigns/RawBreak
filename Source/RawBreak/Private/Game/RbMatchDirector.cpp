@@ -1131,12 +1131,10 @@ void URbMatchDirector::CommitShot(const TSharedRef<const FRbShot>& Shot)
 	{
 		CueActor->SetDrive(ERbCueDrive::Hidden);
 	}
-	if (UWorld* World = GetWorld())
+	UWorld* World = bRecordReplays ? GetWorld() : nullptr;
+	if (URbReplaySubsystem* Replay = World ? World->GetSubsystem<URbReplaySubsystem>() : nullptr)
 	{
-		if (URbReplaySubsystem* Replay = World->GetSubsystem<URbReplaySubsystem>())
-		{
-			Replay->RecordShot(Committed);
-		}
+		Replay->RecordShot(Committed);
 	}
 	ShowTableState();
 

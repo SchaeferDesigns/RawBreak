@@ -3,6 +3,12 @@
 // Game mode of the playable table room (Docs/ue-architecture.md 5.1, 7). Finds the level's ARbTable (or spawns one
 // at the origin), spawns ARbBallSet and ARbCue, creates the URbMatchDirector and starts the match. URL options
 // (also usable from the command line after the map name):
+//
+// Several tables per level (M2-E, 18.6.2): EVERY ARbTable of the level (URbTableSubsystem, sorted by TableIndex) gets a session
+// - its own ball set, cue and director - registered with URbTableSubsystem. The PLAYER's table (tagged RbPlayerTable, else the
+// lowest TableIndex) plays the match of the options below and owns the pawn's stroke component and the replay history; every
+// other table starts an idle practice rack (rendered, nobody shoots in M2; V2: AI regulars) with a seed derived from the match
+// seed and its TableIndex. GetDirector() / GetTable() / GetBallSet() / GetCue() are the player session's (M1 code and tests).
 //   ?Mode=Practice|HotSeat  ?Game=NineBall|EightBall|TenBall|StraightPool  ?Race=5  ?Lag=0|1  ?Seed=<n>
 //   ?Attr=<0..100> (both shooters' attributes; default the neutral guest profile 50)  ?Pressure=0|1  ?Noise=<NoiseScale>
 //   ?Rate=<live playback rate, 0 = commit at once>  ?P1=<name>  ?P2=<name>
@@ -27,6 +33,18 @@ class ARbBallSet;
 class ARbCue;
 class ARbTable;
 
+// The actors and the director of one table's session (kept alive by the game mode; registered with URbTableSubsystem).
+USTRUCT()
+struct FRbGameModeSession
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Transient) TObjectPtr<ARbTable> Table;
+	UPROPERTY(Transient) TObjectPtr<ARbBallSet> BallSet;
+	UPROPERTY(Transient) TObjectPtr<ARbCue> Cue;
+	UPROPERTY(Transient) TObjectPtr<URbMatchDirector> Director;
+};
+
 UCLASS()
 class RAWBREAK_API ARbGameMode : public AGameModeBase
 {
@@ -37,10 +55,16 @@ public:
 
 	static ARbGameMode* Get(const UObject* WorldContext);
 
+	// The PLAYER session's (see the file comment).
 	URbMatchDirector* GetDirector() const { return Director; }
 	ARbTable* GetTable() const { return Table; }
 	ARbBallSet* GetBallSet() const { return BallSet; }
 	ARbCue* GetCue() const { return Cue; }
+
+	// Every session of the level (index order = TableIndex order; the player's included).
+	const TArray<FRbGameModeSession>& GetSessions() const { return Sessions; }
+	// Setup the idle match of a non-player table starts with (practice 9-ball, seed from the match seed and TableIndex).
+	FRbMatchSetup MakeIdleSetup(int32 TableIndex) const;
 
 	// Match started in StartPlay (options above override these defaults).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RawBreak|Match")
@@ -70,15 +94,20 @@ protected:
 	// Hands a (re)spawned player pawn's stroke component to the table, the cue and the director.
 	void WirePawn(APawn* Pawn);
 
-	// Debug lines of the director's table state (rb.Match.DrawTableState).
+	// Debug lines of the directors' table states (rb.Match.DrawTableState; every session).
 	void DrawTableStateDebug() const;
 
 	virtual void FinishRestartPlayer(AController* NewPlayer, const FRotator& StartRotation) override;
+
+	// Ball set, cue and director of Table (found or spawned), initialised and registered with URbTableSubsystem.
+	FRbGameModeSession MakeSession(ARbTable* SessionTable, bool bPlayer);
 
 	UPROPERTY(Transient) TObjectPtr<URbMatchDirector> Director;
 	UPROPERTY(Transient) TObjectPtr<ARbTable> Table;
 	UPROPERTY(Transient) TObjectPtr<ARbBallSet> BallSet;
 	UPROPERTY(Transient) TObjectPtr<ARbCue> Cue;
+
+	UPROPERTY(Transient) TArray<FRbGameModeSession> Sessions;
 
 	FRbMatchSetup Setup;
 	float PlaybackRate = 1.0f;

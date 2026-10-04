@@ -24,6 +24,7 @@
 #include "Dev/RbLookDevCamera.h"
 #include "Game/RbGameMode.h"
 #include "Game/RbMatchDirector.h"
+#include "Game/RbTableSubsystem.h"
 #include "Game/RbTestRoom.h"
 #include "Player/RbPlayerCharacter.h"
 #include "Player/RbStrokeComponent.h"
@@ -115,12 +116,13 @@ bool FRbM1FlowCommand::Update()
 	{
 		return true;
 	}
-	int32 Tables = 0;
-	for (TActorIterator<ARbTable> It(World); It; ++It)
-	{
-		++Tables;
-	}
+	const URbTableSubsystem* TableRegistry = URbTableSubsystem::Get(World);
+	const int32 Tables = TableRegistry ? TableRegistry->GetTables().Num() : 0;
 	Test->TestEqual(TEXT("the game mode uses the level's table (none spawned)"), Tables, 1);
+	// M2-E (18.6.2): the one table is the player's and has its registered session (the game mode's accessors are its actors).
+	const FRbTableSession* PlayerSession = TableRegistry ? TableRegistry->GetPlayerSession() : nullptr;
+	Test->TestTrue(TEXT("player session registered for the level's table"), PlayerSession && PlayerSession->Table.Get() == Table &&
+		PlayerSession->Director.Get() == Director && PlayerSession->BallSet.Get() == Mode->GetBallSet());
 	Test->TestNearlyEqual(TEXT("physics lamp = rendered lamp (R-14)"), Table->GetContext().Setup.LampUndersideZ, Room->GetLampUndersideHeightMeters(), 1e-12);
 	const FRbLuxReport Lux = Room->ComputeLux(10.0, ERbLuxSources::Lamp);
 	Test->TestTrue(FString::Printf(TEXT("E4 in play: >= 520 lux on bed and rails (min %.0f)"), Lux.TableMin()), Lux.TableMin() >= ARbTestRoom::WpaMinLux);

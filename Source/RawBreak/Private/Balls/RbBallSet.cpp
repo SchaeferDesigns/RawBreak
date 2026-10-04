@@ -1,6 +1,7 @@
 #include "Balls/RbBallSet.h"
 
 #include "RawBreak.h"
+#include "Balls/RbLooseBallSubsystem.h"
 #include "Balls/RbShotPlaybackComponent.h"
 #include "Core/RbAssetPaths.h"
 #include "Core/RbCoords.h"
@@ -16,7 +17,7 @@
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "Misc/PackageName.h"
 
-// Owner: UE-2.
+// Owner: UE-2; M2-E: withholding of balls that lie off the table (awaiting return) and the binding to URbLooseBallSubsystem.
 
 namespace
 {
@@ -117,6 +118,8 @@ void ARbBallSet::DestroyBalls()
 	BallMaterials.Reset();
 	BallRadiiCm.Reset();
 	BallOrientations.Reset();
+	BallRequestedVisible.Reset();
+	BallWithheld.Reset();
 }
 
 UStaticMesh* ARbBallSet::ResolveBallMesh()
@@ -210,6 +213,8 @@ void ARbBallSet::InitForTable(ARbTable* InTable)
 		BallMaterials.Add(Mid);
 		BallRadiiCm.Add(RadiusCm);
 		BallOrientations.Add(FQuat::Identity);
+		BallRequestedVisible.Add(false);
+		BallWithheld.Add(false);
 	}
 
 	if (!bOcclusionCollectionOverridden)
@@ -217,6 +222,21 @@ void ARbBallSet::InitForTable(ARbTable* InTable)
 		OcclusionCollection = LoadGenerated<UMaterialParameterCollection>(RbAssetPaths::BallMpc);
 	}
 	UpdateOcclusionParameters();
+
+	// M2-E: a live shot's BallOffTable event hands the ball to engine physics (every table's ball set, 18.6).
+	if (URbLooseBallSubsystem* LooseBalls = URbLooseBallSubsystem::Get(this))
+	{
+		LooseBalls->BindBallSet(this);
+	}
+}
+
+void ARbBallSet::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (URbLooseBallSubsystem* LooseBalls = URbLooseBallSubsystem::Get(this))
+	{
+		LooseBalls->UnbindBallSet(this);
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void ARbBallSet::SetBallCore(int32 BallId, const rb::Vec3& Position, const rb::Quat& Orientation)
@@ -243,20 +263,80 @@ void ARbBallSet::SetBallSpinCore(int32 BallId, const rb::Vec3& Omega)
 
 void ARbBallSet::SetBallVisible(int32 BallId, bool bVisible)
 {
-	if (UStaticMeshComponent* Ball = GetBallComponent(BallId))
+	if (GetBallComponent(BallId))
 	{
-		if (Ball->IsVisible() != bVisible)
+		BallRequestedVisible[BallId] = bVisible;
+		ApplyBallVisibility(BallId);
+	}
+}
+
+void ARbBallSet::ApplyBallVisibility(int32 BallId)
+{
+	UStaticMeshComponent* Ball = GetBallComponent(BallId);
+	if (!Ball)
+	{
+		return;
+	}
+	const bool bVisible = BallRequestedVisible[BallId] && !(BallWithheld[BallId] && !bWithholdSuspended);
+	if (Ball->IsVisible() != bVisible)
+	{
+		if (!bVisible)
 		{
-			if (!bVisible)
-			{
-				// The renderer keeps a hidden primitive's last transform as its previous one: a ball shown again elsewhere (spotted,
-				// a replay start, a seek back before its capture) would streak from where it disappeared. Drop it while the proxy
-				// still exists (a hidden ball has none).
-				Ball->ResetSceneVelocity();
-			}
-			Ball->SetVisibility(bVisible);
+			// The renderer keeps a hidden primitive's last transform as its previous one: a ball shown again elsewhere (spotted,
+			// a replay start, a seek back before its capture) would streak from where it disappeared. Drop it while the proxy
+			// still exists (a hidden ball has none).
+			Ball->ResetSceneVelocity();
 		}
-		UpdateOcclusionParameter(BallId);
+		Ball->SetVisibility(bVisible);
+	}
+	UpdateOcclusionParameter(BallId);
+}
+
+void ARbBallSet::SetBallWithheld(int32 BallId, bool bWithheld)
+{
+	UStaticMeshComponent* Ball = GetBallComponent(BallId);
+	if (!Ball || BallWithheld[BallId] == bWithheld)
+	{
+		return;
+	}
+	const bool bWasVisible = Ball->IsVisible();
+	BallWithheld[BallId] = bWithheld;
+	ApplyBallVisibility(BallId);
+	if (!bWasVisible && Ball->IsVisible())
+	{
+		ResetBallMotion(BallId); // returned: the table instance appears where the table state shows it (a jump)
+	}
+}
+
+bool ARbBallSet::IsBallWithheld(int32 BallId) const
+{
+	return BallWithheld.IsValidIndex(BallId) && BallWithheld[BallId];
+}
+
+bool ARbBallSet::IsBallRequestedVisible(int32 BallId) const
+{
+	return BallRequestedVisible.IsValidIndex(BallId) && BallRequestedVisible[BallId];
+}
+
+void ARbBallSet::SetWithholdSuspended(bool bSuspended)
+{
+	if (bWithholdSuspended == bSuspended)
+	{
+		return;
+	}
+	bWithholdSuspended = bSuspended;
+	for (int32 Id = 0; Id < GetBallCount(); ++Id)
+	{
+		const UStaticMeshComponent* Ball = GetBallComponent(Id);
+		if (Ball && BallWithheld[Id])
+		{
+			const bool bWasVisible = Ball->IsVisible();
+			ApplyBallVisibility(Id);
+			if (!bWasVisible && Ball->IsVisible())
+			{
+				ResetBallMotion(Id);
+			}
+		}
 	}
 }
 
@@ -349,10 +429,23 @@ void ARbBallSet::SetOcclusionCollection(UMaterialParameterCollection* Collection
 	UpdateOcclusionParameters();
 }
 
+void ARbBallSet::SetDrivesOcclusion(bool bDrives)
+{
+	if (bDrivesOcclusion == bDrives)
+	{
+		return;
+	}
+	bDrivesOcclusion = bDrives;
+	if (bDrivesOcclusion)
+	{
+		UpdateOcclusionParameters(); // take over the collection with this table's balls
+	}
+}
+
 void ARbBallSet::UpdateOcclusionParameters()
 {
 	UWorld* World = GetWorld();
-	if (!OcclusionCollection || !World)
+	if (!OcclusionCollection || !World || !bDrivesOcclusion)
 	{
 		return;
 	}
@@ -371,7 +464,7 @@ void ARbBallSet::UpdateOcclusionParameters()
 void ARbBallSet::UpdateOcclusionParameter(int32 BallId)
 {
 	UWorld* World = GetWorld();
-	if (!OcclusionCollection || !World || BallId < 0 || BallId >= MpcBallCount)
+	if (!OcclusionCollection || !World || !bDrivesOcclusion || BallId < 0 || BallId >= MpcBallCount)
 	{
 		return;
 	}

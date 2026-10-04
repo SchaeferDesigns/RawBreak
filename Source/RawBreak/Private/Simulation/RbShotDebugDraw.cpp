@@ -2,6 +2,7 @@
 
 #include "RawBreak.h"
 #include "Core/RbCoords.h"
+#include "Game/RbTableSubsystem.h"
 #include "Simulation/RbSimScenarios.h"
 #include "Simulation/RbSimulationSubsystem.h"
 #include "Table/RbTable.h"
@@ -231,12 +232,14 @@ namespace RbShotDebugDrawPrivate
 			return;
 		}
 
-		// The table frame: a placed ARbTable's cloth origin, else the world origin raised to the bed height.
+		// The table frame: the player's table's cloth origin (URbTableSubsystem), else the world origin raised to the bed height.
 		FTransform TableToWorld(FVector(0.0, 0.0, FRbCoords::CmPerMeter * Request.Table->BedHeight()));
-		for (TActorIterator<ARbTable> It(World); It; ++It)
+		if (const URbTableSubsystem* Tables = URbTableSubsystem::Get(World))
 		{
-			TableToWorld = It->GetTableToWorld();
-			break;
+			if (const ARbTable* PlayerTable = Tables->GetPlayerTable())
+			{
+				TableToWorld = PlayerTable->GetTableToWorld();
+			}
 		}
 
 		const TSharedRef<uint32> ShotId = MakeShared<uint32>(0u);
