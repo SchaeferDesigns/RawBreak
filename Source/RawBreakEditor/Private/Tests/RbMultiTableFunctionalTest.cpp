@@ -260,6 +260,8 @@ private:
 			OtherDirector->GetStrokeComponent() == nullptr);
 		Test->TestTrue(TEXT("only the player's director records replays"), PlayerDirector->RecordsReplays() && !OtherDirector->RecordsReplays());
 		Test->TestTrue(TEXT("both ball sets hand off loose balls"), Loose->IsBound(PlayerBalls) && Loose->IsBound(OtherBalls));
+		// Review: the world-wide ball-occlusion collection (MPC_RbBalls) is written by the player's balls only.
+		Test->TestTrue(TEXT("only the player's ball set drives the ball-occlusion collection"), PlayerBalls->DrivesOcclusion() && !OtherBalls->DrivesOcclusion());
 		Test->TestTrue(TEXT("FindBallSet per table"), Tables->FindBallSet(PlayerTable) == PlayerBalls && Tables->FindBallSet(OtherTable) == OtherBalls);
 
 		// The idle 9-ft plays its own practice rack, on its own table, with its own seed.

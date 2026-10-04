@@ -240,15 +240,19 @@ FVector ARbReplayCamera::ClampToRoom(const FVector& LookAt, const FVector& Eye) 
 	{
 		Params.AddIgnoredActor(TableActor);
 	}
-	// Every table's balls (M2-E: through the table registry, never by iterating the world's ball sets).
+	// Every table's balls (M2-E: through the table registry, never by iterating the world's ball sets). Called every tick of the
+	// Follow view: the registered sessions (no allocation), plus the viewed table's ball set on a dev map without a session.
 	if (const URbTableSubsystem* Tables = URbTableSubsystem::Get(World))
 	{
-		for (const ARbTable* Any : Tables->GetTables())
+		bool bViewedTableHasSession = false;
+		for (const FRbTableSession& Session : Tables->GetSessions())
 		{
-			if (const ARbBallSet* Balls = Tables->FindBallSet(Any))
-			{
-				Params.AddIgnoredActor(Balls);
-			}
+			Params.AddIgnoredActor(Session.BallSet.Get());
+			bViewedTableHasSession |= Session.Table.Get() == Table.Get();
+		}
+		if (!bViewedTableHasSession && Table.IsValid())
+		{
+			Params.AddIgnoredActor(Tables->FindBallSet(Table.Get()));
 		}
 	}
 	const FVector Start = LookAt + FVector(0.0, 0.0, 10.0);

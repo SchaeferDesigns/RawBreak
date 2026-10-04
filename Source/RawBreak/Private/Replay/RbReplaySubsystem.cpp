@@ -110,10 +110,12 @@ bool URbReplaySubsystem::PlayReplayFrom(int32 IndexFromLast, ERbReplayView View,
 	{
 		Playback->Stop(false); // our previous replay (restart / next view)
 	}
-	// M2-E: the recorded shot shows every ball (withholding suspended) and no loose actor (no second copy of a ball).
+	// M2-E: the recorded shot shows every ball (withholding suspended) and no loose actor (no second copy of a ball) - on the
+	// replayed table only; the other tables' loose balls stay where they lie (18.6.2 rule 3).
 	if (URbLooseBallSubsystem* LooseBalls = URbLooseBallSubsystem::Get(this))
 	{
-		LooseBalls->SetReplayActive(true);
+		const ARbTable* ReplayTable = Balls->GetTable();
+		LooseBalls->SetReplayActive(true, ReplayTable ? ReplayTable->TableIndex : INDEX_NONE);
 	}
 	// The pre-shot table of the stored input, then the stored result with its own clock (never re-simulated).
 	Balls->ShowSimBalls(Shot->Request.Input.Balls, rb::kMaxBalls);
@@ -275,10 +277,11 @@ void URbReplaySubsystem::RestoreLive()
 			Director->SetReplayActive(false);
 		}
 	}
-	// M2-E: balls that lie off the table are withheld again and their loose actors visible (the live room).
+	// M2-E: balls that lie off the table are withheld again and their loose actors visible (the live room; every replay state
+	// ends, whichever table the replay showed).
 	if (URbLooseBallSubsystem* LooseBalls = URbLooseBallSubsystem::Get(this))
 	{
-		LooseBalls->SetReplayActive(false);
+		LooseBalls->SetReplayActive(false, INDEX_NONE);
 	}
 	UE_LOG(LogRawBreak, Log, TEXT("RbReplay: ended (shot %u), live table restored"), Ended.IsValid() ? Ended->Id : 0u);
 	OnReplayChanged.Broadcast();

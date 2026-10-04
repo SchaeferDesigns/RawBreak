@@ -1,16 +1,21 @@
 // Balls off the table (M2-E, Docs/ue-architecture.md 18.6.1): RawBreak.Unit.LooseBall.*
 //   HandOff_ExactCoreState        a simulated jump shot leaves the table (reason Floor); the loose ball starts at the event's core
-//                                 state (position 0.1 mm, velocity / spin 1e-6 relative) on a translated + yawed table
+//                                 state (position 0.1 mm, velocity / spin 1e-6 relative) on a translated + yawed table; its body
+//                                 allows the core's spins (no engine 62.8 rad/s cap)
 //   RestsOnRailSpawnsNothing      RestsOnRailOrFrame hands nothing off; the playback's hide rule per final status
 //   AwaitingReturn                the table instance stays hidden while its loose copy exists, whatever the presentation asks;
-//                                 a return shows it only if the table state has it in play; replays suspend both; re-hand-off
+//                                 a return shows it only if the table state has it in play; replays suspend both; re-hand-off,
+//                                 also after the earlier copy vanished (its stale entry never releases the new copy's ball)
 //   LiveHandsOff_ReplaySpawnsNothing  the live playback hands off exactly once at the event; a replay of the same shot hides the
 //                                 ball at the hand-off time and spawns nothing; the switch off spawns nothing
 //   MatchUnchanged_ObjectBallAwaitsReturn  a director shot that sends the 9 off the table: the committed ResultHash and GameState
 //                                 equal a run with the subsystem disabled; the respotted 9 awaits its return; a later shot returns it
 //   CueBallInHand                 the cue ball off the table: pick-up by interaction (gaze, reach, verb) into the carrying hand,
-//                                 the placement returns a loose cue ball, a new rack returns every loose ball
-//   AutomaticReturns              kill Z, a return volume, reachable vs unreachable (UnreachableReturnSeconds)
+//                                 an automatic return during the placement into the player's hand too, a carrying hand returns
+//                                 the loose copy, the placement returns a loose cue ball, a new rack returns every loose ball
+//   AutomaticReturns              kill Z, a return volume, reachable vs unreachable (UnreachableReturnSeconds), lying on a table
+//                                 (OnTableReturnSeconds); rolling resistance on speed and spin each (a ball spinning in place keeps
+//                                 its spin); OnRolling on the floor, none while the ball is hidden by a replay of its table
 // World tests without ticking: the physics never steps here (the bounce and the rest: RawBreak.Functional.LooseBall).
 // Owner: M2-E.
 
@@ -26,6 +31,7 @@
 #include "Game/RbTableSubsystem.h"
 #include "Interaction/RbInteractionSubsystem.h"
 #include "Player/RbBallInHandComponent.h"
+#include "Player/RbStrokeComponent.h"
 #include "Tests/RbTestFlags.h"
 
 #include "Components/BoxComponent.h"
@@ -36,6 +42,7 @@
 #include "GameFramework/DefaultPawn.h"
 #include "HAL/PlatformTime.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Physics/PhysicsInterfaceCore.h"
 
 #include "rb/Equipment/Cue.h"
 
@@ -261,6 +268,17 @@ bool FRbLooseBallHandOffExact::RunTest(const FString& Parameters)
 	TestTrue(TEXT("ignores the cue sweep"), Body->GetCollisionResponseToChannel(RbAssetPaths::Collision::CueSweepChannel) == ECR_Ignore);
 	TestTrue(TEXT("simulates physics"), Body->IsSimulatingPhysics());
 	TestTrue(TEXT("CCD"), Body->BodyInstance.bUseCCD);
+	// Review (M2-E): Chaos clamps the spin to the body's MaxAngularVelocity every step; the engine default 3600 deg/s (62.8 rad/s)
+	// caps rolling at 1.8 m/s - the body (and its live particle) must allow the core's spins.
+	TestTrue(FString::Printf(TEXT("body spin cap %.0f rad/s >= the core's spins"), Body->BodyInstance.GetMaxAngularVelocityInRadians()),
+		Body->BodyInstance.GetMaxAngularVelocityInRadians() >= 0.999 * ARbLooseBall::MaxSpinRadS);
+	float ParticleSpinCap = 0.0f;
+	FPhysicsCommand::ExecuteRead(Body->BodyInstance.GetPhysicsActor(), [&ParticleSpinCap](const FPhysicsActorHandle& Actor)
+	{
+		ParticleSpinCap = FPhysicsInterface::GetMaxAngularVelocity_AssumesLocked(Actor);
+	});
+	TestTrue(FString::Printf(TEXT("physics particle spin cap %.0f rad/s (engine default 62.8)"), ParticleSpinCap), ParticleSpinCap >= 0.999 * ARbLooseBall::MaxSpinRadS);
+	TestTrue(TEXT("the hand-off spin is below the cap"), Spin.Size() < ARbLooseBall::MaxSpinRadS);
 	TestNearlyEqual(TEXT("mass [kg]"), static_cast<double>(Body->GetMass()), Scene.Table->GetContext().Balls.Balls[0].Mass, 1e-4);
 	TestTrue(TEXT("tagged RbLooseBall"), Ball->ActorHasTag(RbAssetPaths::Tag::LooseBall));
 	TestEqual(TEXT("ball id"), Ball->GetBallId(), 0);
@@ -392,6 +410,21 @@ bool FRbLooseBallAwaitingReturn::RunTest(const FString& Parameters)
 	TestTrue(TEXT("still withheld"), Scene.Balls->IsBallWithheld(7));
 	TestEqual(TEXT("ReturnAll"), Loose->ReturnAll(TableIndex), 1);
 	TestFalse(TEXT("released"), Scene.Balls->IsBallWithheld(7));
+
+	// Review (M2-E): a loose copy that vanished (FellOutOfWorld) just before the same ball left the table again. Its stale entry
+	// must not release the NEW copy's table ball when it is cleaned up (the table 8 would show beside its loose copy).
+	ARbLooseBall* Gone = Loose->HandOff(*Scene.Balls, 8, Floor);
+	if (TestNotNull(TEXT("8 handed off"), Gone))
+	{
+		Gone->Destroy();
+	}
+	ARbLooseBall* Again = Loose->HandOff(*Scene.Balls, 8, Floor);
+	TestNotNull(TEXT("8 handed off again"), Again);
+	Loose->UpdateAutomaticReturns(0.1);
+	TestTrue(TEXT("the new copy waits for its return"), Loose->IsAwaitingReturn(TableIndex, 8) && Loose->FindLooseBall(TableIndex, 8) == Again);
+	TestTrue(TEXT("its table ball stays withheld"), Scene.Balls->IsBallWithheld(8));
+	TestEqual(TEXT("one loose ball"), Loose->GetNumLooseBalls(), 1);
+	TestTrue(TEXT("returned"), Loose->ReturnBall(TableIndex, 8) && !Scene.Balls->IsBallWithheld(8));
 	return true;
 }
 
@@ -619,6 +652,34 @@ bool FRbLooseBallCueBallInHand::RunTest(const FString& Parameters)
 		Hand->Cancel();
 	}
 
+	// Review (M2-E): a loose cue ball that comes back by itself while the director waits for the placement (the "bartender"
+	// returns: unreachable, return volume, kill Z, ...) also goes into the player's hand - the pawn of the session's stroke
+	// component - or nothing would be left to place when the hand does not pick up a cue ball that lies loose. A hand that
+	// already carries the cue ball returns the loose copy (Carried) and keeps its ball.
+	URbStrokeComponent* Stroke = Pawn ? NewObject<URbStrokeComponent>(Pawn) : nullptr;
+	if (Stroke && Hand)
+	{
+		Stroke->RegisterComponent();
+		D.Director->SetStrokeComponent(Stroke);
+		TestEqual(TEXT("still waiting for the placement"), D.Director->GetPhase(), ERbDirectorPhase::AwaitPlacement);
+		TestNotNull(TEXT("cue ball loose again"), DropResting(*Loose, *D.Scene.Balls, 0, Center));
+		Loose->UpdateAutomaticReturns(0.1);
+		TestTrue(TEXT("an empty hand does not take a cue ball that lies loose"), Loose->IsAwaitingReturn(TableIndex, 0) && Hand->GetState() == ERbBallInHandState::Inactive);
+		TestTrue(TEXT("returned by itself (unreachable)"), Loose->ReturnBall(TableIndex, 0, ERbLooseBallReturn::Unreachable));
+		TestEqual(TEXT("... into the player's hand"), Hand->GetState(), ERbBallInHandState::Carrying);
+		TestFalse(TEXT("... not onto the table"), D.Scene.Balls->IsBallVisible(0));
+		TestNotNull(TEXT("cue ball loose once more"), DropResting(*Loose, *D.Scene.Balls, 0, Center));
+		Loose->UpdateAutomaticReturns(0.1);
+		TestFalse(TEXT("the carrying hand returns the loose copy"), Loose->IsAwaitingReturn(TableIndex, 0));
+		TestEqual(TEXT("reason Carried"), Loose->GetLastReturnReason(), ERbLooseBallReturn::Carried);
+		TestEqual(TEXT("the hand keeps carrying"), Hand->GetState(), ERbBallInHandState::Carrying);
+		Hand->Cancel();
+		TestNotNull(TEXT("a loose 5"), DropResting(*Loose, *D.Scene.Balls, 5, Center + FVector(0.0, 15.0, 0.0)));
+		TestTrue(TEXT("an object ball's return"), Loose->ReturnBall(TableIndex, 5, ERbLooseBallReturn::Unreachable));
+		TestEqual(TEXT("... puts nothing into the hand"), Hand->GetState(), ERbBallInHandState::Inactive);
+		D.Director->SetStrokeComponent(nullptr);
+	}
+
 	// A loose cue ball returns when the ball in hand is placed (the player put the ball down).
 	ARbLooseBall* Again = DropResting(*Loose, *D.Scene.Balls, 0, Center);
 	TestNotNull(TEXT("cue ball handed off again"), Again);
@@ -707,6 +768,109 @@ bool FRbLooseBallAutomaticReturns::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the reachable ball stays"), Loose->IsAwaitingReturn(TableIndex, 4));
 	TestFalse(TEXT("the unreachable ball came back after UnreachableReturnSeconds"), Loose->IsAwaitingReturn(TableIndex, 5));
 	TestEqual(TEXT("reason Unreachable"), Loose->GetLastReturnReason(), ERbLooseBallReturn::Unreachable);
+
+	// Review (M2-E): a loose ball lying on a table (a lamp rebound falls back onto the bed) is taken off after OnTableReturnSeconds -
+	// left there it would roll through the table's balls (no physics) and lie where the next shot is aimed; on the floor it stays.
+	{
+		rb::BallState OnBed;
+		OnBed.Position = rb::Vec3(0.4, 0.15, Scene.Table->GetContext().BallRadius(7));
+		ARbLooseBall* OnCloth = Loose->HandOff(*Scene.Balls, 7, OnBed, rb::Quat::Identity(), rb::OffTableReason::ExternalObjectRebound, 0);
+		if (TestNotNull(TEXT("ball lying on the bed"), OnCloth))
+		{
+			OnCloth->GetBodyComponent()->PutRigidBodyToSleep();
+			OnCloth->UpdateMotion(1.0 / 60.0);
+			TestTrue(TEXT("grounded on its table"), OnCloth->IsGrounded() && OnCloth->GetGroundActor() == Scene.Table && OnCloth->IsOnTable());
+			if (Open)
+			{
+				Open->UpdateMotion(1.0 / 60.0);
+				TestTrue(TEXT("the ball on the open floor is not on a table"), Open->IsGrounded() && !Open->IsOnTable());
+			}
+			Loose->OnTableReturnSeconds = 0.3;
+			Loose->UpdateAutomaticReturns(0.1);
+			Loose->UpdateAutomaticReturns(0.1);
+			TestTrue(TEXT("on the table for 0.2 s: still there"), Loose->IsAwaitingReturn(TableIndex, 7));
+			Loose->UpdateAutomaticReturns(0.15);
+			TestFalse(TEXT("on the table for OnTableReturnSeconds: taken off"), Loose->IsAwaitingReturn(TableIndex, 7));
+			TestEqual(TEXT("reason OnTable"), Loose->GetLastReturnReason(), ERbLooseBallReturn::OnTable);
+			TestFalse(TEXT("released (out of play: stays hidden)"), Scene.Balls->IsBallWithheld(7) || Scene.Balls->IsBallVisible(7));
+			TestTrue(TEXT("the ball on the open floor stays"), Loose->IsAwaitingReturn(TableIndex, 4));
+		}
+	}
+
+	// Review (M2-E): rolling resistance takes mu_r g dt off the speed AND off the rolling spin's surface speed, each on its own: a
+	// rolling ball keeps rolling, a ball spinning in place keeps its spin (one shared factor zeroed it when the ball stood still).
+	{
+		const double Rb = Scene.Balls->GetBallRadiusCm(9);
+		const double Dt = 1.0 / 60.0;
+		const double Decrement = ARbLooseBall::RollingResistanceFor(SurfaceType_Default) * 980.665 * Dt; // [cm/s] per tick
+		rb::BallState Spinning;
+		Spinning.Position = Scene.Table->WorldToCore(FVector(-200.0, 300.0, FloorZ + Rb));
+		Spinning.Omega = Scene.Table->WorldDirectionToCore(FVector(0.0, 1.0, 0.0));
+		Spinning.Omega = rb::Vec3(60.0 * Spinning.Omega.x, 60.0 * Spinning.Omega.y, 60.0 * Spinning.Omega.z); // 60 rad/s, horizontal axis
+		ARbLooseBall* Spinner = Loose->HandOff(*Scene.Balls, 9, Spinning, rb::Quat::Identity(), rb::OffTableReason::Floor, 0);
+		if (TestNotNull(TEXT("ball spinning in place on the floor"), Spinner))
+		{
+			const double Before = Spinner->GetAngularVelocity().Size();
+			Spinner->UpdateMotion(Dt);
+			const double After = Spinner->GetAngularVelocity().Size();
+			AddInfo(FString::Printf(TEXT("spin in place: %.4f -> %.4f rad/s (expected -%.4f)"), Before, After, Decrement / Rb));
+			TestTrue(TEXT("grounded"), Spinner->IsGrounded());
+			TestTrue(TEXT("a ball spinning in place keeps its spin (one tick's decrement only)"), FMath::Abs((Before - After) - Decrement / Rb) <= 1e-3);
+		}
+		rb::BallState Rolling;
+		Rolling.Position = Scene.Table->WorldToCore(FVector(-200.0, 200.0, FloorZ + Rb));
+		const rb::Vec3 Along = Scene.Table->WorldDirectionToCore(FVector(1.0, 0.0, 0.0));
+		const double V = 1.0; // [m/s]
+		Rolling.Velocity = rb::Vec3(V * Along.x, V * Along.y, V * Along.z);
+		const rb::Vec3 CoreAxis = rb::Vec3(-Along.y, Along.x, 0.0); // rolling: w = v / R about z x v (the core's right-handed frame)
+		const double W = V / (FRbCoords::MetersPerCm * Rb);
+		Rolling.Omega = rb::Vec3(W * CoreAxis.x, W * CoreAxis.y, W * CoreAxis.z);
+		ARbLooseBall* Roller = Loose->HandOff(*Scene.Balls, 10, Rolling, rb::Quat::Identity(), rb::OffTableReason::Floor, 0);
+		if (TestNotNull(TEXT("ball rolling on the floor"), Roller))
+		{
+			Roller->UpdateMotion(Dt);
+			const double Speed = Roller->GetLinearVelocity().Size();
+			const double SpinSpeed = Roller->GetAngularVelocity().Size() * Rb;
+			AddInfo(FString::Printf(TEXT("rolling: v %.4f cm/s, w R %.4f cm/s (expected %.4f)"), Speed, SpinSpeed, 100.0 * V - Decrement));
+			TestTrue(TEXT("rolling: the speed loses one tick's decrement"), FMath::Abs(Speed - (100.0 * V - Decrement)) <= 1e-3);
+			TestTrue(TEXT("rolling: the spin's surface speed loses the same (it keeps rolling)"), FMath::Abs(SpinSpeed - Speed) <= 1e-3);
+		}
+		Loose->ReturnBall(TableIndex, 9);
+		Loose->ReturnBall(TableIndex, 10);
+	}
+
+	// Review (M2-E): a ball rolling on the floor reports OnRolling (AU-25); hidden while its table replays it is silent too (the
+	// replay neither shows nor sounds the live copy), and back live it reports again.
+	{
+		int32 Rolling = 0;
+		EPhysicalSurface LastSurface = SurfaceType_Max;
+		const FDelegateHandle Handle = Loose->OnRolling.AddLambda([&Rolling, &LastSurface](const FRbLooseBallRolling& Sample)
+		{
+			Rolling += Sample.BallId == 6 ? 1 : 0;
+			LastSurface = Sample.Surface;
+		});
+		rb::BallState State;
+		State.Position = Scene.Table->WorldToCore(FVector(-450.0, 100.0, FloorZ + Scene.Balls->GetBallRadiusCm(6)));
+		const rb::Vec3 Along = Scene.Table->WorldDirectionToCore(FVector(1.0, 0.0, 0.0));
+		State.Velocity = rb::Vec3(0.5 * Along.x, 0.5 * Along.y, 0.5 * Along.z); // 0.5 m/s along world +X
+		ARbLooseBall* Roller = Loose->HandOff(*Scene.Balls, 6, State, rb::Quat::Identity(), rb::OffTableReason::Floor, 0);
+		if (TestNotNull(TEXT("ball rolling on the floor"), Roller))
+		{
+			Roller->UpdateMotion(1.0 / 60.0);
+			TestTrue(TEXT("on the floor"), Roller->IsGrounded());
+			TestEqual(TEXT("rolling reported"), Rolling, 1);
+			TestEqual(TEXT("... on the floor's surface (engine cube: default)"), static_cast<int32>(LastSurface), static_cast<int32>(SurfaceType_Default));
+			Loose->SetReplayActive(true, TableIndex);
+			Roller->UpdateMotion(1.0 / 60.0);
+			TestTrue(TEXT("hidden during its table's replay"), Roller->IsHidden());
+			TestEqual(TEXT("... and silent"), Rolling, 1);
+			Loose->SetReplayActive(false, INDEX_NONE);
+			Roller->UpdateMotion(1.0 / 60.0);
+			TestEqual(TEXT("back live: reported again"), Rolling, 2);
+		}
+		Loose->OnRolling.Remove(Handle);
+		Loose->ReturnBall(TableIndex, 6);
+	}
 
 	// An actor that vanished (FellOutOfWorld / unload) releases its table ball.
 	if (Open)

@@ -6,8 +6,10 @@
 //   ShotMovesOnlyItsTable  two tables with their own ball sets and directors: a shot on the player's table moves only its balls;
 //                          the other session is untouched; loose balls are keyed by (TableIndex, BallId); the venue seed hashes
 //                          the index (every table of a hall has its own slope and balls)
-//   NoSingleTableLookups   grep test: "the first table found" (TActorIterator / TActorRange / GetAllActorsOfClass / GetActorOfClass
-//                          over ARbTable, ARbBallSet, ARbCue) only inside RbTableSubsystem.cpp
+//   PerTableState          (review) the world-wide ball-occlusion collection follows the player's table only; a replay suspends
+//                          withholding / hides loose balls of the replayed table only
+//   NoSingleTableLookups   grep test: "the first table found" (TActorIterator / TActorRange / TObjectIterator / GetAllActorsOfClass /
+//                          GetActorOfClass / ForEachObjectOfClass over ARbTable, ARbBallSet, ARbCue) only inside RbTableSubsystem.cpp
 // Owner: M2-E.
 
 #include "Balls/RbBallSet.h"
@@ -18,12 +20,15 @@
 #include "Core/RbCoords.h"
 #include "Game/RbMatchDirector.h"
 #include "Game/RbTableSubsystem.h"
+#include "Interaction/RbInteractionSubsystem.h"
 #include "Table/RbTable.h"
 #include "Tests/RbTestFlags.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "HAL/FileManager.h"
 #include "Internationalization/Regex.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -125,6 +130,29 @@ bool FRbMultiTableRegistry::RunTest(const FString& Parameters)
 	ARbBallSet* BallsOne = SpawnBallSet(World, One);
 	TestTrue(TEXT("FindBallSet per table"), Tables->FindBallSet(Zero) == BallsZero && Tables->FindBallSet(One) == BallsOne && Tables->FindBallSet(Two) == nullptr);
 	TestEqual(TEXT("the 7-ft's ball set has the oversized cue ball"), BallsOne->GetBallRadiusCm(0), 100.0 * One->GetContext().BallRadius(0));
+
+	// Review (M2-E): the queries iterate the object hash (no per-call allocation), so they must still see only THIS world's live
+	// actors - another world's tables / ball sets (PIE beside the editor world, a second test world) and destroyed ones never.
+	{
+		RbBallTest::FTestWorld OtherWorld;
+		ARbTable* Foreign = SpawnTable(OtherWorld.World, 5, FVector::ZeroVector, 0.0, ERbTablePreset::NineFootPro, true);
+		ARbBallSet* ForeignBalls = OtherWorld.World->SpawnActor<ARbBallSet>(); // placed, no table yet (unassigned)
+		ARbTable* Doomed = SpawnTable(World, 6, FVector(-900.0, 0.0, 0.0), 0.0);
+		TestTrue(TEXT("scene of the other world"), Foreign && ForeignBalls && Doomed);
+		TestTrue(TEXT("another world's table is not this world's"), Tables->FindTable(5) == nullptr && Tables->GetTables().Num() == 4);
+		TestTrue(TEXT("another world's tagged table is not this world's player table"), Tables->GetPlayerTable() == Two);
+		TestEqual(TEXT("another world's tag is not counted"), Tables->CountPlayerTableTags(), 1);
+		TestNull(TEXT("another world's unassigned ball set is not this world's"), Tables->FindUnassignedBallSet());
+		TestTrue(TEXT("the other world sees its own"), URbTableSubsystem::Get(OtherWorld.World)->GetPlayerTable() == Foreign &&
+			URbTableSubsystem::Get(OtherWorld.World)->FindUnassignedBallSet() == ForeignBalls);
+		TestTrue(TEXT("FindTable of a fresh table"), Doomed && Tables->FindTable(6) == Doomed);
+		if (Doomed)
+		{
+			Doomed->Destroy();
+		}
+		TestTrue(TEXT("a destroyed table is gone"), Tables->FindTable(6) == nullptr && Tables->GetTables().Num() == 3);
+		TestTrue(TEXT("nearest ignores the destroyed table"), Tables->FindNearestTable(FVector(-900.0, 0.0, 0.0)) == Zero);
+	}
 	return true;
 }
 
@@ -295,6 +323,113 @@ bool FRbMultiTableShot::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbMultiTablePerTableState, "RawBreak.Unit.MultiTable.PerTableState", RB_UNIT_TEST_FLAGS)
+bool FRbMultiTablePerTableState::RunTest(const FString& Parameters)
+{
+	// Review (M2-E): state that exists once per world must follow the player's table, state that exists per table must stay per
+	// table (18.6.2 rules 3 / 4):
+	//  * MPC_RbBalls (the cloth's ball occlusion) is ONE collection: only the player's ball set writes it - an idle table racking
+	//    after the player's (the player's table has the LOWER index, as in the dive bar) must not overwrite its entries;
+	//  * a replay of the player's table suspends withholding and hides loose balls of THAT table only; the other table's loose
+	//    balls stay visible, keep returning, and its withheld balls stay hidden.
+	using namespace RbMultiTableTest;
+	RbBallTest::FTestWorld TestWorld;
+	UWorld* World = TestWorld.World;
+	URbLooseBallSubsystem* Loose = URbLooseBallSubsystem::Get(World);
+	ARbTable* Player = SpawnTable(World, 0, FVector::ZeroVector, 0.0, ERbTablePreset::NineFootPro, true);
+	ARbTable* Idle = SpawnTable(World, 1, FVector(100.0, 560.0, 0.0), 90.0, ERbTablePreset::SevenFootBar);
+	ARbBallSet* PlayerBalls = Player ? SpawnBallSet(World, Player) : nullptr;
+	ARbBallSet* IdleBalls = Idle ? SpawnBallSet(World, Idle) : nullptr;
+	UMaterialParameterCollection* Mpc = RbBallTest::MakeBallMpc();
+	if (!Loose || !PlayerBalls || !IdleBalls || !Mpc)
+	{
+		AddError(TEXT("scene"));
+		return false;
+	}
+	TestTrue(TEXT("a ball set drives the collection by default (one table, tests, dev maps)"), PlayerBalls->DrivesOcclusion());
+	IdleBalls->SetDrivesOcclusion(false); // what ARbGameMode does for every session but the player's
+	PlayerBalls->SetOcclusionCollection(Mpc);
+	IdleBalls->SetOcclusionCollection(Mpc);
+	UMaterialParameterCollectionInstance* Instance = World->GetParameterCollectionInstance(Mpc);
+	if (!TestNotNull(TEXT("MPC instance"), Instance))
+	{
+		return false;
+	}
+	// Racks: the player's first, then the idle table's (StartPlay order = TableIndex order).
+	const auto Rack = [](const ARbTable& Table, double Shift, rb::SimBall (&Out)[rb::kMaxBalls])
+	{
+		for (int32 Id = 0; Id < rb::kMaxBalls; ++Id)
+		{
+			Out[Id] = rb::SimBall{};
+			Out[Id].InPlay = Id < 10;
+			Out[Id].State.Position = rb::Vec3(-0.6 + 0.11 * Id, Shift - 0.03 * Id, Table.GetContext().BallRadius(Id));
+		}
+	};
+	rb::SimBall PlayerRack[rb::kMaxBalls];
+	rb::SimBall IdleRack[rb::kMaxBalls];
+	Rack(*Player, 0.2, PlayerRack);
+	Rack(*Idle, -0.1, IdleRack);
+	PlayerBalls->ShowSimBalls(PlayerRack, rb::kMaxBalls);
+	IdleBalls->ShowSimBalls(IdleRack, rb::kMaxBalls);
+	const auto MpcHolds = [&](const ARbTable& Table, const rb::SimBall (&Rack)[rb::kMaxBalls]) -> bool
+	{
+		for (int32 Id = 0; Id < 10; ++Id)
+		{
+			FLinearColor Value;
+			if (!Instance->GetVectorParameterValue(RbAssetPaths::Param::MpcBall(Id), Value) ||
+				!FVector(Value.R, Value.G, Value.B).Equals(Table.CoreToWorld(Rack[Id].State.Position), 1e-2) || Value.A != 1.0f)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	TestTrue(TEXT("the collection holds the player's balls after the idle table racked"), MpcHolds(*Player, PlayerRack));
+	IdleBalls->SetBallCore(3, rb::Vec3(0.3, 0.1, IdleRack[3].State.Position.z), rb::Quat::Identity());
+	IdleBalls->SetBallVisible(4, false);
+	TestTrue(TEXT("... and after the idle table moved / hid a ball"), MpcHolds(*Player, PlayerRack));
+	// Switching the player to the other table (a later rebind): the new driver pushes its balls at once.
+	PlayerBalls->SetDrivesOcclusion(false);
+	IdleBalls->SetBallVisible(4, true);
+	IdleBalls->SetBallCore(3, IdleRack[3].State.Position, rb::Quat::Identity());
+	IdleBalls->SetDrivesOcclusion(true);
+	TestTrue(TEXT("a new driver takes the collection over"), MpcHolds(*Idle, IdleRack));
+	IdleBalls->SetDrivesOcclusion(false);
+	PlayerBalls->SetDrivesOcclusion(true);
+	TestTrue(TEXT("and gives it back"), MpcHolds(*Player, PlayerRack));
+
+	// Replays are per table: a loose ball on each table, the idle table's 5 respotted (requested visible) and withheld.
+	rb::BallState Floor;
+	Floor.Position = rb::Vec3(0.0, 1.2, -0.7);
+	rb::BallState Deep; // far below the floor: the kill-Z return
+	Deep.Position = rb::Vec3(0.0, 1.2, -5.0);
+	ARbLooseBall* PlayerLoose = Loose->HandOff(*PlayerBalls, 3, Deep);
+	ARbLooseBall* IdleLoose = Loose->HandOff(*IdleBalls, 5, Floor);
+	ARbLooseBall* IdleDeep = Loose->HandOff(*IdleBalls, 6, Deep);
+	if (!TestTrue(TEXT("loose balls on both tables"), PlayerLoose && IdleLoose && IdleDeep))
+	{
+		return false;
+	}
+	Loose->SetReplayActive(true, Player->TableIndex);
+	TestTrue(TEXT("a replay plays"), Loose->IsReplayActive() && Loose->IsReplayActive(Player->TableIndex) && !Loose->IsReplayActive(Idle->TableIndex));
+	TestTrue(TEXT("the replayed table: withholding suspended, its loose ball hidden"), PlayerBalls->IsWithholdSuspended() && PlayerLoose->IsHidden());
+	TestTrue(TEXT("the other table: withholding stays, its loose balls stay visible"), !IdleBalls->IsWithholdSuspended() && !IdleLoose->IsHidden() && !IdleDeep->IsHidden());
+	TestFalse(TEXT("the other table's respotted 5 stays hidden"), IdleBalls->IsBallVisible(5));
+	TestNull(TEXT("no pick-up offered during a replay"), Loose->FindGazedBall(FRbInteractionQuery{}));
+	Loose->UpdateAutomaticReturns(0.1);
+	TestFalse(TEXT("the other table keeps returning (kill Z)"), Loose->IsAwaitingReturn(Idle->TableIndex, 6));
+	TestTrue(TEXT("the replayed table's loose ball waits for the live room"), Loose->IsAwaitingReturn(Player->TableIndex, 3));
+	ARbLooseBall* During = Loose->HandOff(*PlayerBalls, 7, Floor);
+	TestTrue(TEXT("a hand-off on the replayed table starts hidden"), During && During->IsHidden());
+	Loose->SetReplayActive(false, INDEX_NONE);
+	TestFalse(TEXT("replay over"), Loose->IsReplayActive());
+	TestTrue(TEXT("the replayed table: withheld again, loose balls visible"), !PlayerBalls->IsWithholdSuspended() && !PlayerLoose->IsHidden() && During && !During->IsHidden());
+	Loose->UpdateAutomaticReturns(0.1);
+	TestFalse(TEXT("back live: the replayed table's kill-Z return"), Loose->IsAwaitingReturn(Player->TableIndex, 3));
+	Loose->ReturnAll(INDEX_NONE);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbMultiTableGrep, "RawBreak.Unit.MultiTable.NoSingleTableLookups", RB_UNIT_TEST_FLAGS)
 bool FRbMultiTableGrep::RunTest(const FString& Parameters)
 {
@@ -308,7 +443,8 @@ bool FRbMultiTableGrep::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	const FRegexPattern Pattern(TEXT("(TActorIterator|TActorRange)\\s*<\\s*(const\\s+)?ARb(Table|BallSet|Cue)\\s*>|(GetAllActorsOfClass|GetActorOfClass)\\s*\\([^;]*ARb(Table|BallSet|Cue)::StaticClass"));
+	const FRegexPattern Pattern(TEXT("(TActorIterator|TActorRange|TObjectIterator|TObjectRange)\\s*<\\s*(const\\s+)?ARb(Table|BallSet|Cue)\\s*>|")
+		TEXT("(GetAllActorsOfClass|GetActorOfClass|ForEachObjectOfClass|GetObjectsOfClass)\\s*\\([^;]*ARb(Table|BallSet|Cue)::StaticClass"));
 	const FString Allowed = TEXT("RbTableSubsystem.cpp");
 	// Files of other M2 packages with a lookup the M2-E report asks their owners to replace (removed here at the merge).
 	const TMap<FString, FString> Pending = {

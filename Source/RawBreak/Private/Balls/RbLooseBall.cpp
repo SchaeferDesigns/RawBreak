@@ -52,6 +52,9 @@ ARbLooseBall::ARbLooseBall()
 	Body->BodyInstance.bNotifyRigidBodyCollision = true;
 	Body->BodyInstance.LinearDamping = 0.0f;
 	Body->BodyInstance.AngularDamping = 0.0f;
+	// The engine's 3600 deg/s spin cap would clamp a ball rolling faster than 1.8 m/s (header: spin cap).
+	Body->BodyInstance.bOverrideMaxAngularVelocity = true;
+	Body->BodyInstance.MaxAngularVelocity = static_cast<float>(FMath::RadiansToDegrees(MaxSpinRadS));
 
 	Ball = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Ball"));
 	Ball->SetupAttachment(Body);
@@ -105,6 +108,7 @@ void ARbLooseBall::Launch(ARbTable* InTable, int32 InBallId, UStaticMesh* Mesh, 
 	Body->SetLinearDamping(0.0f);
 	Body->SetAngularDamping(0.0f);
 	Body->SetSimulatePhysics(true);
+	Body->BodyInstance.SetMaxAngularVelocityInRadians(static_cast<float>(MaxSpinRadS), false); // onto the live particle, before the spin
 	Body->SetMassOverrideInKg(NAME_None, static_cast<float>(MassKg), true);
 	Body->SetPhysicsLinearVelocity(LinearVelocityCmS);
 	Body->SetPhysicsAngularVelocityInRadians(AngularVelocityRadS);
@@ -112,6 +116,7 @@ void ARbLooseBall::Launch(ARbTable* InTable, int32 InBallId, UStaticMesh* Mesh, 
 	PreStepVelocity = LinearVelocityCmS;
 	RestSeconds = 0.0;
 	bGrounded = false;
+	GroundActor.Reset();
 	ImpactCount = 0;
 	FloorImpactCount = 0;
 	MaxImpactSpeed = 0.0;
@@ -132,6 +137,11 @@ FVector ARbLooseBall::GetAngularVelocity() const
 bool ARbLooseBall::IsResting() const
 {
 	return !Body->IsSimulatingPhysics() || !Body->IsAnyRigidBodyAwake() || RestSeconds >= RestHoldSeconds;
+}
+
+bool ARbLooseBall::IsOnTable() const
+{
+	return bGrounded && Cast<ARbTable>(GroundActor.Get()) != nullptr;
 }
 
 double ARbLooseBall::RollingResistanceFor(EPhysicalSurface Surface)
@@ -161,6 +171,7 @@ void ARbLooseBall::UpdateGround()
 {
 	using namespace RbLooseBallPrivate;
 	bGrounded = false;
+	GroundActor.Reset();
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -176,6 +187,7 @@ void ARbLooseBall::UpdateGround()
 		bGrounded = true;
 		GroundNormal = Hit.ImpactNormal;
 		GroundSurface = Hit.PhysMaterial.IsValid() ? Hit.PhysMaterial->SurfaceType.GetValue() : SurfaceType_Default;
+		GroundActor = Hit.GetActor();
 	}
 }
 
@@ -186,6 +198,7 @@ void ARbLooseBall::UpdateMotion(double DeltaSeconds)
 	{
 		RestSeconds += DeltaSeconds;
 		bGrounded = false;
+		GroundActor.Reset();
 		return;
 	}
 	FVector V = Body->GetPhysicsLinearVelocity();
@@ -194,19 +207,21 @@ void ARbLooseBall::UpdateMotion(double DeltaSeconds)
 	const bool bAwake = Body->IsAnyRigidBodyAwake();
 	if (bGrounded && bAwake)
 	{
-		// Constant rolling resistance mu_r g on the tangential velocity; the spin shrinks by the same factor (a rolling ball keeps
-		// rolling, v = w x r stays true), and the spin about the normal decays (pivoting friction).
+		// Constant rolling resistance mu_r g: the tangential velocity and the rolling spin's surface speed |w_t| R each lose the
+		// same amount (clamped at zero), so a rolling ball keeps rolling (v = w x r stays true) while a ball spinning in place
+		// (it landed with spin, or bounced straight back from a wall) keeps its spin for the contact friction to turn into roll
+		// (M2-E review: one shared factor zeroed that spin whenever the ball's own speed was below one tick's decrement). The
+		// spin about the normal decays (pivoting friction).
 		const double Mu = RollingResistanceFor(GroundSurface);
 		const FVector Vn = GroundNormal * (V | GroundNormal);
 		const FVector Vt = V - Vn;
 		const FVector Wn = GroundNormal * (W | GroundNormal);
 		const FVector Wt = W - Wn;
-		const double Speed = Vt.Size();
 		const double Decel = Mu * GravityCmS2 * DeltaSeconds;
-		const double Factor = Speed > Decel ? (Speed - Decel) / Speed : 0.0;
+		const auto Shrink = [Decel](double SurfaceSpeed) { return SurfaceSpeed > Decel ? (SurfaceSpeed - Decel) / SurfaceSpeed : 0.0; };
 		const double PivotDecay = FMath::Exp(-DeltaSeconds / FMath::Max(PivotSpinDecaySeconds, 1.0e-3));
-		const FVector NewV = Vn + Vt * Factor;
-		const FVector NewW = Wt * Factor + Wn * PivotDecay;
+		const FVector NewV = Vn + Vt * Shrink(Vt.Size());
+		const FVector NewW = Wt * Shrink(Wt.Size() * RadiusCm) + Wn * PivotDecay;
 		Body->SetPhysicsLinearVelocity(NewV);
 		Body->SetPhysicsAngularVelocityInRadians(NewW);
 		V = NewV;
@@ -232,7 +247,8 @@ void ARbLooseBall::UpdateMotion(double DeltaSeconds)
 		W = FVector::ZeroVector;
 	}
 
-	URbLooseBallSubsystem* Subsystem = URbLooseBallSubsystem::Get(this);
+	// Rolling noise (AU-25) - not while hidden: its table replays, the live copy is neither seen nor heard.
+	URbLooseBallSubsystem* Subsystem = IsHidden() ? nullptr : URbLooseBallSubsystem::Get(this);
 	const double Speed = V.Size();
 	if (Subsystem && bGrounded && Speed >= RestSpeedCmS)
 	{
@@ -288,7 +304,8 @@ void ARbLooseBall::OnBodyHit(UPrimitiveComponent* /*HitComponent*/, AActor* /*Ot
 	// The next hit in this step compares against the velocity after this one (a second contact of the same step is rarer).
 	PreStepVelocity = Body->GetPhysicsLinearVelocity();
 
-	if (URbLooseBallSubsystem* Subsystem = URbLooseBallSubsystem::Get(this))
+	URbLooseBallSubsystem* Subsystem = IsHidden() ? nullptr : URbLooseBallSubsystem::Get(this); // hidden: a replay of its table plays
+	if (Subsystem)
 	{
 		FRbLooseBallImpact Impact;
 		Impact.TableIndex = TableIndex;

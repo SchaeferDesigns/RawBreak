@@ -11,12 +11,14 @@
 //     GetCue() remain as the PLAYER session's accessors (UI, cheats, tests of M1 keep working).
 //   * Per-table consumers key their state by TableIndex: loose balls (URbLooseBallSubsystem), table audio + shot clocks
 //     (URbTableAudioComponent, one per table), replays (the player's table), later the score slates.
-// Owner: M2-E. The table queries are implemented by the M2 architect step (actor iteration, no caching assumptions); ARbGameMode
-// registers one session per table of the level (M2-E; the player's session drives the M1 accessors of the game mode).
+// Owner: M2-E. The table queries are implemented by the M2 architect step (actor iteration, no caching assumptions; M2-E review:
+// the iteration allocates nothing, so GetPlayerTable / GetPlayerSession / FindTable / FindNearestTable may run every frame -
+// only GetTables builds its result list); ARbGameMode registers one session per table of the level (M2-E; the player's session
+// drives the M1 accessors of the game mode).
 //
-// Rule (enforced by RawBreak.Unit.MultiTable.NoSingleTableLookups): TActorIterator / TActorRange / GetAllActorsOfClass over
-// ARbTable, ARbBallSet or ARbCue ("the first table found") appear ONLY in RbTableSubsystem.cpp; everything else asks this
-// subsystem for a specific table or for the player's.
+// Rule (enforced by RawBreak.Unit.MultiTable.NoSingleTableLookups): TActorIterator / TActorRange / TObjectIterator /
+// GetAllActorsOfClass / ForEachObjectOfClass over ARbTable, ARbBallSet or ARbCue ("the first table found") appear ONLY in
+// RbTableSubsystem.cpp; everything else asks this subsystem for a specific table or for the player's.
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"

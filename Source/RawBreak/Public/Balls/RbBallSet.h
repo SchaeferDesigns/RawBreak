@@ -135,6 +135,13 @@ public:
 	void SetWithholdSuspended(bool bSuspended);
 	bool IsWithholdSuspended() const { return bWithholdSuspended; }
 
+	// MPC_RbBalls is ONE world-wide collection (Ball00..Ball15): with several tables per level only one ball set may write it,
+	// or the last table that changed a ball overwrites the others' entries (the player's balls lose their cloth occlusion when
+	// an idle table racks after them). ARbGameMode lets only the PLAYER session's ball set drive it (18.6.2 rule 4: the
+	// player's context); default on (one table, tests, dev maps). Switching it on pushes every ball at once.
+	void SetDrivesOcclusion(bool bDrives);
+	bool DrivesOcclusion() const { return bDrivesOcclusion; }
+
 	// AActor
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -172,5 +179,6 @@ protected:
 	TArray<bool> BallRequestedVisible;   // index = ball id (M2-E)
 	TArray<bool> BallWithheld;           // index = ball id (M2-E)
 	bool bWithholdSuspended = false;
+	bool bDrivesOcclusion = true;        // M2-E review: only the player's ball set writes MPC_RbBalls
 	bool bOcclusionCollectionOverridden = false;
 };

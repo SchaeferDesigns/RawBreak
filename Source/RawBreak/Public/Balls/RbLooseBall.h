@@ -15,17 +15,22 @@
 //  * Launch sets the core state of the hand-off: the actor transform (position, orientation) is the caller's, then mass
 //    (inertia 2/5 m R^2 from the sphere), linear [cm/s] and angular [rad/s] world velocities. Read back unchanged before the
 //    first physics step (RawBreak.Unit.LooseBall.HandOff_ExactCoreState).
+//  * Spin cap: Chaos clamps a body's spin to its MaxAngularVelocity in every step; the engine default (3600 deg/s = 62.8 rad/s)
+//    would cap a pool ball's rolling speed at 1.8 m/s (w R) and make every faster hand-off skid on the floor. The body overrides
+//    it with MaxSpinRadS (M2-E review; Functional.LooseBall checks that a free flight keeps 300 rad/s).
 //  * Contact materials: PM_RbBall multiplies (friction 1.0, restitution 0.975, combine mode Multiply wins over the default
 //    Average), so the SURFACE's physical material gives the pair its friction / restitution (VCT 0.5 / 0.35 etc.,
 //    rb_make_physics.py; venue-dive-bar 13.5).
 //  * Rolling resistance (Chaos has none): while the ball rests on a surface (a probe below the centre on the RbLooseBall
-//    channel), its tangential velocity and its spin shrink by the same factor each tick, i.e. a constant deceleration
-//    mu_r * g that keeps a rolling ball rolling (RollingResistanceFor, ESTIMATE per surface), and the spin about the normal
-//    decays (pivoting friction).
+//    channel), its tangential velocity and the surface speed of its rolling spin (|w_t| R) each lose mu_r g dt per tick (a
+//    constant deceleration that keeps a rolling ball rolling and leaves a ball spinning in place its spin for the contact
+//    friction; RollingResistanceFor, ESTIMATE per surface), and the spin about the normal decays (pivoting friction). The
+//    probe also tells what the ball lies on (GetGroundActor / IsOnTable: back on a table, URbLooseBallSubsystem returns it).
 //  * Rest: IsResting when the body sleeps, or it moved slower than RestSpeedCmS for RestHoldSeconds; then it is put to sleep.
 //  * Events (URbLooseBallSubsystem, audio AU-25): every physics hit with an approach speed >= MinImpactSpeedMps -> OnImpact
 //    (normal impulse [N s], approach speed [m/s] from the velocity before the step, surface type of the other material);
-//    every tick while it rolls on a surface -> OnRolling.
+//    every tick while it rolls on a surface -> OnRolling. None while the actor is hidden (a replay of its table plays: the
+//    live copy is neither seen nor heard; it keeps moving under physics meanwhile).
 //  * Rotation smear: its own material instance (a copy of the ball set's) gets BallOmegaLocal from the physics spin.
 
 #include "CoreMinimal.h"
@@ -76,6 +81,10 @@ public:
 	// The last tick found a supporting surface under the ball (its surface type, e.g. RbAssetPaths::Surface::Vct).
 	bool IsGrounded() const { return bGrounded; }
 	EPhysicalSurface GetGroundSurface() const { return GroundSurface; }
+	// The actor of that supporting surface (nullptr when not grounded), and whether it is a table (any ARbTable: the ball came
+	// back onto a bed, rail or pocket after a lamp rebound or a bounce off furniture; M2-E review).
+	AActor* GetGroundActor() const { return bGrounded ? GroundActor.Get() : nullptr; }
+	bool IsOnTable() const;
 	// Physics hits reported so far (all / from below: normal within 60 deg of up) and the largest approach speed [m/s].
 	int32 GetImpactCount() const { return ImpactCount; }
 	int32 GetFloorImpactCount() const { return FloorImpactCount; }
@@ -87,6 +96,10 @@ public:
 	// Shot whose hand-off spawned this ball (FRbShot::Id; 0 = a direct HandOff call).
 	uint32 GetHandOffShotId() const { return HandOffShotId; }
 	void SetHandOffShotId(uint32 Id) { HandOffShotId = Id; }
+
+	// The body's spin cap [rad/s] (see the file comment): above the core's spins (a cue ball rolling at 10 m/s turns 350 rad/s,
+	// masse / draw spins a few hundred) and equal to Chaos's global p.HackMaxAngularVelocity default.
+	static constexpr double MaxSpinRadS = 1000.0;
 
 	// Rolling-resistance coefficient mu_r of a pool ball on a surface (ESTIMATE until measured: VCT / concrete 0.02 with grout
 	// and grit, wood 0.015, rubber mat 0.08, cloth 0.010 as the core's table cloth, anything else 0.02).
@@ -141,6 +154,7 @@ protected:
 	bool bGrounded = false;
 	FVector GroundNormal = FVector::UpVector;
 	EPhysicalSurface GroundSurface = SurfaceType_Default;
+	TWeakObjectPtr<AActor> GroundActor;
 	int32 ImpactCount = 0;
 	int32 FloorImpactCount = 0;
 	double MaxImpactSpeed = 0.0;

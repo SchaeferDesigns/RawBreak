@@ -429,10 +429,23 @@ void ARbBallSet::SetOcclusionCollection(UMaterialParameterCollection* Collection
 	UpdateOcclusionParameters();
 }
 
+void ARbBallSet::SetDrivesOcclusion(bool bDrives)
+{
+	if (bDrivesOcclusion == bDrives)
+	{
+		return;
+	}
+	bDrivesOcclusion = bDrives;
+	if (bDrivesOcclusion)
+	{
+		UpdateOcclusionParameters(); // take over the collection with this table's balls
+	}
+}
+
 void ARbBallSet::UpdateOcclusionParameters()
 {
 	UWorld* World = GetWorld();
-	if (!OcclusionCollection || !World)
+	if (!OcclusionCollection || !World || !bDrivesOcclusion)
 	{
 		return;
 	}
@@ -451,7 +464,7 @@ void ARbBallSet::UpdateOcclusionParameters()
 void ARbBallSet::UpdateOcclusionParameter(int32 BallId)
 {
 	UWorld* World = GetWorld();
-	if (!OcclusionCollection || !World || BallId < 0 || BallId >= MpcBallCount)
+	if (!OcclusionCollection || !World || !bDrivesOcclusion || BallId < 0 || BallId >= MpcBallCount)
 	{
 		return;
 	}

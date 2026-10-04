@@ -602,6 +602,12 @@ FRbGameModeSession ARbGameMode::MakeSession(ARbTable* SessionTable, bool bPlayer
 		Session.BallSet = World->SpawnActor<ARbBallSet>(ARbBallSet::StaticClass(), FTransform::Identity, Params);
 	}
 	Session.Cue = World->SpawnActor<ARbCue>(ARbCue::StaticClass(), FTransform::Identity, Params);
+	if (Session.BallSet)
+	{
+		// MPC_RbBalls is one world-wide collection: only the player's balls write it (an idle table racking after the player's
+		// would otherwise overwrite the entries of the player's balls; M2-E review).
+		Session.BallSet->SetDrivesOcclusion(bPlayer);
+	}
 	if (SessionTable->HasContext())
 	{
 		if (Session.BallSet)

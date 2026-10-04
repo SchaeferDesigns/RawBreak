@@ -15,7 +15,8 @@
 //              cue ball in hand goes into M2-F's carrying hand). Automatic return when the next address starts (BeginAddress
 //              of the player's table), when the ball comes to rest in an RbBallReturn volume, falls below the kill Z or rests
 //              unreachable for 20 s ("the bartender brings it"; a voice line later).
-//   Events     OnImpact per physics hit (audio AU-25, M2-C; captions later), OnReturned per returned ball.
+//   Events     OnImpact per physics hit (audio AU-25, M2-C; captions later), OnReturned per returned ball. A loose ball that is
+//              hidden (a replay of its table plays) reports no OnImpact / OnRolling: the replay neither shows nor sounds it.
 // Keyed by (TableIndex, BallId): several tables per level work (18.6.2).
 // Owner: M2-E.
 //
@@ -37,13 +38,24 @@
 //                     with the same seed): the balls are racked
 //    and per loose ball: ReturnVolume (resting inside a component with the RbBallReturn profile or tag), KillZ (below the
 //    world's kill Z or FallBelowFloorCm under its table's floor), Unreachable (resting where no standing spot within reach
-//    exists, for UnreachableReturnSeconds).
+//    exists, for UnreachableReturnSeconds), OnTable (M2-E review: lying on ANY table - bed, rail, pocket - for
+//    OnTableReturnSeconds: an ExternalObjectRebound ball is handed off at its apex under the lamp and falls back onto the bed,
+//    a Floor ball may bounce off furniture onto a rail; left there it would roll through the table's balls, which have no
+//    physics, and lie where the player aims the next shot while its table instance - respotted - stays hidden). The scene
+//    queries of a resting ball (return volume, reach) run on its first resting tick and then every 0.5 s. A table that
+//    replays keeps its loose balls as they are until the replay ends.
+//  * A returned loose CUE ball while its director waits for the placement (any reason but CueBallPlaced / Carried / Replaced
+//    / NewRack) goes into the hand as a picked-up one does: the picker's pawn, else the pawn of the session's stroke component
+//    (M2-E review: the "bartender" returns of a cue ball the player cannot reach would otherwise leave nothing to place when
+//    the carrying hand does not pick up a cue ball that lies loose).
 //  * Pick-up: FindGazedBall = the loose ball (resting or slower than PickUpMaxSpeedCmS) whose centre is at most
 //    GazeToleranceCm + R from the gaze ray, in front of the eye, within ReachCm plan distance and PickUpMaxDropCm below / 30 cm
 //    above the eye, with a clear line of sight (Visibility); the nearest to the ray wins. A cue ball picked up while the
 //    director waits for the placement goes into the pawn's URbBallInHandComponent (BeginCarry, legality = CanPlaceCueBall).
-//  * Replays: URbReplaySubsystem calls SetReplayActive around a replay: withholding is suspended (the recorded shot shows every
-//    ball) and the loose actors are hidden (the replay never shows a second copy); both return with the live table.
+//  * Replays: URbReplaySubsystem calls SetReplayActive around a replay of the player's table: that table's withholding is
+//    suspended (the recorded shot shows every ball) and its loose actors are hidden (the replay never shows a second copy); both
+//    return with the live table. Other tables keep their loose balls and withheld balls (per table, 18.6.2 rule 3); no pick-up
+//    is offered while any replay plays.
 //  * Switch: console variable rb.LooseBall.Enable (1) and SetEnabled (tests): off = no hand-off (the ball disappears at the
 //    hand-off time), everything else unchanged - the rules and hashes never depend on it.
 //  * Dev commands: rb.LooseBall.List, rb.LooseBall.ReturnAll, rb.LooseBall.Drop <table> <id> <x> <y> <z> [<vx> <vy> <vz>]
@@ -103,6 +115,7 @@ enum class ERbLooseBallReturn : uint8
 	Replaced,      // the same ball left the table again
 	Manual,        // ReturnBall / ReturnAll / console
 	Destroyed,     // the actor vanished (FellOutOfWorld, level unload)
+	OnTable,       // came back onto a table (lamp rebound, a bounce off furniture): the referee takes it off (M2-E review)
 };
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FRbOnLooseBallImpact, const FRbLooseBallImpact& /*Impact*/);
@@ -171,9 +184,12 @@ public:
 	// Seconds the ball has rested out of reach (0 while reachable or moving).
 	double GetUnreachableSeconds(const ARbLooseBall& Ball) const;
 
-	// Replays: suspends withholding on every bound ball set and hides the loose actors (true), restores both (false).
-	void SetReplayActive(bool bActive);
-	bool IsReplayActive() const { return bReplayActive; }
+	// Replays: suspends withholding on the replayed table's ball set and hides that table's loose actors (true), restores both
+	// (false). Per table (18.6.2 rule 3: the other tables' loose balls and withheld balls are not part of the player's replay);
+	// TableIndex INDEX_NONE = every table (false with INDEX_NONE ends every replay state).
+	void SetReplayActive(bool bActive, int32 TableIndex = INDEX_NONE);
+	// Any table replays (INDEX_NONE) / that table replays.
+	bool IsReplayActive(int32 TableIndex = INDEX_NONE) const;
 
 	// Hand-offs on / off (and the console variable rb.LooseBall.Enable).
 	void SetEnabled(bool bEnable) { bEnabled = bEnable; }
@@ -185,6 +201,7 @@ public:
 	double PickUpMaxSpeedCmS = 30.0;
 	double PickUpMaxDropCm = 200.0;
 	double UnreachableReturnSeconds = 20.0;
+	double OnTableReturnSeconds = 0.3; // lying on a table this long (accumulated while grounded on one): returned
 	double FallBelowFloorCm = 300.0;
 	double PawnRadiusCm = 25.0;
 	double PawnHalfHeightCm = 88.0;
@@ -209,6 +226,7 @@ private:
 		int32 BallId = INDEX_NONE;
 		uint32 ShotId = 0;
 		double UnreachableSeconds = 0.0;
+		double OnTableSeconds = 0.0; // grounded on a table (OnTable return)
 		double ReachCheckIn = 0.0;   // seconds until the next reachability check
 		bool bReachable = true;
 	};
@@ -231,11 +249,22 @@ private:
 	void HandleShotEvent(const TSharedRef<const FRbShot>& Shot, int32 EventIndex, TWeakObjectPtr<ARbBallSet> WeakBalls);
 	FEntry* FindEntry(int32 TableIndex, int32 BallId);
 	const FEntry* FindEntry(const ARbLooseBall& Ball) const;
-	// Removes the entry at Index, destroys its actor, un-withholds the table ball and broadcasts the return.
-	void ReturnEntry(int32 Index, ERbLooseBallReturn Reason);
+	// A live loose ball of that table (no allocation: UpdateSessions asks it every tick).
+	bool HasLooseBalls(int32 TableIndex) const;
+	// Removes the entry at Index, destroys its actor, un-withholds the table ball (unless another live loose copy of the same
+	// ball exists), hands a returned cue ball to the placing player (GiveCueBallToHand) and broadcasts the return. Pawn: who
+	// picked it up (nullptr = an automatic return: the session's player).
+	void ReturnEntry(int32 Index, ERbLooseBallReturn Reason, APawn* Pawn = nullptr);
+	// The cue ball of TableIndex into the carrying hand (URbBallInHandComponent::BeginCarry, legality = CanPlaceCueBall) while
+	// that table's director waits for the placement and the hand holds nothing. Pawn nullptr: the session's stroke component's.
+	void GiveCueBallToHand(int32 TableIndex, double RadiusCm, APawn* Pawn);
 	void UpdateSessions();
 	bool IsInReturnVolume(const ARbLooseBall& Ball) const;
 	bool IsBelowKillZ(const ARbLooseBall& Ball) const;
+	// Replay state of one table (SetReplayActive) and its application to the bound ball sets / loose actors.
+	bool IsTableInReplay(int32 TableIndex) const { return bReplayAllTables || ReplayTables.Contains(TableIndex); }
+	void ApplyReplayState();
+	static int32 TableIndexOf(const ARbBallSet* BallSet);
 
 	TArray<FEntry> Entries;
 	TArray<FBinding> Bindings;
@@ -243,6 +272,7 @@ private:
 	FDelegateHandle ProviderHandle;
 	ERbLooseBallReturn LastReturnReason = ERbLooseBallReturn::Manual;
 	int32 ReturnCount = 0;
-	bool bReplayActive = false;
+	TArray<int32, TInlineAllocator<4>> ReplayTables; // tables whose replay plays (M2: the player's)
+	bool bReplayAllTables = false;
 	bool bEnabled = true;
 };

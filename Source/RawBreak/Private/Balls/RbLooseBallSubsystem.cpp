@@ -211,7 +211,7 @@ void URbLooseBallSubsystem::BindBallSet(ARbBallSet* BallSet)
 		Bindings.Add(Binding);
 	}
 	// Re-initialised ball sets (InitForTable) keep their balls that lie off the table withheld.
-	BallSet->SetWithholdSuspended(bReplayActive);
+	BallSet->SetWithholdSuspended(IsTableInReplay(TableIndexOf(BallSet)));
 	for (const FEntry& Entry : Entries)
 	{
 		if (Entry.BallSet.Get() == BallSet && Entry.Ball.IsValid())
@@ -325,9 +325,14 @@ ARbLooseBall* URbLooseBallSubsystem::HandOff(ARbBallSet& Balls, int32 BallId, co
 		return nullptr;
 	}
 	const int32 TableIndex = Table->TableIndex;
-	if (FEntry* Previous = FindEntry(TableIndex, BallId))
+	// It left the table again: its earlier copy goes, and so does an entry whose actor vanished meanwhile (FellOutOfWorld before
+	// the next tick) - left behind, that stale entry's later return would release the NEW copy's table ball (a double ball).
+	for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
 	{
-		ReturnEntry(static_cast<int32>(Previous - Entries.GetData()), ERbLooseBallReturn::Replaced); // it left the table again
+		if (Entries.IsValidIndex(Index) && Entries[Index].TableIndex == TableIndex && Entries[Index].BallId == BallId)
+		{
+			ReturnEntry(Index, Entries[Index].Ball.IsValid() ? ERbLooseBallReturn::Replaced : ERbLooseBallReturn::Destroyed);
+		}
 	}
 
 	// Core (table frame) -> world: position, orientation, velocity (a vector) and spin (a pseudovector, FRbCoords).
@@ -349,7 +354,7 @@ ARbLooseBall* URbLooseBallSubsystem::HandOff(ARbBallSet& Balls, int32 BallId, co
 	const double MassKg = BallId < Context.Balls.Count ? Context.Balls.Balls[BallId].Mass : rb::kStandardPoolBall.Mass;
 	Loose->SetHandOffShotId(ShotId);
 	Loose->Launch(Table, BallId, Balls.GetBallMesh(), Balls.GetBallMaterial(BallId), Balls.GetBallRadiusCm(BallId), MassKg, Velocity, Spin);
-	if (bReplayActive)
+	if (IsTableInReplay(TableIndex))
 	{
 		Loose->SetActorHiddenInGame(true);
 	}
@@ -411,10 +416,26 @@ TArray<ARbLooseBall*> URbLooseBallSubsystem::GetLooseBalls(int32 TableIndex) con
 
 int32 URbLooseBallSubsystem::GetNumLooseBalls() const
 {
-	return GetLooseBalls(INDEX_NONE).Num();
+	int32 Count = 0;
+	for (const FEntry& Entry : Entries)
+	{
+		Count += Entry.Ball.IsValid() ? 1 : 0;
+	}
+	return Count;
 }
 
-void URbLooseBallSubsystem::ReturnEntry(int32 Index, ERbLooseBallReturn Reason)
+bool URbLooseBallSubsystem::HasLooseBalls(int32 TableIndex) const
+{
+	return Entries.ContainsByPredicate([TableIndex](const FEntry& E) { return E.TableIndex == TableIndex && E.Ball.IsValid(); });
+}
+
+int32 URbLooseBallSubsystem::TableIndexOf(const ARbBallSet* BallSet)
+{
+	const ARbTable* Table = BallSet ? BallSet->GetTable() : nullptr;
+	return Table ? Table->TableIndex : INDEX_NONE;
+}
+
+void URbLooseBallSubsystem::ReturnEntry(int32 Index, ERbLooseBallReturn Reason, APawn* Pawn)
 {
 	if (!Entries.IsValidIndex(Index))
 	{
@@ -422,14 +443,28 @@ void URbLooseBallSubsystem::ReturnEntry(int32 Index, ERbLooseBallReturn Reason)
 	}
 	const FEntry Entry = Entries[Index];
 	Entries.RemoveAt(Index);
+	ARbBallSet* Balls = Entry.BallSet.Get();
+	double RadiusCm = Balls ? Balls->GetBallRadiusCm(Entry.BallId) : 0.0;
 	if (ARbLooseBall* Ball = Entry.Ball.Get())
 	{
+		RadiusCm = Ball->GetRadiusCm();
 		Ball->Destroy();
 	}
-	if (ARbBallSet* Balls = Entry.BallSet.Get())
+	const bool bOtherCopy = Entries.ContainsByPredicate([&Entry](const FEntry& E)
+	{
+		return E.BallSet == Entry.BallSet && E.BallId == Entry.BallId && E.Ball.IsValid();
+	});
+	if (Balls && !bOtherCopy)
 	{
 		// Visible again only if the committed table state has the ball in play (the presentation's last request).
 		Balls->SetBallWithheld(Entry.BallId, false);
+	}
+	// A cue ball that comes back while its director waits for the placement goes into the hand (header). Not when the placement
+	// or the hand already took it (CueBallPlaced / Carried), another copy replaces it or a new rack starts.
+	if (Entry.BallId == rb::kCueBallId && !bOtherCopy && Reason != ERbLooseBallReturn::CueBallPlaced && Reason != ERbLooseBallReturn::Carried &&
+		Reason != ERbLooseBallReturn::Replaced && Reason != ERbLooseBallReturn::NewRack)
+	{
+		GiveCueBallToHand(Entry.TableIndex, RadiusCm, Pawn);
 	}
 	LastReturnReason = Reason;
 	++ReturnCount;
@@ -437,6 +472,34 @@ void URbLooseBallSubsystem::ReturnEntry(int32 Index, ERbLooseBallReturn Reason)
 		*StaticEnum<ERbLooseBallReturn>()->GetNameStringByValue(static_cast<int64>(Reason)));
 	OnReturned.Broadcast(Entry.TableIndex, Entry.BallId);
 	OnReturnedWithReason.Broadcast(Entry.TableIndex, Entry.BallId, Reason);
+}
+
+void URbLooseBallSubsystem::GiveCueBallToHand(int32 TableIndex, double RadiusCm, APawn* Pawn)
+{
+	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	const FRbTableSession* Session = Tables ? Tables->FindSession(TableIndex) : nullptr;
+	URbMatchDirector* Director = Session ? Session->Director.Get() : nullptr;
+	ARbTable* Table = Session ? Session->Table.Get() : nullptr;
+	if (!Director || !Table || Director->GetPhase() != ERbDirectorPhase::AwaitPlacement || RadiusCm <= 0.0)
+	{
+		return;
+	}
+	if (!Pawn)
+	{
+		const URbStrokeComponent* Stroke = Director->GetStrokeComponent();
+		Pawn = Stroke ? Cast<APawn>(Stroke->GetOwner()) : nullptr;
+	}
+	URbBallInHandComponent* Hand = Pawn ? Pawn->FindComponentByClass<URbBallInHandComponent>() : nullptr;
+	if (!Hand || (Hand->GetState() != ERbBallInHandState::Inactive && Hand->GetState() != ERbBallInHandState::Placed))
+	{
+		return; // no carrying hand, or it holds the ball already (M2-F picks the cue ball up when the placement begins)
+	}
+	const TWeakObjectPtr<URbMatchDirector> WeakDirector(Director);
+	Hand->BeginCarry(Table, rb::kCueBallId, FRbCoords::MetersPerCm * RadiusCm, [WeakDirector](const rb::Vec2& Plan)
+	{
+		const URbMatchDirector* D = WeakDirector.Get();
+		return D && D->CanPlaceCueBall(Plan);
+	});
 }
 
 bool URbLooseBallSubsystem::ReturnBall(int32 TableIndex, int32 BallId)
@@ -466,6 +529,10 @@ int32 URbLooseBallSubsystem::ReturnAll(int32 TableIndex, ERbLooseBallReturn Reas
 	int32 Count = 0;
 	for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
 	{
+		if (!Entries.IsValidIndex(Index))
+		{
+			continue; // a return listener removed more than one entry
+		}
 		if (TableIndex == INDEX_NONE || Entries[Index].TableIndex == TableIndex)
 		{
 			Count += Entries[Index].Ball.IsValid() ? 1 : 0;
@@ -483,7 +550,7 @@ ARbLooseBall* URbLooseBallSubsystem::FindGazedBall(const FRbInteractionQuery& Qu
 {
 	UWorld* World = GetWorld();
 	const FVector Direction = Query.Direction.GetSafeNormal();
-	if (!World || bReplayActive || Direction.IsNearlyZero())
+	if (!World || IsReplayActive() || Direction.IsNearlyZero())
 	{
 		return nullptr;
 	}
@@ -505,14 +572,13 @@ ARbLooseBall* URbLooseBallSubsystem::FindGazedBall(const FRbInteractionQuery& Qu
 		{
 			continue;
 		}
+		// Line of sight. Another loose ball in front does not hide this one (the nearest to the ray wins) - checked on the hit instead
+		// of ignoring every loose actor: the ignore list is inline for 4 actors, and the key hints ask this every frame (no allocation).
 		FCollisionQueryParams Params(SCENE_QUERY_STAT(RbLooseBallGaze), false, Query.Pawn);
-		for (const FEntry& Other : Entries)
-		{
-			Params.AddIgnoredActor(Other.Ball.Get());
-		}
+		Params.AddIgnoredActor(Ball);
 		FHitResult Hit;
 		if (World->LineTraceSingleByChannel(Hit, Query.Eye, Center, ECC_Visibility, Params) && Hit.bBlockingHit &&
-			Hit.Distance < ToBall.Size() - Ball->GetRadiusCm() - 1.0)
+			Hit.Distance < ToBall.Size() - Ball->GetRadiusCm() - 1.0 && !Cast<ARbLooseBall>(Hit.GetActor()))
 		{
 			continue; // something is in the way
 		}
@@ -524,31 +590,14 @@ ARbLooseBall* URbLooseBallSubsystem::FindGazedBall(const FRbInteractionQuery& Qu
 
 bool URbLooseBallSubsystem::PickUp(ARbLooseBall& Ball, APawn* Pawn)
 {
-	const int32 TableIndex = Ball.GetTableIndex();
-	const int32 BallId = Ball.GetBallId();
-	ARbTable* Table = Ball.GetTable();
-	const double RadiusM = FRbCoords::MetersPerCm * Ball.GetRadiusCm();
-	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
-	const FRbTableSession* Session = Tables ? Tables->FindSession(TableIndex) : nullptr;
-	URbMatchDirector* Director = Session ? Session->Director.Get() : nullptr;
-	if (!ReturnBall(TableIndex, BallId, ERbLooseBallReturn::PickUp))
+	const int32 Index = Entries.IndexOfByPredicate([&Ball](const FEntry& E) { return E.Ball.Get() == &Ball; });
+	if (Index == INDEX_NONE)
 	{
 		return false;
 	}
-	// The cue ball in hand goes into the carrying hand (M2-F's URbBallInHandComponent), which then places it.
-	if (BallId == rb::kCueBallId && Pawn && Table && Director && Director->GetPhase() == ERbDirectorPhase::AwaitPlacement)
-	{
-		URbBallInHandComponent* Hand = Pawn->FindComponentByClass<URbBallInHandComponent>();
-		if (Hand && (Hand->GetState() == ERbBallInHandState::Inactive || Hand->GetState() == ERbBallInHandState::Placed))
-		{
-			const TWeakObjectPtr<URbMatchDirector> WeakDirector(Director);
-			Hand->BeginCarry(Table, BallId, RadiusM, [WeakDirector](const rb::Vec2& Plan)
-			{
-				const URbMatchDirector* D = WeakDirector.Get();
-				return D && D->CanPlaceCueBall(Plan);
-			});
-		}
-	}
+	// The cue ball in hand goes into the picker's carrying hand (M2-F's URbBallInHandComponent), which then places it
+	// (ReturnEntry -> GiveCueBallToHand).
+	ReturnEntry(Index, ERbLooseBallReturn::PickUp, Pawn);
 	return true;
 }
 
@@ -602,11 +651,9 @@ bool URbLooseBallSubsystem::IsReachable(const ARbLooseBall& Ball) const
 		return true;
 	}
 	const FVector Center = Ball.GetActorLocation();
+	// Loose balls ignore the Pawn channel (floor trace, capsule test); in the line of sight another loose ball does not count as a
+	// wall (checked on the hit, so the ignore list stays inline: this ball and the players' pawns).
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(RbLooseBallReach), false, &Ball);
-	for (const FEntry& Entry : Entries)
-	{
-		Params.AddIgnoredActor(Entry.Ball.Get());
-	}
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (const APlayerController* PC = It->Get())
@@ -644,7 +691,7 @@ bool URbLooseBallSubsystem::IsReachable(const ARbLooseBall& Ball) const
 			const FVector Eye(Spot.X, Spot.Y, FloorZ + PawnEyeHeightCm);
 			FHitResult Block;
 			if (World->LineTraceSingleByChannel(Block, Eye, Center, ECC_Visibility, Params) && Block.bBlockingHit &&
-				Block.Distance < (Center - Eye).Size() - Ball.GetRadiusCm() - 1.0)
+				Block.Distance < (Center - Eye).Size() - Ball.GetRadiusCm() - 1.0 && !Cast<ARbLooseBall>(Block.GetActor()))
 			{
 				continue;
 			}
@@ -683,7 +730,7 @@ void URbLooseBallSubsystem::UpdateSessions()
 		Watch.MatchSeed = Director->GetMatchSeed();
 		Watch.MatchShotIndex = Director->GetMatchShotIndex();
 		Watch.Phase = static_cast<uint8>(Phase);
-		if (GetLooseBalls(TableIndex).IsEmpty())
+		if (!HasLooseBalls(TableIndex))
 		{
 			continue;
 		}
@@ -705,6 +752,10 @@ void URbLooseBallSubsystem::UpdateSessions()
 		const uint32 PendingId = Pending.IsValid() ? Pending->Id : 0u;
 		for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
 		{
+			if (!Entries.IsValidIndex(Index))
+			{
+				continue; // a return listener removed more than one entry
+			}
 			const FEntry& Entry = Entries[Index];
 			if (Entry.TableIndex != TableIndex || !Entry.Ball.IsValid() || (Entry.ShotId != 0 && Entry.ShotId == PendingId))
 			{
@@ -742,28 +793,35 @@ void URbLooseBallSubsystem::UpdateAutomaticReturns(double DeltaSeconds)
 {
 	for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
 	{
-		if (!Entries[Index].Ball.IsValid())
+		if (Entries.IsValidIndex(Index) && !Entries[Index].Ball.IsValid())
 		{
 			ReturnEntry(Index, ERbLooseBallReturn::Destroyed); // FellOutOfWorld, level unload
 		}
 	}
-	if (bReplayActive || Entries.IsEmpty())
-	{
-		UpdateSessions(); // keeps the watches current (rack / phase changes during a replay are not "new")
-		return;
-	}
-	UpdateSessions();
+	UpdateSessions(); // also keeps the watches current (rack / phase changes during a replay are not "new")
 	for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
 	{
+		if (!Entries.IsValidIndex(Index))
+		{
+			continue; // a return listener removed more than one entry
+		}
 		FEntry& Entry = Entries[Index];
 		const ARbLooseBall* Ball = Entry.Ball.Get();
-		if (!Ball)
+		if (!Ball || IsTableInReplay(Entry.TableIndex))
 		{
-			continue;
+			continue; // its table replays: hidden, and nothing it does now is the live room
 		}
 		if (IsBelowKillZ(*Ball))
 		{
 			ReturnEntry(Index, ERbLooseBallReturn::KillZ);
+			continue;
+		}
+		// Back on a table (a lamp rebound falls onto the bed, a bounce off furniture lands on a rail): the referee takes it off
+		// before it rolls through the table's balls or lies where the next shot is aimed (header).
+		Entry.OnTableSeconds = Ball->IsOnTable() ? Entry.OnTableSeconds + DeltaSeconds : 0.0;
+		if (Entry.OnTableSeconds >= OnTableReturnSeconds)
+		{
+			ReturnEntry(Index, ERbLooseBallReturn::OnTable);
 			continue;
 		}
 		if (!Ball->IsResting())
@@ -772,16 +830,18 @@ void URbLooseBallSubsystem::UpdateAutomaticReturns(double DeltaSeconds)
 			Entry.ReachCheckIn = 0.0;
 			continue;
 		}
-		if (IsInReturnVolume(*Ball))
-		{
-			ReturnEntry(Index, ERbLooseBallReturn::ReturnVolume);
-			continue;
-		}
+		// The scene queries of a resting ball (return volume, reachability) run on its first resting tick and then every
+		// ReachCheckInterval, not every tick (the overlap query fills a heap array: no per-frame allocation while balls lie around).
 		Entry.ReachCheckIn -= DeltaSeconds;
 		if (Entry.ReachCheckIn <= 0.0)
 		{
-			Entry.bReachable = IsReachable(*Ball);
 			Entry.ReachCheckIn = RbLooseBallSubsystemPrivate::ReachCheckInterval;
+			if (IsInReturnVolume(*Ball))
+			{
+				ReturnEntry(Index, ERbLooseBallReturn::ReturnVolume);
+				continue;
+			}
+			Entry.bReachable = IsReachable(*Ball);
 		}
 		Entry.UnreachableSeconds = Entry.bReachable ? 0.0 : Entry.UnreachableSeconds + DeltaSeconds;
 		if (Entry.UnreachableSeconds >= UnreachableReturnSeconds)
@@ -795,25 +855,50 @@ void URbLooseBallSubsystem::UpdateAutomaticReturns(double DeltaSeconds)
 // Replays
 // ---------------------------------------------------------------------------------------------------------------------
 
-void URbLooseBallSubsystem::SetReplayActive(bool bActive)
+bool URbLooseBallSubsystem::IsReplayActive(int32 TableIndex) const
 {
-	if (bReplayActive == bActive)
+	return TableIndex == INDEX_NONE ? (bReplayAllTables || ReplayTables.Num() > 0) : IsTableInReplay(TableIndex);
+}
+
+void URbLooseBallSubsystem::SetReplayActive(bool bActive, int32 TableIndex)
+{
+	if (TableIndex == INDEX_NONE)
 	{
-		return;
+		bReplayAllTables = bActive;
+		if (!bActive)
+		{
+			ReplayTables.Reset(); // every replay state ends
+		}
 	}
-	bReplayActive = bActive;
+	else if (bActive)
+	{
+		ReplayTables.AddUnique(TableIndex);
+	}
+	else
+	{
+		ReplayTables.Remove(TableIndex);
+	}
+	ApplyReplayState();
+}
+
+void URbLooseBallSubsystem::ApplyReplayState()
+{
 	for (const FBinding& Binding : Bindings)
 	{
 		if (ARbBallSet* Balls = Binding.BallSet.Get())
 		{
-			Balls->SetWithholdSuspended(bActive);
+			Balls->SetWithholdSuspended(IsTableInReplay(TableIndexOf(Balls)));
 		}
 	}
 	for (const FEntry& Entry : Entries)
 	{
 		if (ARbLooseBall* Ball = Entry.Ball.Get())
 		{
-			Ball->SetActorHiddenInGame(bActive);
+			const bool bHidden = IsTableInReplay(Entry.TableIndex);
+			if (Ball->IsHidden() != bHidden)
+			{
+				Ball->SetActorHiddenInGame(bHidden);
+			}
 		}
 	}
 }

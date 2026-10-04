@@ -9,7 +9,7 @@ Used by RawBreak.Functional.MultiTable / LooseBall (M2-E) and by M2-C / M2-D for
     LampUndersideHeight and, for the bar table, the lamp footprint of venue-dive-bar E14 feed the off-table apex check);
   * a closed room (engine cubes, static): floor PM_RbSurface_Vct, walls PM_RbSurface_Concrete, a wood kick plate
     PM_RbSurface_Wood (rb_make_physics.py), two procedural bar stools beside the 7-ft (loose balls roll between their legs),
-    dim warm ambient light, the test room's post-process baseline (local exposure, low bloom);
+    dim warm ambient light, the test room's post-process baseline (local exposure, low bloom, white point = lamp + 200 K);
   * an RbBallReturn trigger volume in a corner (a ball resting there goes back automatically);
   * PlayerStart at the 7-ft's head end; ARbLookDevCameras (Eyes preset): RbCam_M2E_Overview (both tables),
     RbCam_M2E_LooseBall (low view along the kick plate beside the 7-ft where the capture shot's ball comes to rest, StoolA's
@@ -49,6 +49,8 @@ TABLES = [
 	("Table_7ft", "SEVEN_FOOT_BAR", "OLD_BAR_OVERSIZED_CUE", 1, (300.0, 150.0, 0.0), 90.0, 0.86, True, True),
 ]
 BED = {"NINE_FOOT_PRO": (127.0, 63.5), "SEVEN_FOOT_BAR": (99.0, 49.5)}  # half length / half width of the bed [cm] (lamp size)
+AMBIENT_LUMENS = 9000.0  # each of the three warm wall washers (room fill, see main)
+LAMP_TEMPERATURE_K = 3600.0  # table lamps; the post-process white point follows them (see main)
 
 
 def fresh_level(path: str) -> unreal.World:
@@ -213,7 +215,7 @@ def main() -> None:
 		lc.set_editor_property("source_height", 0.56 * hw)
 		lc.set_editor_property("barn_door_angle", 70.0)
 		lc.set_editor_property("barn_door_length", 14.0)
-		lc.set_editor_property("temperature", 3600.0)
+		lc.set_editor_property("temperature", LAMP_TEMPERATURE_K)
 		lc.set_editor_property("use_temperature", True)
 		lc.set_editor_property("attenuation_radius", 900.0)
 
@@ -222,11 +224,15 @@ def main() -> None:
 	stool("StoolB", 500.0, 235.0, seat_mat, steel_mat)
 
 	# Dim warm room light (Lumen bounces it; enough that the eye does not adapt the lit cloth to white): three wall washers.
+	# M2-E review: 1500 lm each left ~15 lux on the floor against ~700 lux on the beds; the centre-weighted Eyes metering of the
+	# overview (floor between the tables) then pushed both cloths 3+ stops over mid-grey and they clipped to a pale white-blue
+	# (together with the missing white point below). AMBIENT_LUMENS gives a dim bar's ~100 lux of fill; the beds stay ~3 stops
+	# brighter, so the lit cloth still glows in the overview (Docs/images/dev/m2e/two_tables.png) but reads blue.
 	for i, (x, y) in enumerate(((0.0, 380.0), (-420.0, -380.0), (520.0, -380.0))):
 		p = rb.spawn(unreal.PointLight, (x, y, 250.0), label=f"Ambient{i}")
 		pc = p.light_component
 		pc.set_editor_property("intensity_units", unreal.LightUnits.LUMENS)
-		pc.set_editor_property("intensity", 1500.0)
+		pc.set_editor_property("intensity", AMBIENT_LUMENS)
 		pc.set_editor_property("temperature", 2700.0)
 		pc.set_editor_property("use_temperature", True)
 		pc.set_editor_property("source_radius", 6.0)
@@ -243,6 +249,10 @@ def main() -> None:
 	pps.set_editor_property("local_exposure_shadow_contrast_scale", 0.9)
 	pps.set_editor_property("override_bloom_intensity", True)
 	pps.set_editor_property("bloom_intensity", 0.15)
+	# The eye adapts to the lamps' colour (as ARbTestRoom: white point = lamp temperature + 200 K). M2-E review: without it the
+	# 3600 K lamps were seen against a D65 white point - the room turned orange and the blue cloth a pale grey-white.
+	pps.set_editor_property("override_white_temp", True)
+	pps.set_editor_property("white_temp", LAMP_TEMPERATURE_K + 200.0)
 	ppv.set_editor_property("settings", pps)
 
 	# The ball return (a corner "behind the bar" stand-in): profile + tag RbBallReturn.

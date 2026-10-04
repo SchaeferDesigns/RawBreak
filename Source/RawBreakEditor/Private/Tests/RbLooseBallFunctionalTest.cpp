@@ -10,10 +10,12 @@
 //   3. a replay of the shot shows the 9 leaving, hides it from the hand-off time on and spawns nothing (the loose actor is
 //      hidden meanwhile); back live, the loose 9 shows again and the table 9 is withheld again;
 //   4. ball in hand placed: the 9 still waits; the pawn steps up to it and looks at it, the key-hint query offers "Pick up the
-//      ball", the pawn's Confirm (HandleConfirm, the F key) picks it up -> the 9 shows on its spot;
+//      ball", the pawn's Confirm (HandleConfirm, the F key) picks it up -> the 9 shows on its spot; a ball dropped with 300 rad/s
+//      keeps its spin in free flight (no engine spin cap, review);
 //   5. automatic returns under engine physics in the level: a ball dropped into the RbBallReturn corner (ReturnVolume), one
-//      below the kill Z (KillZ), one under the 9-ft table (Unreachable after UnreachableReturnSeconds), one on the open floor
-//      that the next shot returns (Address), one returned by a new match (NewRack).
+//      below the kill Z (KillZ), one handed off above the bed as after a lamp rebound that lands on the cloth and is taken off
+//      (OnTable, review), one under the 9-ft table (Unreachable after UnreachableReturnSeconds), one on the open floor that the
+//      next shot returns (Address), one returned by a new match (NewRack).
 // Needs the dev level (python Tools/unreal/rbue.py py Tools/unreal/editor/rb_dev_m2e.py). Owner: M2-E.
 
 #include "Editor.h"
@@ -260,8 +262,10 @@ public:
 		case EStage::Replay: bDone = StageReplay(); break;
 		case EStage::Place: bDone = StagePlace(); break;
 		case EStage::PickUp: bDone = StagePickUp(); break;
+		case EStage::Spin: bDone = StageSpin(); break;
 		case EStage::ReturnVolume: bDone = StageReturnVolume(); break;
 		case EStage::KillZ: bDone = StageKillZ(); break;
+		case EStage::OnTable: bDone = StageOnTable(); break;
 		case EStage::Unreachable: bDone = StageUnreachable(); break;
 		case EStage::Address: bDone = StageAddress(); break;
 		case EStage::NewRack: bDone = StageNewRack(); break;
@@ -297,8 +301,10 @@ private:
 		Replay,
 		Place,
 		PickUp,
+		Spin,
 		ReturnVolume,
 		KillZ,
+		OnTable,
 		Unreachable,
 		Address,
 		NewRack,
@@ -898,6 +904,47 @@ private:
 		const UStaticMeshComponent* Nine = Balls->GetBallComponent(kNine);
 		Test->TestTrue(TEXT("the 9 shows on its spot on the table"), Balls->IsBallVisible(kNine) && Nine &&
 			FVector::Dist(Nine->GetComponentLocation(), Table->CoreToWorld(State.Balls[kNine].State.Position)) < 1.0e-3);
+		Stage = EStage::Spin;
+		return false;
+	}
+
+	// --- 6b. spin: a free flight keeps 300 rad/s (review: the engine's 62.8 rad/s cap clamped it in the first physics step) ---
+
+	bool StageSpin()
+	{
+		constexpr int32 Id = 2;
+		constexpr double SpinRadS = 300.0; // the topspin of a ball rolling at 8.6 m/s
+		if (!bStageStarted)
+		{
+			// 80 cm above the bed, 60 cm beyond the foot rail over the open floor: about half a second of free flight.
+			const rb::TableSpec& Spec = Table->GetContext().Spec;
+			rb::BallState State;
+			State.Position = rb::Vec3(0.5 * Spec.Length + Spec.RailWidthTotal + 0.6, 0.0, 0.8);
+			State.Omega = rb::Vec3(0.0, SpinRadS, 0.0);
+			const ARbLooseBall* Ball = Loose->HandOff(*Balls, Id, State, rb::Quat::Identity(), rb::OffTableReason::Floor, 0);
+			if (!Test->TestNotNull(TEXT("spinning ball dropped"), Ball))
+			{
+				return true;
+			}
+			SpinStartZ = Ball->GetActorLocation().Z;
+			bStageStarted = true;
+			return false;
+		}
+		const ARbLooseBall* Ball = Loose->FindLooseBall(Table->TableIndex, Id);
+		if (!Test->TestNotNull(TEXT("the spinning ball"), Ball))
+		{
+			return true;
+		}
+		if (Ball->GetImpactCount() == 0 && SpinStartZ - Ball->GetActorLocation().Z < 5.0)
+		{
+			return false; // a few physics steps first
+		}
+		const double Spin = Ball->GetAngularVelocity().Size();
+		Test->AddInfo(FString::Printf(TEXT("spin after %.1f cm of free fall: %.2f rad/s (handed off %.0f), %d hits"), SpinStartZ - Ball->GetActorLocation().Z, Spin,
+			SpinRadS, Ball->GetImpactCount()));
+		Test->TestEqual(TEXT("still in free flight"), Ball->GetImpactCount(), 0);
+		Test->TestTrue(TEXT("free flight keeps its spin (300 rad/s within 1 %)"), FMath::Abs(Spin - SpinRadS) <= 0.01 * SpinRadS);
+		Loose->ReturnBall(Table->TableIndex, Id, ERbLooseBallReturn::Manual);
 		Stage = EStage::ReturnVolume;
 		return false;
 	}
@@ -959,6 +1006,46 @@ private:
 			return false;
 		}
 		Test->TestTrue(TEXT("below the kill Z: returned"), LastReturnWas(Id, ERbLooseBallReturn::KillZ));
+		Stage = EStage::OnTable;
+		return false;
+	}
+
+	// Review (M2-E): a ball that comes back onto a table under engine physics - here as after a lamp rebound (ExternalObjectRebound
+	// is handed off at the flight apex under the lamp) - lands on the cloth and is taken off after OnTableReturnSeconds instead of
+	// rolling through the table's balls and lying where the next shot is aimed.
+	bool StageOnTable()
+	{
+		constexpr int32 Id = 8;
+		if (!bStageStarted)
+		{
+			const rb::TableSpec& Spec = Table->GetContext().Spec;
+			rb::BallState Apex;
+			Apex.Position = rb::Vec3(-0.25 * Spec.Length, 0.2 * Spec.Width, 0.45); // 45 cm above the bed, head side
+			Apex.Velocity = rb::Vec3(0.4, 0.0, 0.0);
+			if (!Test->TestNotNull(TEXT("ball handed off above the bed"),
+				Loose->HandOff(*Balls, Id, Apex, rb::Quat::Identity(), rb::OffTableReason::ExternalObjectRebound, 0)))
+			{
+				return true;
+			}
+			bSawOnTable = false;
+			OnTableHits = 0;
+			bStageStarted = true;
+			return false;
+		}
+		if (const ARbLooseBall* Ball = Loose->FindLooseBall(Table->TableIndex, Id))
+		{
+			bSawOnTable |= Ball->IsOnTable();
+			OnTableHits = FMath::Max(OnTableHits, Ball->GetFloorImpactCount());
+			return false;
+		}
+		const double Seconds = FPlatformTime::Seconds() - StageStart;
+		Test->AddInfo(FString::Printf(TEXT("the ball that fell onto the bed was taken off after %.2f s (%d hits from below)"), Seconds, OnTableHits));
+		Test->TestTrue(TEXT("it landed on the cloth"), OnTableHits >= 1 && bSawOnTable);
+		Test->TestTrue(TEXT("taken off the table"), LastReturnWas(Id, ERbLooseBallReturn::OnTable));
+		Test->TestTrue(TEXT("... soon (within 3 s)"), Seconds < 3.0);
+		Test->TestFalse(TEXT("released"), Balls->IsBallWithheld(Id));
+		Test->TestEqual(TEXT("the table instance shows iff the table state has the ball in play"), Balls->IsBallVisible(Id),
+			Director->GetTableState().Balls[Id].InPlay);
 		Stage = EStage::Unreachable;
 		return false;
 	}
@@ -1148,8 +1235,11 @@ private:
 	int32 AimFrames = 0;
 	bool bLooseCueBall = false;
 	bool bCheckedReach = false;
+	bool bSawOnTable = false;
+	int32 OnTableHits = 0;
 	bool bStruck = false;
 	bool bRestarted = false;
+	double SpinStartZ = 0.0;
 	uint32 ShotIndexBefore = 0;
 	double DefaultUnreachableSeconds = 20.0;
 };
