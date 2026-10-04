@@ -2071,7 +2071,7 @@ namespace RbTableMeshBuilderPrivate
 			(Options.BaseStyle == ERbTableBaseStyle::Auto && Spec.Cloth == rb::ClothPreset::NappedBar);
 		// M2-L look-dev parameters (defaults per base style).
 		L.Style = L.bCabinet ? ERbTableBaseStyle::Cabinet : ERbTableBaseStyle::Legs;
-		L.OuterR = (Options.OuterCornerRadiusCm > 0.0 ? Options.OuterCornerRadiusCm : (L.bCabinet ? 4.0 : 2.0)) / FRbCoords::CmPerMeter;
+		L.OuterR = RbTableMeshBuilder::ResolveOuterCornerRadiusCm(Spec, Options) / FRbCoords::CmPerMeter;
 		L.CapEdge = (Options.CapEdgeRadiusCm > 0.0 ? Options.CapEdgeRadiusCm : (L.bCabinet ? 0.5 : 0.8)) / FRbCoords::CmPerMeter;
 		L.SkirtInset = L.bCabinet ? 0.0 : 0.010;
 		L.BodyInset = L.bCabinet ? 0.0 : 0.0015;
@@ -3311,7 +3311,10 @@ namespace RbTableMeshBuilderPrivate
 		constexpr double Board = 0.019;              // board thickness
 		constexpr double PedestalSize = 0.20, PedestalInset = 0.10, PedestalPlanR = 0.01;
 		constexpr double ScrewLevelerR = 0.025, ScrewDiscH = 0.008, ScrewStemR = 0.006, ScrewStemH = 0.004;
-		constexpr double TopTrimH = 0.045, BottomTrimH = 0.035;
+		// Trim band heights: the top band ends above the coin plate (its top at CoinCentreZ + CoinPlateH / 2 = 0.68 m, the rail
+		// underside of the 7-ft bar box at 0.7176 m), the bottom band below the ball tray opening (TrayZ0 0.33 m); M2-L review: 4.5 / 3.5
+		// cm bands ran over the plate's top and the tray opening's bottom (RawBreak.Unit.Table.Look.FootEndFit).
+		constexpr double TopTrimH = 0.035, BottomTrimH = 0.025;
 		// Foot-end face (core +x), heights above the floor.
 		constexpr double CoinCentreZ = 0.62, CoinPlateW = 0.20, CoinPlateH = 0.12, CoinPlateT = 0.004;
 		constexpr double SlideW = 0.16, SlideH = 0.036, SlideOut = 0.06, QuarterR = 0.01213; // 24.26 mm quarters, 6 slots
@@ -3784,6 +3787,31 @@ namespace RbTableMeshBuilder
 			return Options.LinerThicknessCm;
 		}
 		return ResolveBaseStyle(Spec, Options) == ERbTableBaseStyle::Cabinet ? 0.3 : 0.8;
+	}
+
+	double ResolveOuterCornerRadiusCm(const rb::TableSpec& Spec, const FRbTableMeshOptions& Options)
+	{
+		if (Options.OuterCornerRadiusCm > 0.0)
+		{
+			return Options.OuterCornerRadiusCm;
+		}
+		return ResolveBaseStyle(Spec, Options) == ERbTableBaseStyle::Cabinet ? 4.0 : 2.0;
+	}
+
+	FMaterialTableParameters GetMaterialTableParameters(const rb::TableGeometry& Geometry, const FRbTableMeshOptions& Options)
+	{
+		const rb::TableSpec& Spec = Geometry.Spec;
+		constexpr double Cm = FRbCoords::CmPerMeter;
+		FMaterialTableParameters Out;
+		Out.Scalars.Add({FName(TEXT("HalfLength")), 0.5 * Spec.Length});
+		Out.Scalars.Add({FName(TEXT("HalfWidth")), 0.5 * Spec.Width});
+		Out.Scalars.Add({FName(TEXT("CushionWidth")), Spec.CushionWidth});
+		// The rubber face's base line behind the nose (CushionProfile point 0: 0.4 CushionWidth).
+		Out.Scalars.Add({FName(TEXT("FaceBase")), Geometry.Profile.Points.Size() > 0 ? Geometry.Profile.Points[0].x : 0.4 * Spec.CushionWidth});
+		Out.Scalars.Add({FName(TEXT("CornerRadiusCm")), ResolveOuterCornerRadiusCm(Spec, Options)});
+		Out.Scalars.Add({FName(TEXT("BedHeightCm")), Cm * Spec.BedHeight});
+		Out.Vectors.Add({FName(TEXT("HalfOuterCm")), FVector2D(Cm * (0.5 * Spec.Length + Spec.RailWidthTotal), Cm * (0.5 * Spec.Width + Spec.RailWidthTotal))});
+		return Out;
 	}
 
 	bool PartExpected(ERbTableBaseStyle Style, ERbTablePart Part)

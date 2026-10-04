@@ -16,7 +16,7 @@
 // bHideLampFixture: while this camera is the view target the test room's lamp housing is hidden (the overhead view looks at
 // the table from above the lamp); the lights stay on.
 // Placement TableView (M2-L, Docs/ue-architecture.md 18.7): one of the standard table look-dev views (overhead, standing at the
-// head end, pocket close-up, cushion grazing, rail close-up) computed from the table's own geometry, so the same camera works on
+// head end, pocket close-up, cushion grazing, rail close-up, foot end) computed from the table's own geometry, so the same camera works on
 // every preset and after every TableSpec change (ComputeTableViewPose).
 // Table: TableIndex >= 0 = the level's table with that index (URbTableSubsystem), else the player's table.
 // Look-dev only: nothing happens unless this camera is the local player's view target, so the cameras can stay in the M1 map.
@@ -30,6 +30,7 @@
 
 #include "RbLookDevCamera.generated.h"
 
+class ARbCue;
 class ARbTable;
 
 UENUM(BlueprintType)
@@ -46,7 +47,7 @@ enum class ERbTableLookDevView : uint8
 {
 	Overhead,       // straight down over the bed centre, the whole table in frame (image right = foot)
 	Standing,       // standing eye (1.65 m above the floor) behind the head rail, looking at the foot spot
-	PocketCloseUp,  // the foot-left corner pocket from the table side: jaws, facings, liner, drop, hardware
+	PocketCloseUp,  // the foot-right corner pocket (rb::PocketId::FootRight) from the table side: jaws, facings, liner, drop, hardware
 	CushionGrazing, // 3 cm above the cloth along the right long cushion: nose roll, rubber, cloth sheen at grazing angles
 	RailCloseUp,    // from outside, above the right long rail: cap edge, sights, rail body, apron / cabinet below
 	FootEnd,        // bent over the foot end (eye 1.15 m above the floor): foot rail, coin mechanism, trap window, ball tray, return
@@ -159,4 +160,9 @@ protected:
 	bool bLoggedFallback = false;
 	FVector FocusPointWorld = FVector::ZeroVector; // ChinOnCue: the aim point
 	bool bHasFocusPoint = false;
+	// ResolveTable's last result and the level's first cue (the camera ticks every frame while it is the view target: no table query /
+	// actor iteration per frame).
+	mutable TWeakObjectPtr<ARbTable> CachedTable;
+	mutable int32 CachedTableIndex = INDEX_NONE;
+	TWeakObjectPtr<ARbCue> CachedCue;
 };

@@ -52,7 +52,7 @@ PLAYER_CAPTURES = [
 
 
 # --- M2-L table look-dev (Docs/ue-architecture.md 18.7) ------------------------------------------------------------------------
-# Seven ARbLookDevCameras per look-dev level (tags RbCam_TL_<View>): the chin-on-cue placement and the five TableView placements
+# Seven ARbLookDevCameras per look-dev level (tags RbCam_TL_<View>): the chin-on-cue placement and the six TableView placements
 # (ARbLookDevCamera::ComputeTableViewPose, computed from the table's own geometry). Both look-dev levels are written by
 # rb_dev_m2l.py (git-ignored scratch): the 9-ft pro table in a copy of the M1 room, the 7-ft coin-op bar box in a dark room under
 # the bar lamp until L_DiveBar exists; both carry a known-albedo card (0.80 / 0.18 / 0.04) on the bed. Output names:
@@ -104,9 +104,10 @@ BAR_LAMP = {
 # M1 room): -1.0 so the cards read like a photo of a lit table. The M1 acceptance cameras (A7) stay unbiased.
 LOOKDEV_EXPOSURE_BIAS_EV = {"9ft": -1.0, "7ft": -1.5}
 # Per-view offset on top of the table's bias [EV]. r8: the foot-end view is filled by the dark cabinet / apron, the metering lifts the
-# frame and the cloth in its top third clips to pastel (r9: -0.75 EV still left the cloth ~1.3 EV above the standing view); -1.25 EV
-# brings the cloth near the chin-on-cue / standing tone while the cabinet stays readable.
-LOOKDEV_VIEW_EXPOSURE_OFFSET_EV = {"foot_end": -1.25}
+# frame and the cloth in its top third clips to pastel (r9: -0.75 EV still left the cloth ~1.3 EV above the standing view). r11
+# (review): at -1.25 EV the foot-end cloth still measured ~1.3 EV (7-ft) / ~1.0 EV (9-ft) above the lamp-centre cloth of the standing
+# view (relative luminance of the sRGB samples), the 7-ft cloth read mint pastel; -2.25 EV puts it at the standing tone.
+LOOKDEV_VIEW_EXPOSURE_OFFSET_EV = {"foot_end": -2.25}
 
 
 def table_capture_options(preset: str) -> str:

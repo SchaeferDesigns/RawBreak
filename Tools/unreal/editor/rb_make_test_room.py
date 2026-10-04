@@ -11,7 +11,8 @@ Contents (everything else is built by C++ from these actors at construction / Be
     generator writes the lamp's underside height into ARbTable::LampUndersideHeight (single source, review R-14);
   * PlayerStart at the head end facing the table;
   * four ARbLookDevCameras with the RbAssetPaths::CaptureCamera tags (Eyes preset) for Tools/unreal/capture_m1.py;
-  * M2-L: the six table look-dev cameras RbCam_TL_* (rb_m1_layout.TABLE_VIEWS) for Tools/unreal/capture_table.py.
+  * (not in the M1 map: the seven M2-L table look-dev cameras RbCam_TL_* of rb_m1_layout.TABLE_VIEWS and the albedo card are
+    written into the look-dev levels of rb_dev_m2l.py only, build(lookdev=True), for Tools/unreal/capture_table.py).
 Idempotent: a re-run reloads the map, removes every actor and rebuilds it. After saving, the C++ level validator
 (ARbTestRoom::ValidateM1Level) checks the level and prints its report (A2 compares it between runs); any FAIL fails the run.
 --dev also writes the same room with flat dev materials on the table (/Game/Dev, git-ignored) for look-dev before the generated
@@ -138,7 +139,7 @@ def build(path: str, dev_materials: bool = False, preset: str = "NINE_FOOT_PRO",
 		exposure_bias_ev: float = 0.0) -> None:
 	"""Builds a test-room level at path around one table of preset. m1: the M1 capture cameras + the M1 validator (L_M1_TestRoom).
 	room: ARbTestRoom property overrides (snake_case names; tuples of 3 = linear colours, of 2 = FVector2D). ball_material: the ball
-	set's BallMaterialOverride (a placed ARbBallSet, which ARbGameMode uses). lookdev: the six M2-L table cameras and the
+	set's BallMaterialOverride (a placed ARbBallSet, which ARbGameMode uses). lookdev: the seven M2-L table cameras and the
 	known-albedo card (dev levels only; the M1 map stays as M1 defined it). exposure_bias_ev: exposure calibration of the look-dev
 	cameras (0 = the Eyes preset unchanged)."""
 	world = fresh_level(path)

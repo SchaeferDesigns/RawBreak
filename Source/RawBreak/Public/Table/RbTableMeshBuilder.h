@@ -152,6 +152,21 @@ namespace RbTableMeshBuilder
 	// The liner thickness [cm] the options resolve to for a table (LinerThicknessCm, or the base style's default when <= 0).
 	RAWBREAK_API double ResolveLinerThicknessCm(const rb::TableSpec& Spec, const FRbTableMeshOptions& Options);
 
+	// The plan-corner radius [cm] of the rail outline / coin-op cabinet the options resolve to (OuterCornerRadiusCm, or the base
+	// style's default when <= 0).
+	RAWBREAK_API double ResolveOuterCornerRadiusCm(const rb::TableSpec& Spec, const FRbTableMeshOptions& Options);
+
+	// Table-dimension parameters of the table-family materials (Shaders/Private/RbTableLook.ush places the wear from the table-local
+	// position and needs these; rb_make_materials.py bakes the committed presets' values into the generated materials). Names and
+	// values for a table: scalars HalfLength / HalfWidth / CushionWidth / FaceBase [m] (cloth), CornerRadiusCm / BedHeightCm and the
+	// vector HalfOuterCm (rg) [cm] (laminate). ARbTable gives a table whose values differ from its material's a dynamic instance.
+	struct FMaterialTableParameters
+	{
+		TArray<TPair<FName, double>, TInlineAllocator<8>> Scalars;
+		TArray<TPair<FName, FVector2D>, TInlineAllocator<2>> Vectors;
+	};
+	RAWBREAK_API FMaterialTableParameters GetMaterialTableParameters(const rb::TableGeometry& Geometry, const FRbTableMeshOptions& Options);
+
 	// Whether BuildAll produces triangles for a part in a base style (coin-op parts are empty on a legs table).
 	RAWBREAK_API bool PartExpected(ERbTableBaseStyle Style, ERbTablePart Part);
 

@@ -33,12 +33,18 @@ namespace RbLookDevCameraPrivate
 
 ARbTable* ARbLookDevCamera::ResolveTable() const
 {
-	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
-	if (!Tables)
+	// Cached while the table lives in this camera's world and the index is unchanged (URbTableSubsystem's queries collect the level's
+	// tables into an array: not once per frame).
+	if (ARbTable* Cached = CachedTable.Get(); Cached && CachedTableIndex == TableIndex && Cached->GetWorld() == GetWorld() &&
+		(TableIndex < 0 || Cached->TableIndex == TableIndex))
 	{
-		return nullptr;
+		return Cached;
 	}
-	return TableIndex >= 0 ? Tables->FindTable(TableIndex) : Tables->GetPlayerTable();
+	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	ARbTable* Table = Tables ? (TableIndex >= 0 ? Tables->FindTable(TableIndex) : Tables->GetPlayerTable()) : nullptr;
+	CachedTable = Table;
+	CachedTableIndex = TableIndex;
+	return Table;
 }
 
 FRbTableViewPose ARbLookDevCamera::ComputeTableViewPose(const ARbTable& Table, ERbTableLookDevView View)
@@ -254,9 +260,19 @@ void ARbLookDevCamera::UpdatePlacement(bool bActive)
 		const ARbGameMode* Mode = ARbGameMode::Get(this);
 		Director = Mode && Mode->GetTable() == Table ? Mode->GetDirector() : nullptr;
 	}
-	for (TActorIterator<ARbCue> It(GetWorld()); It && !Cue; ++It)
+	if (!Cue)
 	{
-		Cue = *It;
+		// The level's first cue, looked up once (an actor iterator collects the class's objects into an array: not every frame).
+		if (!CachedCue.IsValid() || CachedCue->GetWorld() != GetWorld())
+		{
+			CachedCue = nullptr;
+			for (TActorIterator<ARbCue> It(GetWorld()); It; ++It)
+			{
+				CachedCue = *It;
+				break;
+			}
+		}
+		Cue = CachedCue.Get();
 	}
 	FVector2D CueBall = CueBallCore;
 	if (Director)

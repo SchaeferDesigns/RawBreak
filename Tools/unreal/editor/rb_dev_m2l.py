@@ -7,7 +7,7 @@ Writes (git-ignored scratch under /Game/Dev/M2L):
     the dive-bar table condition, a placed ARbBallSet with MI_RbBall_DiveBar, in a dark room under an emulation of The Low Bridge's
     3-shade bar lamp (rb_m1_layout.BAR_LAMP), until L_DiveBar exists;
   * L_TableLookDev_9ft: the 9-ft pro table in a copy of the M1 room.
-Both with a PlayerStart, the six RbCam_TL_* look-dev cameras and the known-albedo card on the bed. Captures:
+Both with a PlayerStart, the seven RbCam_TL_* look-dev cameras and the known-albedo card on the bed. Captures:
 Tools/unreal/capture_table.py. Idempotent.
 """
 
