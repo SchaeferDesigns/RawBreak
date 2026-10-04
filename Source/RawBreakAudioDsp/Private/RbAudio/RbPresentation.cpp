@@ -276,15 +276,17 @@ namespace RbAudio
 		}
 		constexpr int32 Up = 4;
 		constexpr int32 Taps = 193;
-		static TArray<double> Fir;
-		if (Fir.Num() == 0)
+		// Thread-safe one-time design (a function-local static's initialiser runs once; the meters may run on several threads).
+		static const TArray<double> Fir = []()
 		{
-			KaiserLowPass(Taps, 0.5 * 48000.0 * 0.98, 48000.0 * Up, 8.0, Fir);
-			for (double& H : Fir)
+			TArray<double> F;
+			KaiserLowPass(Taps, 0.5 * 48000.0 * 0.98, 48000.0 * Up, 8.0, F);
+			for (double& H : F)
 			{
 				H *= Up;
 			}
-		}
+			return F;
+		}();
 		const int32 Frames = Interleaved.Num() / NumChannels;
 		double Peak = 0.0;
 		const int32 Half = Taps / 2;

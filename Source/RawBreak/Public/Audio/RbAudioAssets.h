@@ -78,8 +78,10 @@ namespace RbAudioAssets
 	inline FString LimiterPresetPath() { return FString::Printf(TEXT("%s/DYN_RB_MasterLimiter.DYN_RB_MasterLimiter"), MixDir); }
 	inline FString PauseLowPassPresetPath() { return FString::Printf(TEXT("%s/FLT_RB_PauseLowPass.FLT_RB_PauseLowPass"), MixDir); }
 
-	// Audio anchor tags (RbAssetPaths::Tag::AudioAnchor) the ambience looks for in a venue level (M2-A places them; otherwise the
-	// venue profile's default positions are used): RbAudio_Hvac (ceiling diffusers), RbAudio_Cooler (compressors), RbAudio_Neon.
+	// Anchor kinds of the room-tone layers (FRbAmbienceEmitter::Anchor). A level's anchor actor tagged RbAudio_<Name> belongs to a kind
+	// by the prefix of <Name> (RbAmbienceAnchorKind): Hvac* / RoomTone* (ceiling diffusers), Cooler* (compressors), Neon* (signs); M2-A's
+	// dive-bar generator places RbAudio_RoomTone, RoomTone2, CoolerCompressor1 / 2, NeonN1..N5 from layout.json. Without anchors of a
+	// kind the venue profile's default positions are used.
 	inline const TCHAR* const AnchorHvac = TEXT("Hvac");
 	inline const TCHAR* const AnchorCooler = TEXT("Cooler");
 	inline const TCHAR* const AnchorNeon = TEXT("Neon");

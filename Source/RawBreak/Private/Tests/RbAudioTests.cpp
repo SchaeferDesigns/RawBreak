@@ -5,7 +5,8 @@
 //   AU-T16   presentation of the dive-bar break at the breaker's ears per dynamic-range mode (true peak before the limiter)
 //   AU-T19   offline render cost of the densest device block of the break (all 30 voices of the table)
 //   plans    the test-room break9, the audio tiers T1 / T2 (audio.md 6.6), emitter positions
-//   live     loose-ball floor hits and footsteps (AU-25, AU-65), venue profiles, tier hysteresis, the volume taper.
+//   live     loose-ball floor hits and footsteps (AU-25, AU-65), venue profiles, tier hysteresis, the volume taper
+//   anchors  the room-tone layers at the dive-bar level's RbAudio_* anchors (M2-A's layout.json names).
 // No audio device, no world. Owner: M2-C.
 
 #include "Tests/RbTestFlags.h"
@@ -26,6 +27,9 @@
 #include "RbAudio/RbShotAudioClock.h"
 #include "RbAudio/RbVoiceRenderer.h"
 
+#include "Algo/Reverse.h"
+#include "Audio/RbAudioAssets.h"
+#include "Audio/RbImpactVoiceComponent.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/Paths.h"
 
@@ -88,6 +92,8 @@ namespace RbAudioTests
 
 	// Renders every voice of a plan offline through FVoiceRenderer (anchored at frame 0), Frames frames, BlockFrames per block; with
 	// bWithFeed the table's reverb feed is rendered as the last entry of Out (it runs on the audio thread like the voices).
+	// OutBlockMicros: the CPU time of the calling thread per block (FRbAudioRenderProfile::ThreadCpuMicros, as the engine T19 check):
+	// wall time on a shared, busy machine measured preemption (a quiet block 0.6 s into the shot at 79 %, review M2-C).
 	void RenderVoices(const FRbShotAudioPlan& Plan, double Fs, int32 BlockFrames, int32 Frames, TArray<TArray<float>>& Out, TArray<double>* OutBlockMicros = nullptr,
 		bool bWithFeed = true)
 	{
@@ -103,20 +109,26 @@ namespace RbAudioTests
 			Renderers[V].SetPlan(MakeShared<const FVoicePlan, ESPMode::ThreadSafe>(V < Plan.Voices.Num() ? Plan.Voices[V] : Plan.ReverbFeed));
 			Out[V].Reset();
 		}
-		TArray<float> Block;
+		const int32 TotalFrames = (Frames + BlockFrames - 1) / BlockFrames * BlockFrames;
+		for (int32 V = 0; V < NumRenderers; ++V)
+		{
+			Out[V].SetNumZeroed(TotalFrames); // no growth inside the timed blocks (31 arrays reallocating at once measured as render time)
+		}
 		for (int64 F = 0; F < Frames; F += BlockFrames)
 		{
-			const uint64 T0 = FPlatformTime::Cycles64();
+			const double Cpu0 = OutBlockMicros ? FRbAudioRenderProfile::ThreadCpuMicros() : 0.0;
 			for (int32 V = 0; V < NumRenderers; ++V)
 			{
-				Block.SetNumZeroed(BlockFrames);
-				Renderers[V].RenderBlock(&Clock, F, Block);
-				Out[V].Append(Block);
+				Renderers[V].RenderBlock(&Clock, F, TArrayView<float>(Out[V].GetData() + F, BlockFrames));
 			}
 			if (OutBlockMicros)
 			{
-				OutBlockMicros->Add(FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64() - T0) * 1000.0);
+				OutBlockMicros->Add(FRbAudioRenderProfile::ThreadCpuMicros() - Cpu0);
 			}
+		}
+		for (int32 V = 0; V < NumRenderers; ++V)
+		{
+			Out[V].SetNum(Frames); // the requested length
 		}
 	}
 
@@ -319,9 +331,9 @@ bool FRbAudioT19::RunTest(const FString& Parameters)
 		}
 	}
 	const double BlockMicros = 512.0 / Fs * 1e6;
-	AddInfo(FString::Printf(TEXT("densest block %d (%.1f ms into the shot): all 30 voices + the reverb feed rendered in %.0f us on one thread = %.1f %% of a %.2f ms block"),
+	AddInfo(FString::Printf(TEXT("densest block %d (%.1f ms into the shot): all 30 voices + the reverb feed rendered in %.0f us CPU time on one thread = %.1f %% of a %.2f ms block"),
 		At, At * 512.0 / Fs * 1e3, Max, 100.0 * Max / BlockMicros, BlockMicros / 1000.0));
-	TestTrue(FString::Printf(TEXT("AU-T19 (offline, one thread): %.0f us <= 60 %% of a block (%.0f us)"), Max, 0.6 * BlockMicros), Max <= 0.6 * BlockMicros);
+	TestTrue(FString::Printf(TEXT("AU-T19 (offline, one thread): %.0f us CPU <= 60 %% of a block (%.0f us)"), Max, 0.6 * BlockMicros), Max <= 0.6 * BlockMicros);
 	return true;
 }
 
@@ -658,6 +670,136 @@ bool FRbAudioVenueTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("slider 0 -> silence"), URbAudioSettings::VolumeToGain(0.0f), 0.0f);
 	TestEqual(TEXT("slider 1 -> unity"), URbAudioSettings::VolumeToGain(1.0f), 1.0f);
 	TestTrue(TEXT("slider 0.5 -> -12 dB (square law)"), FMath::IsNearlyEqual(URbAudioSettings::VolumeToGain(0.5f), 0.25f));
+
+	// Mix-state ramps (audio.md 7.3 CBM_RB_Pause: -12 dB, attack 0.2 s / release 0.3 s), 10 ms frames.
+	auto Run = [](float Gain, bool bActive, double Seconds)
+	{
+		for (int32 I = 0; I < FMath::RoundToInt(Seconds / 0.01); ++I)
+		{
+			Gain = URbAudioSubsystem::StepMixGain(Gain, bActive, -12.0, 0.2, 0.3, 0.01);
+		}
+		return 20.0 * std::log10(FMath::Max(static_cast<double>(Gain), 1e-9));
+	};
+	TestTrue(FString::Printf(TEXT("pause mix: half the depth after half the attack (%.2f dB)"), Run(1.0f, true, 0.1)), FMath::IsNearlyEqual(Run(1.0f, true, 0.1), -6.0, 0.05));
+	TestTrue(TEXT("pause mix: -12 dB after the attack"), FMath::IsNearlyEqual(Run(1.0f, true, 0.2), -12.0, 0.01));
+	const float Down = static_cast<float>(RbAudio::DbToGain(-12.0));
+	TestTrue(FString::Printf(TEXT("pause mix: release takes its 0.3 s (half way after 0.15 s: %.2f dB)"), Run(Down, false, 0.15)),
+		FMath::IsNearlyEqual(Run(Down, false, 0.15), -6.0, 0.05));
+	TestTrue(TEXT("pause mix: released to exactly unity after 0.3 s"), URbAudioSubsystem::StepMixGain(static_cast<float>(RbAudio::DbToGain(-0.005)), false, -12.0, 0.2, 0.3, 0.01) == 1.0f
+		&& FMath::IsNearlyEqual(Run(Down, false, 0.3), 0.0, 1e-6));
+	return true;
+}
+
+// The room-tone layers at a level's audio anchors (review M2-C: the subsystem looked for RbAudio_Hvac / _Cooler / _Neon, the dive-bar
+// generator of M2-A tags RbAudio_RoomTone, _CoolerCompressor1, _NeonN3 ... from layout.json, so no layer ever reached its anchor).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbAudioAnchorTest, "RawBreak.Unit.Audio.Venue_AmbienceAnchors", RB_UNIT_TEST_FLAGS)
+bool FRbAudioAnchorTest::RunTest(const FString& Parameters)
+{
+	const FRbVenueAudioProfile Bar = RbGetVenueAudioProfile(ERbVenue::DiveBar);
+	auto M = [](double X, double Y, double Z) { return FVector(X, Y, Z) * 100.0; };
+	// Art/DiveBar/layout.json "audio_anchors" (M2-A, venue frame V in metres): every entry, the ones of later layers included.
+	const TArray<FRbAudioAnchor> Layout = {
+		{TEXT("RoomTone"), M(8.845, 2.745, 2.72)}, {TEXT("RoomTone2"), M(12.505, 1.525, 2.72)}, {TEXT("CoolerCompressor1"), M(3.11, 0.30, 0.20)},
+		{TEXT("CoolerCompressor2"), M(7.90, 0.30, 0.20)}, {TEXT("IceMachine"), M(17.50, 5.00, 0.90)}, {TEXT("Jukebox"), M(11.30, 6.90, 0.95)},
+		{TEXT("CeilingSpeaker1"), M(5.49, 5.18, 2.72)}, {TEXT("CeilingSpeaker2"), M(12.20, 2.44, 2.72)}, {TEXT("TV1"), M(6.80, 0.40, 2.30)},
+		{TEXT("TV2"), M(16.36, 6.375, 2.22)}, {TEXT("DartMachine"), M(8.90, 6.90, 1.73)}, {TEXT("StreetDoor"), M(0.05, 6.10, 1.10)},
+		{TEXT("StreetWindow"), M(0.05, 2.64, 1.50)}, {TEXT("Restrooms"), M(18.30, 1.46, 1.00)}, {TEXT("NeonN1"), M(0.06, 2.05, 1.32)},
+		{TEXT("NeonN2"), M(0.06, 3.45, 1.32)}, {TEXT("NeonN3"), M(8.50, 0.05, 2.41)}, {TEXT("NeonN4"), M(13.80, 7.28, 2.17)},
+		{TEXT("NeonN5"), M(16.44, 2.90, 1.67)}, {TEXT("PopcornMachine"), M(2.15, 1.87, 1.30)}, {TEXT("CeilingFan"), M(3.0, 5.2, 2.45)}};
+
+	// Kinds by prefix.
+	TestTrue(TEXT("RoomTone2 is an HVAC diffuser"), RbAmbienceAnchorKind(TEXT("RoomTone2")) == RbAudioAssets::AnchorHvac);
+	TestTrue(TEXT("Hvac (the profile's own name) is an HVAC diffuser"), RbAmbienceAnchorKind(TEXT("Hvac")) == RbAudioAssets::AnchorHvac);
+	TestTrue(TEXT("CoolerCompressor1 is a cooler"), RbAmbienceAnchorKind(TEXT("CoolerCompressor1")) == RbAudioAssets::AnchorCooler);
+	TestTrue(TEXT("NeonN4 is a neon sign"), RbAmbienceAnchorKind(TEXT("NeonN4")) == RbAudioAssets::AnchorNeon);
+	TestTrue(TEXT("Jukebox / IceMachine / CeilingSpeaker1 are not room-tone layers of M2"),
+		!RbAmbienceAnchorKind(TEXT("Jukebox")) && !RbAmbienceAnchorKind(TEXT("IceMachine")) && !RbAmbienceAnchorKind(TEXT("CeilingSpeaker1")));
+
+	auto Find = [](const TArray<FRbAmbiencePlacement>& P, const TCHAR* Name) -> const FRbAmbiencePlacement*
+	{
+		return P.FindByPredicate([Name](const FRbAmbiencePlacement& X) { return X.Name == Name; });
+	};
+	auto Near = [](const FRbAmbiencePlacement* P, const FVector& Cm) { return P && P->bAtAnchor && FVector::Dist(P->LocationCm, Cm) < 0.5; };
+
+	// The dive-bar level: every designed layer at its own anchor, the further neon signs as layers of their own.
+	TArray<FRbAmbiencePlacement> Placed;
+	RbPlaceAmbience(Bar, Layout, Placed);
+	int32 Diffusers = 0, Coolers = 0, Neons = 0, Beds = 0;
+	TSet<uint64> Seeds;
+	for (const FRbAmbiencePlacement& P : Placed)
+	{
+		Beds += P.Layer.Layer == EAmbienceLayer::HvacBed ? 1 : 0;
+		Diffusers += P.Layer.Layer == EAmbienceLayer::HvacDiffuser ? 1 : 0;
+		Coolers += P.Layer.Layer == EAmbienceLayer::Compressor ? 1 : 0;
+		Neons += P.Layer.Layer == EAmbienceLayer::NeonHum ? 1 : 0;
+		TestTrue(FString::Printf(TEXT("%s: positional layers sit at a level anchor"), *P.Name), P.Layer.Layer == EAmbienceLayer::HvacBed || P.bAtAnchor);
+		Seeds.Add(P.Layer.Seed);
+	}
+	TestEqual(TEXT("dive-bar level: one bed"), Beds, 1);
+	TestEqual(TEXT("dive-bar level: two diffusers (RoomTone, RoomTone2)"), Diffusers, 2);
+	TestEqual(TEXT("dive-bar level: two coolers"), Coolers, 2);
+	TestEqual(TEXT("dive-bar level: five neon signs N1..N5 (audio.md 12.1)"), Neons, 5);
+	TestEqual(TEXT("every layer has its own seed (no two identical hums)"), Seeds.Num(), Placed.Num());
+	TestTrue(TEXT("DiffuserPool at RoomTone2 (its nearest)"), Near(Find(Placed, TEXT("DiffuserPool")), M(12.505, 1.525, 2.72)));
+	TestTrue(TEXT("DiffuserBar at RoomTone"), Near(Find(Placed, TEXT("DiffuserBar")), M(8.845, 2.745, 2.72)));
+	TestTrue(TEXT("Cooler3Door at CoolerCompressor1"), Near(Find(Placed, TEXT("Cooler3Door")), M(3.11, 0.30, 0.20)));
+	TestTrue(TEXT("Cooler2Door at CoolerCompressor2"), Near(Find(Placed, TEXT("Cooler2Door")), M(7.90, 0.30, 0.20)));
+	const FRbAmbiencePlacement* N3 = Find(Placed, TEXT("NeonHollenbeck"));
+	const FRbAmbiencePlacement* N4 = Find(Placed, TEXT("NeonPool"));
+	const FRbAmbiencePlacement* N5 = Find(Placed, TEXT("NeonLanternFlats"));
+	TestTrue(TEXT("the designed neon layers at N3 / N4 / N5"), Near(N3, M(8.50, 0.05, 2.41)) && Near(N4, M(13.80, 7.28, 2.17)) && Near(N5, M(16.44, 2.90, 1.67)));
+	for (const FRbAmbienceEmitter& E : Bar.Emitters)
+	{
+		if (const FRbAmbiencePlacement* P = Find(Placed, *E.Name))
+		{
+			TestTrue(FString::Printf(TEXT("%s keeps its designed layer (level, seed, duty-cycle start)"), *E.Name), P->Layer.LevelDbA == E.Layer.LevelDbA
+				&& P->Layer.Seed == E.Layer.Seed && P->Layer.bStartOn == E.Layer.bStartOn && P->Layer.Layer == E.Layer.Layer);
+		}
+		else
+		{
+			AddError(FString::Printf(TEXT("%s is missing in the dive-bar level"), *E.Name));
+		}
+	}
+	TestTrue(TEXT("the window signs N1 / N2 hum too (extra layers at their anchors)"),
+		Placed.ContainsByPredicate([&](const FRbAmbiencePlacement& P) { return P.Layer.Layer == EAmbienceLayer::NeonHum && FVector::Dist(P.LocationCm, M(0.06, 2.05, 1.32)) < 0.5; })
+		&& Placed.ContainsByPredicate([&](const FRbAmbiencePlacement& P) { return P.Layer.Layer == EAmbienceLayer::NeonHum && FVector::Dist(P.LocationCm, M(0.06, 3.45, 1.32)) < 0.5; }));
+
+	// Deterministic and independent of the actor order of the level.
+	TArray<FRbAudioAnchor> Reversed = Layout;
+	Algo::Reverse(Reversed);
+	TArray<FRbAmbiencePlacement> Again;
+	RbPlaceAmbience(Bar, Reversed, Again);
+	bool bSame = Again.Num() == Placed.Num();
+	for (int32 I = 0; bSame && I < Placed.Num(); ++I)
+	{
+		bSame = Again[I].Name == Placed[I].Name && Again[I].Layer.Seed == Placed[I].Layer.Seed && Again[I].LocationCm.Equals(Placed[I].LocationCm, 0.0);
+	}
+	TestTrue(TEXT("the placement does not depend on the actor order"), bSame);
+
+	// A level without anchors (the test room, a scene in another frame): the profile at its default positions.
+	TArray<FRbAmbiencePlacement> Defaults;
+	RbPlaceAmbience(Bar, TArray<FRbAudioAnchor>(), Defaults);
+	TestEqual(TEXT("no anchors: every profile layer"), Defaults.Num(), Bar.Emitters.Num());
+	bool bAtDefaults = true;
+	for (int32 I = 0; I < Defaults.Num(); ++I)
+	{
+		bAtDefaults &= !Defaults[I].bAtAnchor && Defaults[I].LocationCm.Equals(Bar.Emitters[Defaults[I].Emitter].DefaultLocationCm, 0.0);
+	}
+	TestTrue(TEXT("no anchors: the default positions"), bAtDefaults);
+
+	// Fewer anchors than designed layers: the level decides (one neon sign -> one neon layer, the nearest design).
+	TArray<FRbAmbiencePlacement> One;
+	TArray<FRbAudioAnchor> OneSign;
+	OneSign.Add({TEXT("Neon"), M(13.0, 7.0, 2.2)});
+	RbPlaceAmbience(Bar, OneSign, One);
+	int32 OneNeons = 0;
+	for (const FRbAmbiencePlacement& P : One)
+	{
+		OneNeons += P.Layer.Layer == EAmbienceLayer::NeonHum ? 1 : 0;
+	}
+	TestEqual(TEXT("one neon anchor -> one neon layer"), OneNeons, 1);
+	TestTrue(TEXT("... the design nearest to it (NeonPool)"), Near(Find(One, TEXT("NeonPool")), M(13.0, 7.0, 2.2)));
+	TestEqual(TEXT("kinds without anchors keep their defaults (2 diffusers, 2 coolers, the bed)"), One.Num(), 6);
 	return true;
 }
 

@@ -15,7 +15,7 @@ struct FRbAmbienceEmitter
 {
 	RbAudio::FAmbienceLayerDesc Layer;
 	FVector DefaultLocationCm = FVector::ZeroVector; // positional layers only
-	const TCHAR* Anchor = nullptr;                   // RbAudio_<Anchor> actors replace the default positions of this layer
+	const TCHAR* Anchor = nullptr;                   // anchor kind (RbAudioAssets::Anchor*): the level's anchors of it place the layer
 	FString Name;
 };
 
@@ -33,6 +33,38 @@ struct FRbVenueAudioProfile
 };
 
 RAWBREAK_API FRbVenueAudioProfile RbGetVenueAudioProfile(ERbVenue Venue);
+
+// An audio anchor of a level: an actor tagged RbAudio_<Name> (RbAssetPaths::Tag::AudioAnchor; M2-A's generator places one per entry
+// of Art/DiveBar/layout.json "audio_anchors": RoomTone, RoomTone2, CoolerCompressor1, NeonN3, Jukebox, ...).
+struct FRbAudioAnchor
+{
+	FString Name;                              // <Name> of the tag
+	FVector LocationCm = FVector::ZeroVector;  // world
+};
+
+// One room-tone layer as it plays in a level.
+struct FRbAmbiencePlacement
+{
+	RbAudio::FAmbienceLayerDesc Layer;
+	FVector LocationCm = FVector::ZeroVector;  // positional layers only
+	FString Name;
+	int32 Emitter = INDEX_NONE;                // the profile emitter it comes from
+	bool bAtAnchor = false;                    // placed at a level anchor (else the profile's default position)
+};
+
+// The profile anchor kind (RbAudioAssets::AnchorHvac / AnchorCooler / AnchorNeon) of a level anchor name, by prefix, case-insensitive:
+// Hvac* and RoomTone* (the HVAC diffusers M16 of the dive-bar layout), Cooler* (CoolerCompressor1 / 2), Neon* (NeonN1..N5); nullptr
+// for anchors of later layers (jukebox, TVs, street, ...).
+RAWBREAK_API const TCHAR* RbAmbienceAnchorKind(const FString& AnchorName);
+
+// Places the profile's layers in a level (pure). Layers without an anchor kind (the stereo bed) play at their default positions. For
+// every anchor kind the level's anchors of that kind are the instances (at most RbMaxAmbienceAnchorsPerKind, by name): (emitter,
+// anchor) pairs are matched closest first, each designed layer keeps its own sound (level, seed, duty-cycle start) at its anchor,
+// every further anchor plays the layer of its nearest emitter with a derived seed (compressors start in the other state); profile
+// emitters left without an anchor are dropped (the level has fewer of them). A kind without anchors in the level keeps the profile's
+// default positions (a level in the venue frame V, or the test room). Independent of the order of Anchors.
+inline constexpr int32 RbMaxAmbienceAnchorsPerKind = 6;
+RAWBREAK_API void RbPlaceAmbience(const FRbVenueAudioProfile& Profile, TConstArrayView<FRbAudioAnchor> Anchors, TArray<FRbAmbiencePlacement>& Out);
 
 // Floor surface of a physical surface type (RbAssetPaths::Surface), with the venue's floor as the fallback.
 RAWBREAK_API RbAudio::EFloorSurface RbFloorSurfaceFor(EPhysicalSurface Surface, RbAudio::EFloorSurface VenueDefault);

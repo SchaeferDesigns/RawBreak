@@ -68,7 +68,8 @@ namespace RbAudio
 	// scipy.signal.firwin(Taps, Cutoff, window=('kaiser', Beta), fs=SampleRate): low-pass, DC gain 1.
 	RAWBREAKAUDIODSP_API void KaiserLowPass(int32 Taps, double CutoffHz, double SampleRate, double Beta, TArray<double>& Out);
 
-	// The 4x decimation FIR of the runtime pulse for a device rate (cutoff fs / 2 at 4 fs; 129 taps, Kaiser 8).
+	// The 4x decimation FIR of the runtime pulse for a device rate (cutoff fs / 2 at 4 fs; 129 taps, Kaiser 8). Cached per rate for
+	// the process: the returned array never moves, and a cached lookup takes no lock (the audio render thread calls it per impact).
 	RAWBREAKAUDIODSP_API const TArray<double>& DecimationFir(double SampleRate);
 
 	// Biquad, transposed direct form II, double precision. Coefficients normalised (a0 = 1).

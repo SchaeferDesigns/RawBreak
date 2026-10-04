@@ -53,10 +53,6 @@ public:
 	void BindPlayback(URbShotPlaybackComponent* Playback);
 	URbShotPlaybackComponent* GetBoundPlayback() const { return BoundPlayback.Get(); }
 
-	// The voice plans of a shot for a listener (pure; worker-safe; tests). ListenerWorld in world space.
-	static void BuildShotPlans(const FRbShot& Shot, const FRbTableContext& Context, const FTransform& TableToWorld, const FVector& ListenerWorld,
-		ERbTableAudioTier Tier, TArray<RbAudio::FVoicePlan>& OutPlans);
-
 	// Creates / replaces the voices of a tier (only while no shot is sounding; otherwise the change waits).
 	void SetTier(ERbTableAudioTier NewTier);
 	ERbTableAudioTier GetTier() const { return Tier; }

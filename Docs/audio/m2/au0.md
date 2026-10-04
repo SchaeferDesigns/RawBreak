@@ -28,16 +28,16 @@ positioning.
 | Recording | `FRbSubmixCapture` on `SUBM_RB_Table`: a submix buffer listener that stamps every buffer with its device frame and counts gaps |
 | Procedure | voice A starts; voice B starts **3 game frames later**. Shot A: the same click at shot time 0.100 s in A (left test channel) and B (right). Shot B: the click at 0.1000 s in A and at 0.1000 s + 0.5104 ms in B. Then five gain probes (pan law, 1 / r, mono upmix, reverb chain) |
 
-## Results (run of 2026-10-04, `Saved/RbLogs/test-20261004-113252.log`)
+## Results (run of 2026-10-04 after the second review, `Saved/RbLogs/test-20261004-175732.log`; the first run 11:32 gave the same values)
 
 | Check | Result | Requirement |
 |---|---|---|
 | Callbacks | 512 frames per call, 48000 Hz, one call per device block for every voice | one per block |
-| Capture | 398 848 frames from device frame 159 232, **0 gaps** | no gaps |
+| Capture | 484 352 frames from device frame 159 744, **0 gaps** | no gaps |
 | **AU-T21** inter-voice skew (same click, voices started 3 game frames apart) | **0.0000 samples** (C++ group delay); 0.0000 in the Python cross-check (cross-spectrum phase slope 0.5-6 kHz) | 0 samples |
 | **AU-T08** 0.5104 ms in two voices | **24.4993 samples** (exact 24.4992); Python cross-check 24.4992 | 24.50 +- 0.05 |
 | `L_src` (scheduled frame vs recorded frame) | **0 samples** (-0.0000) | constant |
-| Anchor lead | 23 / 205 frames past LeadMin (one block) for shots A / B | >= 0 |
+| Anchor lead | 261 / 26 frames past LeadMin (one block) for shots A / B | >= 0 |
 | Click level | peak 0.1080 = offline render x output gain 0.1525 (-3.00 dB stereo test-channel path, compensated) | as rendered |
 
 **Gain structure of the engine** (the probes; the voices' compensation constants in `URbAudioSettings` must cancel them):

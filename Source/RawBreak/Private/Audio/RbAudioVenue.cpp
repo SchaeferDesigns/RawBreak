@@ -76,6 +76,155 @@ FRbVenueAudioProfile RbGetVenueAudioProfile(ERbVenue Venue)
 	return P;
 }
 
+const TCHAR* RbAmbienceAnchorKind(const FString& AnchorName)
+{
+	// Prefixes per kind: the profile's own names and the dive-bar layout's (M2-A layout.json "audio_anchors").
+	struct FAlias
+	{
+		const TCHAR* Prefix;
+		const TCHAR* Kind;
+	};
+	static const FAlias Aliases[] = {
+		{TEXT("Hvac"), RbAudioAssets::AnchorHvac},
+		{TEXT("RoomTone"), RbAudioAssets::AnchorHvac},
+		{TEXT("Cooler"), RbAudioAssets::AnchorCooler},
+		{TEXT("Neon"), RbAudioAssets::AnchorNeon},
+	};
+	for (const FAlias& A : Aliases)
+	{
+		if (AnchorName.StartsWith(A.Prefix, ESearchCase::IgnoreCase))
+		{
+			return A.Kind;
+		}
+	}
+	return nullptr;
+}
+
+void RbPlaceAmbience(const FRbVenueAudioProfile& Profile, TConstArrayView<FRbAudioAnchor> Anchors, TArray<FRbAmbiencePlacement>& Out)
+{
+	Out.Reset();
+	auto SameKind = [](const TCHAR* A, const TCHAR* B) { return A && B && FCString::Strcmp(A, B) == 0; };
+	auto Default = [&Profile](int32 E)
+	{
+		FRbAmbiencePlacement P;
+		P.Layer = Profile.Emitters[E].Layer;
+		P.LocationCm = Profile.Emitters[E].DefaultLocationCm;
+		P.Name = Profile.Emitters[E].Name;
+		P.Emitter = E;
+		return P;
+	};
+	TArray<const TCHAR*> KindsDone;
+	for (int32 E = 0; E < Profile.Emitters.Num(); ++E)
+	{
+		const TCHAR* Kind = Profile.Emitters[E].Anchor;
+		if (!Kind)
+		{
+			Out.Add(Default(E));
+			continue;
+		}
+		if (KindsDone.ContainsByPredicate([&](const TCHAR* K) { return SameKind(K, Kind); }))
+		{
+			continue; // placed with the first emitter of its kind
+		}
+		KindsDone.Add(Kind);
+		TArray<int32> Emitters; // the profile's emitters of this kind
+		for (int32 I = E; I < Profile.Emitters.Num(); ++I)
+		{
+			if (SameKind(Profile.Emitters[I].Anchor, Kind))
+			{
+				Emitters.Add(I);
+			}
+		}
+		TArray<const FRbAudioAnchor*> Level; // the level's anchors of this kind, by name (deterministic)
+		for (const FRbAudioAnchor& A : Anchors)
+		{
+			if (SameKind(RbAmbienceAnchorKind(A.Name), Kind))
+			{
+				Level.Add(&A);
+			}
+		}
+		Level.StableSort([](const FRbAudioAnchor& L, const FRbAudioAnchor& R) { return L.Name < R.Name; });
+		if (Level.Num() > RbMaxAmbienceAnchorsPerKind)
+		{
+			Level.SetNum(RbMaxAmbienceAnchorsPerKind);
+		}
+		if (Level.Num() == 0)
+		{
+			for (const int32 I : Emitters)
+			{
+				Out.Add(Default(I));
+			}
+			continue;
+		}
+		// The designed layers at their anchors: (emitter, anchor) pairs taken closest first (each emitter and anchor once), so every
+		// layer lands at the anchor that is its own in the layout and, with fewer anchors than layers, the nearest designs stay.
+		struct FPair
+		{
+			double DistSq;
+			int32 EmitterSlot;
+			int32 AnchorSlot;
+		};
+		TArray<FPair> Pairs;
+		for (int32 E2 = 0; E2 < Emitters.Num(); ++E2)
+		{
+			for (int32 A = 0; A < Level.Num(); ++A)
+			{
+				Pairs.Add({FVector::DistSquared(Level[A]->LocationCm, Profile.Emitters[Emitters[E2]].DefaultLocationCm), E2, A});
+			}
+		}
+		Pairs.StableSort([](const FPair& L, const FPair& R) { return L.DistSq < R.DistSq; });
+		TArray<bool> Taken;
+		Taken.SetNumZeroed(Level.Num());
+		TArray<int32> AnchorOf;
+		AnchorOf.Init(INDEX_NONE, Emitters.Num());
+		for (const FPair& Pair : Pairs)
+		{
+			if (!Taken[Pair.AnchorSlot] && AnchorOf[Pair.EmitterSlot] == INDEX_NONE)
+			{
+				Taken[Pair.AnchorSlot] = true;
+				AnchorOf[Pair.EmitterSlot] = Pair.AnchorSlot;
+			}
+		}
+		for (int32 E2 = 0; E2 < Emitters.Num(); ++E2)
+		{
+			if (AnchorOf[E2] == INDEX_NONE)
+			{
+				continue; // fewer anchors than designed layers: the level decides
+			}
+			FRbAmbiencePlacement P = Default(Emitters[E2]);
+			P.LocationCm = Level[AnchorOf[E2]]->LocationCm;
+			P.bAtAnchor = true;
+			Out.Add(P);
+		}
+		// Further anchors: the layer of the nearest designed emitter, its own seed (never two identical hums / duty cycles).
+		for (int32 A = 0; A < Level.Num(); ++A)
+		{
+			if (Taken[A])
+			{
+				continue;
+			}
+			int32 Nearest = Emitters[0];
+			double BestD = TNumericLimits<double>::Max();
+			for (const int32 I : Emitters)
+			{
+				const double D = FVector::DistSquared(Level[A]->LocationCm, Profile.Emitters[I].DefaultLocationCm);
+				if (D < BestD)
+				{
+					Nearest = I;
+					BestD = D;
+				}
+			}
+			FRbAmbiencePlacement P = Default(Nearest);
+			P.Layer.Seed = RbAudio::HashMix(P.Layer.Seed, 0xA4C0'0000ull + static_cast<uint64>(A) + 1);
+			P.Layer.bStartOn = !P.Layer.bStartOn;
+			P.LocationCm = Level[A]->LocationCm;
+			P.Name = FString::Printf(TEXT("%s_%s"), *Profile.Emitters[Nearest].Name, *Level[A]->Name);
+			P.bAtAnchor = true;
+			Out.Add(P);
+		}
+	}
+}
+
 RbAudio::EFloorSurface RbFloorSurfaceFor(EPhysicalSurface Surface, RbAudio::EFloorSurface VenueDefault)
 {
 	if (Surface == RbAssetPaths::Surface::Vct)

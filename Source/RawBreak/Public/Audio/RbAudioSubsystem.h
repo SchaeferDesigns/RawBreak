@@ -15,9 +15,9 @@
 //   Loose balls URbLooseBallSubsystem::OnImpact / OnRolling / OnReturned (M2-E) -> synthesised floor hits (Hertz contact on the
 //               floor surface + the ball's radiation) and rolling on the floor per loose ball (AU-25; bus Table).
 //   Venue       ARbVenueInfo::GetVenue (M2-A; TestRoom without one): room tone bed + HVAC diffusers / cooler compressors / neon
-//               transformers as synthesised layers at their anchors (actors tagged RbAudio_<Anchor>, else the profile's default
-//               positions), the venue reverb (SUBM_RB_Reverb_<Venue>: convolution with the IR of Tools/audio/ir_synth.py; dive bar
-//               RT60 0.8 / 0.6 / 0.5 s).
+//               transformers as synthesised layers at the level's audio anchors (actors tagged RbAudio_<Name>: RoomTone*, Cooler*,
+//               Neon* of the dive-bar layout; RbPlaceAmbience), else at the profile's default positions, the venue reverb
+//               (SUBM_RB_Reverb_<Venue>: convolution with the IR of Tools/audio/ir_synth.py; dive bar RT60 0.8 / 0.6 / 0.5 s).
 //   Settings    FRbAudioVolumes (URbGameUserSettings::Volumes) -> submix output volumes, re-applied on OnSettingsChanged (M2-D owns
 //               the storage and the sliders): Master, Table (table voices, loose balls), Ambience (room tone, crowd, footsteps /
 //               foley of the world, audio.md 7.2), Voices, Music (jukebox, menu music), Interface.
@@ -83,6 +83,9 @@ public:
 	float GetPauseMixGain() const { return PauseGain; }
 	float GetReplayMixGain() const { return ReplayGain; }
 	bool IsReplayMix() const { return bReplayMix; }
+	// One step of a mix-state level ramp (pure): linear in dB, the mix's whole depth DepthDb in AttackSeconds when it engages and in
+	// ReleaseSeconds when it lets go (audio.md 7.3); returns the new linear gain (exactly 1 when released).
+	static float StepMixGain(float Gain, bool bActive, double DepthDb, double AttackSeconds, double ReleaseSeconds, double DeltaSeconds);
 
 	// Routing (generated assets; null when rb_make_audio.py has not run).
 	USoundSubmix* GetSubmix(ERbAudioBus Bus) const;

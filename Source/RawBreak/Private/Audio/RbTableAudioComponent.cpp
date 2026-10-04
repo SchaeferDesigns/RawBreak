@@ -1,7 +1,6 @@
 #include "Audio/RbTableAudioComponent.h"
 
 #include "Balls/RbBallSet.h"
-#include "Core/RbCoords.h"
 #include "Simulation/RbShot.h"
 #include "Simulation/RbTableContext.h"
 #include "Table/RbTable.h"
@@ -48,24 +47,6 @@ void URbTableAudioComponent::BindPlayback(URbShotPlaybackComponent* Playback)
 		ClockHandle = Playback->OnPlaybackClockChanged.AddUObject(this, &URbTableAudioComponent::HandlePlaybackClockChanged);
 		FinishedHandle = Playback->OnFinished.AddUObject(this, &URbTableAudioComponent::HandlePlaybackFinished);
 	}
-}
-
-void URbTableAudioComponent::BuildShotPlans(const FRbShot& Shot, const FRbTableContext& Context, const FTransform& TableToWorld, const FVector& InListenerWorld,
-	ERbTableAudioTier InTier, TArray<RbAudio::FVoicePlan>& OutPlans)
-{
-	const FVector LocalCm = TableToWorld.InverseTransformPosition(InListenerWorld);
-	const rb::Vec3 ListenerCore = FRbCoords::PositionToCore(LocalCm);
-	FRbAudioPlanOptions Options;
-	Options.Tier = InTier;
-	const URbAudioSettings* Settings = URbAudioSettings::Get();
-	Options.RefDistance = Settings->RefDistanceMeters;
-	Options.DirectivityFloorDb = Settings->DirectivityFloorDb;
-	Options.PanCompensation = Settings->PanCompensation;
-	Options.Mode = static_cast<RbAudio::EDynamicRangeMode>(Settings->DynamicRange);
-	Options.Seed = Shot.ResultHash;
-	FRbShotAudioPlan Plan;
-	FRbAudioPlanBuilder::Build(Shot.Result, Context, ListenerCore, Options, Plan);
-	OutPlans = MoveTemp(Plan.Voices);
 }
 
 void URbTableAudioComponent::SetRouting(const FRbTableAudioRouting& InRouting)

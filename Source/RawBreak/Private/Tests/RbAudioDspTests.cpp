@@ -26,8 +26,10 @@
 
 #include "RbAudio/RbJsonLite.h"
 
+#include "Async/ParallelFor.h"
 #include "Misc/Paths.h"
 
+#include <atomic>
 #include <cmath>
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -515,6 +517,55 @@ bool FRbAudioDspT11::RunTest(const FString& Parameters)
 		const double Res = ResidualDb(Case[TEXT("p_pa")].AsNumbers(), Out);
 		TestTrue(FString::Printf(TEXT("%s: runtime render residual %.1f dB (want <= -100, AU-T11)"), *Name, Res), Res <= -100.0);
 	}
+	return true;
+}
+
+// The decimation FIR cache (review M2-C): the audio render thread looks it up for every impact it renders while the plan workers do
+// the same in parallel. It was a TMap behind a lock returning a reference to its element: a lock on the render thread, and a
+// reference that moved when another rate was added. Now: lock-free lookups, entries at fixed addresses.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbAudioDspFirCache, "RawBreak.Unit.Audio.Dsp.DecimationFir_StableConcurrent", RB_UNIT_TEST_FLAGS)
+bool FRbAudioDspFirCache::RunTest(const FString& Parameters)
+{
+	const TArray<double>* First = &DecimationFir(48000.0);
+	const TArray<double> FirstTaps = *First;
+	TestEqual(TEXT("129 taps"), FirstTaps.Num(), DecimationTaps);
+	const double Rates[] = {8000.0, 11025.0, 12000.0, 16000.0, 22050.0, 24000.0, 32000.0, 44100.0, 64000.0, 88200.0, 96000.0, 128000.0, 176400.0,
+		192000.0, 352800.0, 384000.0};
+	for (const double R : Rates)
+	{
+		DecimationFir(R);
+	}
+	TestTrue(TEXT("a reference handed out stays valid when other rates are added (same address, same taps)"),
+		&DecimationFir(48000.0) == First && *First == FirstTaps);
+
+	// Concurrent lookups and first-time designs (rates nobody asked for yet) from 8 threads: every array complete and right.
+	const double NewRates[] = {47000.0, 47250.0, 47500.0, 47750.0, 49000.0, 49500.0};
+	TArray<double> All;
+	All.Append(Rates, UE_ARRAY_COUNT(Rates));
+	All.Append(NewRates, UE_ARRAY_COUNT(NewRates));
+	All.Add(48000.0);
+	TArray<double> Centre; // the reference centre tap per rate (an independent design)
+	for (const double R : All)
+	{
+		TArray<double> Ref;
+		KaiserLowPass(DecimationTaps, 0.5 * R, R * DecimationFactor, DecimationKaiserBeta, Ref);
+		Centre.Add(Ref[DecimationTaps / 2]);
+	}
+	std::atomic<int32> Bad{0};
+	ParallelFor(8, [&](int32 Thread)
+	{
+		for (int32 I = 0; I < 400; ++I)
+		{
+			const int32 K = (I * 7 + Thread * 3) % All.Num();
+			const TArray<double>& Fir = DecimationFir(All[K]);
+			if (Fir.Num() != DecimationTaps || Fir[DecimationTaps / 2] != Centre[K])
+			{
+				Bad.fetch_add(1);
+			}
+		}
+	});
+	TestEqual(TEXT("concurrent lookups: every FIR complete and the design of its rate"), Bad.load(), 0);
+	TestTrue(TEXT("the first reference is still valid"), &DecimationFir(48000.0) == First && *First == FirstTaps);
 	return true;
 }
 

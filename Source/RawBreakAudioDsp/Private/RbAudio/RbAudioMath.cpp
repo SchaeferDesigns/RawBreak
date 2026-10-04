@@ -1,7 +1,9 @@
 #include "RbAudio/RbAudioMath.h"
 
 #include "Misc/ScopeLock.h"
+#include "Templates/UniquePtr.h"
 
+#include <atomic>
 #include <cmath>
 
 // Owner: M2-C. Ports of the numpy / scipy routines Tools/audio/click_synth.py uses (see the header).
@@ -345,19 +347,60 @@ namespace RbAudio
 		}
 	}
 
+	namespace
+	{
+		// One cached FIR per device rate. The audio render thread asks for it for every impact it renders (RuntimeForceHertz /
+		// RuntimeForceSine -> Decimate), the plan workers in parallel: lookups walk a lock-free, append-only list (no lock on the
+		// render thread), and every entry lives at a fixed address for the process (a reference handed out stays valid when another
+		// rate is added; a TMap element would move when the map grows). The lock only serialises the rare miss.
+		struct FDecimationFirEntry
+		{
+			int64 Key = 0;
+			TArray<double> Taps;
+			const FDecimationFirEntry* Next = nullptr;
+		};
+
+		std::atomic<const FDecimationFirEntry*>& DecimationFirHead()
+		{
+			static std::atomic<const FDecimationFirEntry*> Head{nullptr};
+			return Head;
+		}
+
+		const FDecimationFirEntry* FindDecimationFir(int64 Key)
+		{
+			for (const FDecimationFirEntry* E = DecimationFirHead().load(std::memory_order_acquire); E; E = E->Next)
+			{
+				if (E->Key == Key)
+				{
+					return E;
+				}
+			}
+			return nullptr;
+		}
+	}
+
 	const TArray<double>& DecimationFir(double SampleRate)
 	{
-		static FCriticalSection Lock;
-		static TMap<int64, TArray<double>> Cache;
 		const int64 Key = FMath::RoundToInt64(SampleRate * 1000.0);
-		FScopeLock Guard(&Lock);
-		if (const TArray<double>* Found = Cache.Find(Key))
+		if (const FDecimationFirEntry* Found = FindDecimationFir(Key))
 		{
-			return *Found;
+			return Found->Taps;
 		}
-		TArray<double> Taps;
-		KaiserLowPass(DecimationTaps, 0.5 * SampleRate, SampleRate * DecimationFactor, DecimationKaiserBeta, Taps);
-		return Cache.Add(Key, MoveTemp(Taps));
+		static FCriticalSection Lock;
+		static TArray<TUniquePtr<FDecimationFirEntry>> Owned; // the entries, freed at process exit
+		FScopeLock Guard(&Lock);
+		if (const FDecimationFirEntry* Found = FindDecimationFir(Key))
+		{
+			return Found->Taps;
+		}
+		TUniquePtr<FDecimationFirEntry> Entry = MakeUnique<FDecimationFirEntry>();
+		Entry->Key = Key;
+		KaiserLowPass(DecimationTaps, 0.5 * SampleRate, SampleRate * DecimationFactor, DecimationKaiserBeta, Entry->Taps);
+		Entry->Next = DecimationFirHead().load(std::memory_order_relaxed);
+		const FDecimationFirEntry* Published = Entry.Get();
+		Owned.Add(MoveTemp(Entry));
+		DecimationFirHead().store(Published, std::memory_order_release); // the taps are complete before readers can see the entry
+		return Published->Taps;
 	}
 
 	FBiquad FBiquad::FromAnalog(double Sb0, double Sb1, double Sb2, double Sa0, double Sa1, double Sa2, double SampleRate, double PrewarpHz)

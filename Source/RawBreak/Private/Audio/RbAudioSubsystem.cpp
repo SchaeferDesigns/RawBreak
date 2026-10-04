@@ -43,7 +43,6 @@ namespace RbAudioSubsystemPrivate
 	constexpr int32 NumLooseBallVoices = 4;
 	constexpr double TableRefreshSeconds = 0.5;
 	constexpr double LooseRollingTimeout = 0.25; // [s] without an OnRolling sample: the ball stopped
-	constexpr int32 MaxAnchorsPerLayer = 6;
 
 	int64 LooseKey(int32 TableIndex, int32 BallId)
 	{
@@ -260,11 +259,28 @@ void URbAudioSubsystem::CreateAmbience()
 		return;
 	}
 	const URbAudioSettings* Settings = URbAudioSettings::Get();
-	TSet<FString> AnchorsUsed;
-	auto AddLayer = [&](const FRbAmbienceEmitter& Emitter, const RbAudio::FAmbienceLayerDesc& Desc, const FVector& Location, const FString& Name)
+	// The level's audio anchors (actors tagged RbAudio_<Name>: M2-A's layout.json "audio_anchors" in the dive bar).
+	TArray<FRbAudioAnchor> Anchors;
+	const FString TagPrefix = RbAssetPaths::Tag::AudioAnchor(TEXT("")).ToString();
+	for (TActorIterator<AActor> It(World); It; ++It)
 	{
+		for (const FName& Tag : It->Tags)
+		{
+			const FString TagName = Tag.ToString();
+			if (TagName.StartsWith(TagPrefix, ESearchCase::IgnoreCase) && TagName.Len() > TagPrefix.Len())
+			{
+				Anchors.Add({TagName.RightChop(TagPrefix.Len()), It->GetActorLocation()});
+			}
+		}
+	}
+	TArray<FRbAmbiencePlacement> Placements;
+	RbPlaceAmbience(Profile, Anchors, Placements);
+	int32 AtAnchors = 0;
+	for (const FRbAmbiencePlacement& Placement : Placements)
+	{
+		const RbAudio::FAmbienceLayerDesc& Desc = Placement.Layer;
 		URbAmbienceVoiceComponent* Voice = NewObject<URbAmbienceVoiceComponent>(Owner, MakeUniqueObjectName(Owner, URbAmbienceVoiceComponent::StaticClass(),
-			FName(*FString::Printf(TEXT("RbAmb_%s"), *Name))), RF_Transient);
+			FName(*FString::Printf(TEXT("RbAmb_%s"), *Placement.Name))), RF_Transient);
 		const bool bPositional = Desc.NumChannels() == 1;
 		Voice->SetupAttachment(Owner->GetRootComponent());
 		Voice->ConfigureLayer(Desc, GetSubmix(ERbAudioBus::Ambience), bPositional ? ReverbSubmix.Get() : nullptr,
@@ -273,43 +289,13 @@ void URbAudioSubsystem::CreateAmbience()
 		Voice->SetOutputGain(GetAmbienceVoiceGain(bPositional));
 		Voice->SetReverbSendGain(AmbienceSendGain);
 		Voice->RegisterComponent();
-		Voice->SetWorldLocation(Location);
+		Voice->SetWorldLocation(Placement.LocationCm);
 		Voice->StartVoice();
 		AmbienceVoices.Add(Voice);
-	};
-	for (const FRbAmbienceEmitter& Emitter : Profile.Emitters)
-	{
-		if (Emitter.Anchor)
-		{
-			const FString AnchorName(Emitter.Anchor);
-			if (AnchorsUsed.Contains(AnchorName))
-			{
-				continue; // the level's anchors of this kind were used for the first emitter of the kind
-			}
-			TArray<AActor*> Anchors;
-			const FName Tag = RbAssetPaths::Tag::AudioAnchor(Emitter.Anchor);
-			for (TActorIterator<AActor> It(World); It; ++It)
-			{
-				if (It->ActorHasTag(Tag) && Anchors.Num() < RbAudioSubsystemPrivate::MaxAnchorsPerLayer)
-				{
-					Anchors.Add(*It);
-				}
-			}
-			if (Anchors.Num() > 0)
-			{
-				AnchorsUsed.Add(AnchorName);
-				for (int32 I = 0; I < Anchors.Num(); ++I)
-				{
-					RbAudio::FAmbienceLayerDesc Desc = Emitter.Layer;
-					Desc.Seed = RbAudio::HashMix(Emitter.Layer.Seed, static_cast<uint64>(I) + 1);
-					Desc.bStartOn = (I % 2) == 0;
-					AddLayer(Emitter, Desc, Anchors[I]->GetActorLocation(), FString::Printf(TEXT("%s%d"), *AnchorName, I));
-				}
-				continue;
-			}
-		}
-		AddLayer(Emitter, Emitter.Layer, Emitter.DefaultLocationCm, Emitter.Name);
+		AtAnchors += Placement.bAtAnchor ? 1 : 0;
 	}
+	UE_LOG(LogRbAudio, Log, TEXT("Audio v1: %d room-tone layers, %d of them at the level's RbAudio_* anchors (%d anchors in the level)"), Placements.Num(),
+		AtAnchors, Anchors.Num());
 }
 
 void URbAudioSubsystem::DestroyAmbience()
@@ -803,6 +789,22 @@ void URbAudioSubsystem::SetPausedMix(bool bPaused)
 	bPausedMix = bPaused;
 }
 
+float URbAudioSubsystem::StepMixGain(float Gain, bool bActive, double DepthDb, double AttackSeconds, double ReleaseSeconds, double Dt)
+{
+	// Linear in dB: the mix's whole depth in its stage time, both ways (a release of a -12 dB mix over 0.3 s is 40 dB/s; review M2-C:
+	// the release used a 60 dB span and was 5 x faster than audio.md 7.3).
+	const double TargetDb = bActive ? DepthDb : 0.0;
+	const double CurrentDb = RbAudio::GainToDb(FMath::Max(Gain, 1e-6f));
+	const double Seconds = FMath::Max(bActive ? AttackSeconds : ReleaseSeconds, 1e-3);
+	const double Rate = FMath::Max(FMath::Abs(DepthDb), 1.0) / Seconds;
+	double NewDb = CurrentDb + FMath::Clamp(TargetDb - CurrentDb, -Rate * Dt, Rate * Dt);
+	if (FMath::Abs(NewDb - TargetDb) < 0.01)
+	{
+		NewDb = TargetDb;
+	}
+	return NewDb >= -0.001 ? 1.0f : static_cast<float>(RbAudio::DbToGain(NewDb));
+}
+
 void URbAudioSubsystem::UpdateMixStates(double Dt)
 {
 	UWorld* World = GetWorld();
@@ -821,23 +823,15 @@ void URbAudioSubsystem::UpdateMixStates(double Dt)
 	bReplayMix = bReplay;
 
 	// Level ramps in dB (attack / release times of audio.md 7.3).
-	auto Ramp = [Dt](float& Gain, double TargetDb, double AttackSeconds, double ReleaseSeconds) -> bool
+	auto Ramp = [Dt](float& Gain, bool bActive, double DepthDb, double AttackSeconds, double ReleaseSeconds) -> bool
 	{
-		const double CurrentDb = RbAudio::GainToDb(FMath::Max(Gain, 1e-6f));
-		const double Seconds = TargetDb < CurrentDb ? AttackSeconds : ReleaseSeconds;
-		const double Rate = FMath::Abs(TargetDb) > 0.0 ? FMath::Abs(TargetDb) / FMath::Max(Seconds, 1e-3) : 60.0 / FMath::Max(Seconds, 1e-3);
-		double NewDb = CurrentDb + FMath::Clamp(TargetDb - CurrentDb, -Rate * Dt, Rate * Dt);
-		if (FMath::Abs(NewDb - TargetDb) < 0.01)
-		{
-			NewDb = TargetDb;
-		}
-		const float NewGain = NewDb >= -0.001 ? 1.0f : static_cast<float>(RbAudio::DbToGain(NewDb));
+		const float NewGain = StepMixGain(Gain, bActive, DepthDb, AttackSeconds, ReleaseSeconds, Dt);
 		const bool bChanged = NewGain != Gain;
 		Gain = NewGain;
 		return bChanged;
 	};
-	bool bChanged = Ramp(PauseGain, bPause ? Settings->PauseLevelDb : 0.0, Settings->PauseAttackSeconds, Settings->PauseReleaseSeconds);
-	bChanged |= Ramp(ReplayGain, bReplay ? Settings->ReplayAmbienceDb : 0.0, 0.3, 0.3);
+	bool bChanged = Ramp(PauseGain, bPause, Settings->PauseLevelDb, Settings->PauseAttackSeconds, Settings->PauseReleaseSeconds);
+	bChanged |= Ramp(ReplayGain, bReplay, Settings->ReplayAmbienceDb, 0.3, 0.3);
 	if (bChanged)
 	{
 		ApplyVolumes();
