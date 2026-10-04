@@ -64,19 +64,17 @@
  "spec_checks": [
   {
    "measured_m": [
-    0.0057,
-    0.3
+    0.3,
+    0.15,
+    1.62
    ],
    "spec_m": [
-    null,
-    0.3
+    0.3,
+    0.15,
+    1.62
    ],
-   "tolerance_m": 0.012,
-   "what": "face width",
-   "z_range_m": [
-    1.5350000000000001,
-    1.705
-   ]
+   "tolerance_m": 0.002,
+   "what": "printed face width x height / centre height"
   }
  ],
  "spec_id": "S19",
@@ -85,7 +83,7 @@
   0.3,
   0.15
  ],
- "tolerance_m": 0.012,
+ "tolerance_m": 0.01,
  "translucent": false,
  "triangles": 308,
  "triangles_render": 296,

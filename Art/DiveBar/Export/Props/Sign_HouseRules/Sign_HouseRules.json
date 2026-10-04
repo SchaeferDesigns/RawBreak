@@ -63,28 +63,26 @@
  "spec_checks": [
   {
    "measured_m": [
-    0.01882,
-    0.22432
+    0.216,
+    0.279,
+    1.46
    ],
    "spec_m": [
-    null,
-    0.216
+    0.216,
+    0.279,
+    1.46
    ],
-   "tolerance_m": 0.012,
-   "what": "face width",
-   "z_range_m": [
-    1.3105,
-    1.6095
-   ]
+   "tolerance_m": 0.002,
+   "what": "printed face width x height / centre height"
   }
  ],
  "spec_id": "S20",
  "target_dimensions_m": [
   0.01882,
-  0.216,
-  0.279
+  0.22432,
+  0.28425
  ],
- "tolerance_m": 0.012,
+ "tolerance_m": 0.01,
  "translucent": false,
  "triangles": 828,
  "triangles_render": 816,

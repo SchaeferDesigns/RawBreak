@@ -63,28 +63,26 @@
  "spec_checks": [
   {
    "measured_m": [
-    0.01912,
-    0.2895
+    0.279,
+    0.432,
+    1.5
    ],
    "spec_m": [
-    null,
-    0.279
+    0.279,
+    0.432,
+    1.5
    ],
-   "tolerance_m": 0.012,
-   "what": "face width",
-   "z_range_m": [
-    1.274,
-    1.726
-   ]
+   "tolerance_m": 0.002,
+   "what": "printed face width x height / centre height"
   }
  ],
  "spec_id": "M15",
  "target_dimensions_m": [
   0.01912,
-  0.279,
-  0.432
+  0.2895,
+  0.43984
  ],
- "tolerance_m": 0.012,
+ "tolerance_m": 0.01,
  "translucent": false,
  "triangles": 908,
  "triangles_render": 896,

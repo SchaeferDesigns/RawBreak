@@ -71,6 +71,14 @@ def plate(outline, x0: float, x1: float, zc: float) -> bmesh.types.BMesh:
 	return bm
 
 
+def record_face(asset: pc.Asset, bm: bmesh.types.BMesh) -> None:
+	"""Remembers the extent of the printed face (y, z in the wall plane) for the VDB-T4 face check: the asset's bounding box also
+	holds the tape that overlaps the wall, the screws and the bent corner, which are not the sign's size."""
+	ys = [vert.co.y for vert in bm.verts]
+	zs = [vert.co.z for vert in bm.verts]
+	asset.face_bounds = (min(ys), max(ys), min(zs), max(zs))
+
+
 def sheet(asset: pc.Asset, name: str, w: float, h: float, zc: float, x_fn, t: float, material: str, nu: int = 1, nv: int = 1, keep=None,
 		edge_material: str | None = None) -> None:
 	"""A printed sheet of thickness t whose front face carries the label (x_fn(u, v) = the front's distance from the wall): the front
@@ -80,6 +88,7 @@ def sheet(asset: pc.Asset, name: str, w: float, h: float, zc: float, x_fn, t: fl
 	def pt(u: float, v: float) -> Vector:
 		return Vector((x_fn(u, v), u, zc + v))
 	front = pc.surface_patch(pt, (-w / 2, w / 2), (-h / 2, h / 2), nu, nv, lab, keep)
+	record_face(asset, front)
 	asset.add(front, material, uv="none", touch=0.2)
 	shell = pc.surface_patch(pt, (-w / 2, w / 2), (-h / 2, h / 2), nu, nv, (0.0, 0.0, 1.0, 1.0), keep)
 	count = len(shell.faces)
@@ -167,6 +176,7 @@ def build_paper(asset: pc.Asset, name: str, w: float, h: float, zc: float, rng) 
 
 	lab = pc.label_rect(name)
 	sheet = pc.surface_patch(lambda u, v: Vector((x_at(u, zc + v), u, zc + v)), (-w / 2, w / 2), (-h / 2, h / 2), 10, 14, lab)
+	record_face(asset, sheet)
 	# the curl twists its quads by ~1.2 mm, more than the 0.25 mm paper: triangulate BEFORE the shell so the front and the back share
 	# one triangulation (a reversed quad splits along the other diagonal, the shells cross and bake / render as a grid of black cells)
 	bmesh.ops.triangulate(sheet, faces=sheet.faces[:], quad_method="FIXED", ngon_method="BEAUTY")
@@ -220,14 +230,23 @@ def main() -> None:
 		obj = asset.build()
 		lo, hi = asset.bounds()
 		w, h = size
-		# VDB-T4: the face size is the label's design size (the atlas cell aspect), the mounting height the spec's
-		check = asset.check_slice(zc - h / 2 - 0.01, zc + h / 2 + 0.01, (None, w), 0.012, "face width")
-		if abs((lo.z + hi.z) / 2.0 - zc) > 0.015:
-			rb_bl.fail(f"{asset_id}: centre height {(lo.z + hi.z) / 2.0:.3f}, spec {zc}")
+		# VDB-T4: the printed face is the sign's size (the label's design size: the atlas cell aspect) and hangs at the spec's mounting
+		# height; both are asserted on the face itself (+-2 mm). The bounding box is the face plus the tape lapping onto the wall, the
+		# screws and the bent corner - design additions, asserted like the stools' footprints at the mid tolerance (+-1 cm), never a
+		# loosened one.
+		fy0, fy1, fz0, fz1 = asset.face_bounds
+		face = (fy1 - fy0, fz1 - fz0)
+		for axis, have, want in (("width", face[0], w), ("height", face[1], h)):
+			if abs(have - want) > pc.HERO_TOL:
+				rb_bl.fail(f"{asset_id}: face {axis} {have:.4f} m, design {want:.4f} m (+-{pc.HERO_TOL})")
+		if abs((fz0 + fz1) / 2.0 - zc) > pc.HERO_TOL:
+			rb_bl.fail(f"{asset_id}: face centre height {(fz0 + fz1) / 2.0:.4f} m, spec {zc}")
+		check = {"what": "printed face width x height / centre height", "measured_m": [round(face[0], 5), round(face[1], 5),
+			round((fz0 + fz1) / 2.0, 5)], "spec_m": [w, h, zc], "tolerance_m": pc.HERO_TOL}
 		label_aspect = pc.label(name)["size_m"]
 		if abs(label_aspect[0] / label_aspect[1] - w / h) > 0.05:
 			rb_bl.fail(f"{asset_id}: face {w} x {h} does not keep the label aspect {label_aspect}")
-		asset.export(out, (hi.x - lo.x, w, h), tolerance=0.012, wm_res=512, collision_profile="RbVenueProp",
+		asset.export(out, tuple(hi - lo), wm_res=512, collision_profile="RbVenueProp",
 			acoustic="paper" if kind in ("paper", "cardboard") else "metal_sheet" if kind == "metal" else "plastic", pivot="wall_plane_floor",
 			external_inputs=["Cardboard002"] if kind == "cardboard" else [], meta={
 				"element": spec, "kind": kind, "face_m": [w, h], "centre_z_m": zc, "label": name, "spec_checks": [check],

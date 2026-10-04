@@ -15,7 +15,7 @@
  "asset_id": "CueRack",
  "axis_convention": "blender(x, y, z) -> unreal(x, -y, z); *_ue_m fields are already in Unreal axes",
  "bounds_max_m": [
-  0.115,
+  0.12,
   0.5,
   1.81099
  ],
@@ -58,7 +58,7 @@
  ],
  "front": "+X",
  "generator": "db_cue_rack.py",
- "geometry_sha256": "2448794c3898f7ce9f2d1a8285dc92e4bbd2ad9191c85c48b5fb0852edc11edb",
+ "geometry_sha256": "483c40f8714a8b6ca83ea069a4492bc87af19e37631fb6e57263e97e3fb4d603",
  "ledger_asset_id": "SM_DB_CueRack",
  "material_slots": [
   "MI_DB_Wood_Stained",
@@ -89,7 +89,7 @@
  "spec_checks": [
   {
    "measured_m": [
-    0.115,
+    0.12,
     1.0
    ],
    "spec_m": [
@@ -107,7 +107,7 @@
    "measured_m": [
     0.2,
     1.6,
-    0.115
+    0.12
    ],
    "spec_m": [
     0.2,
@@ -120,7 +120,7 @@
  ],
  "spec_id": "H05",
  "target_dimensions_m": [
-  0.115,
+  0.12,
   1.0,
   1.61099
  ],

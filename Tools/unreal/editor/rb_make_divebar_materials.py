@@ -36,6 +36,7 @@ Idempotent. Owner: M2-B.
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 import os
@@ -187,12 +188,46 @@ def make_default_textures() -> dict:
 	return out
 
 
+CC0_SOURCES = {"polyhaven", "ambientcg"}   # the only external sources allowed in M2 (Docs/ue-architecture.md 18.1)
+
+
+def ledger_rows(repo: str = PROJECT) -> dict:
+	"""asset_id -> [rows] over Docs/licenses/asset-ledger.csv and every package fragment Docs/licenses/ledger/*.csv."""
+	paths = [os.path.join(repo, "Docs", "licenses", "asset-ledger.csv")]
+	frag = os.path.join(repo, "Docs", "licenses", "ledger")
+	if os.path.isdir(frag):
+		paths += [os.path.join(frag, n) for n in sorted(os.listdir(frag)) if n.endswith(".csv")]
+	rows: dict = {}
+	for path in paths:
+		if os.path.exists(path):
+			with open(path, "r", encoding="utf-8", newline="") as handle:
+				for row in csv.DictReader(handle):
+					rows.setdefault((row.get("asset_id") or "").strip(), []).append(row)
+	return rows
+
+
+def cc0_ledger_problems(manifest: dict, rows: dict) -> list:
+	"""VDB-T7 for the scan textures (they are imported here, not by the mesh importer): every prepared CC0 set needs a ledger row
+	from Poly Haven / ambientCG under CC0-1.0, and nothing in the manifest may come from another source."""
+	problems = []
+	for asset_id, info in sorted(manifest.items()):
+		if info.get("source") not in CC0_SOURCES:
+			problems.append(f"{asset_id}: source {info.get('source')!r} is not Poly Haven / ambientCG")
+		found = rows.get(asset_id, [])
+		if not any(r.get("source") in CC0_SOURCES and r.get("licence") == "CC0-1.0" for r in found):
+			problems.append(f"{asset_id}: no CC0-1.0 ledger row from Poly Haven / ambientCG (python Tools/art/fetch_cc0.py writes it)")
+	return problems
+
+
 def make_cc0_textures() -> dict:
 	manifest_path = os.path.join(ART, "Textures", "CC0", "cc0_prepared.json")
 	if not os.path.exists(manifest_path):
 		rb.fail("Art/DiveBar/Textures/CC0/cc0_prepared.json missing (python Tools/art/fetch_cc0.py ... --prepare)")
 	with open(manifest_path, "r", encoding="utf-8") as handle:
 		manifest = json.load(handle)
+	problems = cc0_ledger_problems(manifest, ledger_rows())
+	if problems:
+		rb.fail("CC0 inputs refused (VDB-T7): " + "; ".join(problems))
 	out = {}
 	for asset_id, info in sorted(manifest.items()):
 		for role, filename in sorted(info["maps"].items()):
@@ -688,7 +723,7 @@ def make_glass(tex: dict, mpc) -> str:
 	g.link(g.vector("GlassTint", (0.92, 0.96, 0.94), "Glass"), to_mfp, "Transmittance Color")
 	# the UE 5.8 slab has no Thickness pin: a lone slab is SUBSTRATE_LAYER_DEFAULT_THICKNESS_CM (0.01 cm) thick, so the MFP is derived
 	# for that thickness and GlassTint is the colour of ONE crossing of the surface (an MFP derived for the real 0.3 - 4 cm made the
-	# glass and the liquids look clear); GlassThicknessCm stays documentation in the instances
+	# glass and the liquids look clear); the instances therefore carry no thickness parameter
 	g.link(g.const(0.01), to_mfp, "Thickness")
 	slab = g.slab(sss=unreal.MaterialSubSurfaceType.MSS_SIMPLE_VOLUME, albedo=(glass, "return"), f0=g.scalar("F0", 0.04, "Glass"),
 		roughness=(glass, "Roughness"), mfp=(to_mfp, "MFP"))
@@ -900,30 +935,33 @@ INSTANCES = {
 		"Roughness": 0.38, "RoughnessTexWeight": 0.4, "NormalStrength": 0.7, "CrackAmount": 1.0, "UnderColor": srgb(62, 44, 34),
 		"EdgeWearWidth": 0.4}),
 	# ---- glass and liquids ----
-	"MI_DB_Glass_Clear": (G, {"GlassTint": (0.96, 0.98, 0.97), "GlassThicknessCm": 0.3, "GlassRoughness": 0.02, "DirtAmount": 0.3,
+	# Translucency casts no shadow in UE: a drink on the bar floats. Coloured glass and the liquids cast theirs through the masked
+	# shadow path (CastShadowAsMasked: the instance's base-property override); clear glass stays shadowless (its real shadow is a
+	# faint ring with a bright caustic, closer to none than to a solid one).
+	"MI_DB_Glass_Clear": (G, {"GlassTint": (0.96, 0.98, 0.97), "GlassRoughness": 0.02, "DirtAmount": 0.3,
 		"FingerprintAmount": 0.35}),
-	"MI_DB_Glass_Amber": (G, {"GlassTint": (0.55, 0.26, 0.06), "GlassThicknessCm": 0.35, "GlassRoughness": 0.02, "DirtAmount": 0.35}),
-	"MI_DB_Glass_Green": (G, {"GlassTint": (0.28, 0.58, 0.30), "GlassThicknessCm": 0.35, "GlassRoughness": 0.02, "DirtAmount": 0.35}),
-	"MI_DB_Glass_Shelf": (G, {"GlassTint": (0.88, 0.95, 0.91), "GlassThicknessCm": 0.6, "GlassRoughness": 0.02, "DirtAmount": 0.4,
+	"MI_DB_Glass_Amber": (G, {"GlassTint": (0.55, 0.26, 0.06), "GlassRoughness": 0.02, "DirtAmount": 0.35, "CastShadowAsMasked": True}),
+	"MI_DB_Glass_Green": (G, {"GlassTint": (0.28, 0.58, 0.30), "GlassRoughness": 0.02, "DirtAmount": 0.35, "CastShadowAsMasked": True}),
+	"MI_DB_Glass_Shelf": (G, {"GlassTint": (0.88, 0.95, 0.91), "GlassRoughness": 0.02, "DirtAmount": 0.4,
 		"DustK": 1.0, "FingerprintAmount": 0.1}),
-	"MI_DB_Glass_Cooler": (G, {"GlassTint": (0.93, 0.96, 0.97), "GlassThicknessCm": 0.4, "GlassRoughness": 0.06, "DirtAmount": 0.15,
+	"MI_DB_Glass_Cooler": (G, {"GlassTint": (0.93, 0.96, 0.97), "GlassRoughness": 0.06, "DirtAmount": 0.15,
 		"FingerprintAmount": 0.3, "GrungeScaleM": 0.35}),
-	"MI_DB_Glass_Ashtray": (G, {"GlassTint": (0.78, 0.80, 0.76), "GlassThicknessCm": 1.2, "GlassRoughness": 0.05, "DirtAmount": 0.9,
+	"MI_DB_Glass_Ashtray": (G, {"GlassTint": (0.78, 0.80, 0.76), "GlassRoughness": 0.05, "DirtAmount": 0.9,
 		"FingerprintAmount": 0.6, "DustK": 0.6}),
-	"MI_DB_Plexi_Scratched": (G, {"GlassTint": (0.94, 0.94, 0.92), "GlassThicknessCm": 0.3, "GlassRoughness": 0.08, "DirtAmount": 0.6,
+	"MI_DB_Plexi_Scratched": (G, {"GlassTint": (0.94, 0.94, 0.92), "GlassRoughness": 0.08, "DirtAmount": 0.6,
 		"FingerprintAmount": 0.5}),
-	"MI_DB_Liquid_Whiskey": (G, {"GlassTint": (0.60, 0.26, 0.05), "GlassThicknessCm": 3.0, "GlassRoughness": 0.0, "DirtAmount": 0.0,
+	"MI_DB_Liquid_Whiskey": (G, {"GlassTint": (0.60, 0.26, 0.05), "GlassRoughness": 0.0, "DirtAmount": 0.0,
+		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02, "CastShadowAsMasked": True}),
+	"MI_DB_Liquid_Beer": (G, {"GlassTint": (0.80, 0.50, 0.10), "GlassRoughness": 0.0, "DirtAmount": 0.0,
+		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02, "CastShadowAsMasked": True}),
+	"MI_DB_Liquid_Clear": (G, {"GlassTint": (0.98, 0.98, 0.98), "GlassRoughness": 0.0, "DirtAmount": 0.0,
 		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02}),
-	"MI_DB_Liquid_Beer": (G, {"GlassTint": (0.80, 0.50, 0.10), "GlassThicknessCm": 4.0, "GlassRoughness": 0.0, "DirtAmount": 0.0,
-		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02}),
-	"MI_DB_Liquid_Clear": (G, {"GlassTint": (0.98, 0.98, 0.98), "GlassThicknessCm": 3.0, "GlassRoughness": 0.0, "DirtAmount": 0.0,
-		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02}),
-	"MI_DB_Liquid_Rum": (G, {"GlassTint": (0.55, 0.28, 0.10), "GlassThicknessCm": 3.0, "GlassRoughness": 0.0, "DirtAmount": 0.0,
-		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02}),
-	"MI_DB_Liquid_Red": (G, {"GlassTint": (0.75, 0.10, 0.05), "GlassThicknessCm": 3.0, "GlassRoughness": 0.0, "DirtAmount": 0.0,
-		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02}),
-	"MI_DB_Liquid_Green": (G, {"GlassTint": (0.45, 0.85, 0.55), "GlassThicknessCm": 3.0, "GlassRoughness": 0.0, "DirtAmount": 0.0,
-		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02}),
+	"MI_DB_Liquid_Rum": (G, {"GlassTint": (0.55, 0.28, 0.10), "GlassRoughness": 0.0, "DirtAmount": 0.0,
+		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02, "CastShadowAsMasked": True}),
+	"MI_DB_Liquid_Red": (G, {"GlassTint": (0.75, 0.10, 0.05), "GlassRoughness": 0.0, "DirtAmount": 0.0,
+		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02, "CastShadowAsMasked": True}),
+	"MI_DB_Liquid_Green": (G, {"GlassTint": (0.45, 0.85, 0.55), "GlassRoughness": 0.0, "DirtAmount": 0.0,
+		"FingerprintAmount": 0.0, "DustK": 0.0, "F0": 0.02, "CastShadowAsMasked": True}),
 	# ---- emissive (cd/m^2; venue-dive-bar 4.2 / 4.3) ----
 	"MI_DB_Emissive_LampBadge": (E, {"EmissiveTex": "T_DB_Labels_BC", "TileSizeM": 1.0, "EmissiveColor": K3500, "Luminance": 150.0}),
 	"MI_DB_Emissive_Bulb2700": (E, {"EmissiveColor": K2700, "Luminance": 30000.0, "OffAlbedo": (0.8, 0.8, 0.78), "CoatRoughness": 0.5}),
@@ -973,15 +1011,49 @@ def _mi(path: str, parent_path: str):
 			unreal.MaterialInstanceConstantFactoryNew())
 	MEL.set_material_instance_parent(mi, unreal.load_asset(parent_path))
 	MEL.clear_all_material_instance_parameters(mi)
+	set_cast_shadow_as_masked(mi, False)    # set_params turns it on again where INSTANCES asks for it
 	return mi
 
 
+def set_cast_shadow_as_masked(mi, enabled: bool) -> None:
+	"""The instance's base-property override 'Cast Dynamic Shadow as Masked' (translucent glass / liquids that should cast a shadow)."""
+	overrides = mi.get_editor_property("base_property_overrides")
+	overrides.set_editor_property("override_cast_dynamic_shadow_as_masked", bool(enabled))
+	overrides.set_editor_property("cast_dynamic_shadow_as_masked", bool(enabled))
+	mi.set_editor_property("base_property_overrides", overrides)
+
+
+# Instance keys that are not material parameters (handled by set_params).
+PSEUDO_KEYS = {"size:", "CastShadowAsMasked"}
+
+_PARAM_NAMES: dict = {}
+
+
+def master_parameter_names(parent) -> set:
+	"""Every scalar / vector / texture parameter name of a master (or of an instance's parent chain)."""
+	key = parent.get_path_name()
+	if key not in _PARAM_NAMES:
+		names = set()
+		for getter in (MEL.get_scalar_parameter_names, MEL.get_vector_parameter_names, MEL.get_texture_parameter_names):
+			names.update(str(n) for n in getter(parent))
+		_PARAM_NAMES[key] = names
+	return _PARAM_NAMES[key]
+
+
 def set_params(mi, params: dict, tex: dict) -> None:
+	# a misspelt key would otherwise be stored as an orphan override and silently do nothing
+	known = master_parameter_names(mi.get_editor_property("parent"))
+	unknown = sorted(k for k in params if k not in PSEUDO_KEYS and (k[4:] if k.startswith("tex:") else k) not in known)
+	if unknown:
+		rb.fail(f"{mi.get_name()}: no parameter(s) {unknown} on {mi.get_editor_property('parent').get_name()}")
 	for key, value in params.items():
 		if key == "size:":
 			size = tex.get(f"size:{value}")
 			if size and "TileSizeM" not in params:
 				MEL.set_material_instance_scalar_parameter_value(mi, "TileSizeM", float(size))
+			continue
+		if key == "CastShadowAsMasked":
+			set_cast_shadow_as_masked(mi, bool(value))
 			continue
 		if key.startswith("tex:"):
 			key, value = key[4:], value
@@ -1097,6 +1169,13 @@ def verify(paths: list) -> None:
 		mat = unreal.load_asset(f"{MAT_DIR}/{master}")
 		if "AgeBias" not in {str(n) for n in MEL.get_scalar_parameter_names(mat)} and master != "M_DB_Floor":
 			rb.fail(f"{master} lacks AgeBias")
+	# the shadow-casting translucent instances read back (the override is a struct property: a silent no-op would float the drinks)
+	for name, (_, params) in sorted(INSTANCES.items()):
+		overrides = unreal.load_asset(f"{MAT_DIR}/{name}").get_editor_property("base_property_overrides")
+		have = bool(overrides.get_editor_property("override_cast_dynamic_shadow_as_masked")) and bool(
+			overrides.get_editor_property("cast_dynamic_shadow_as_masked"))
+		if have != bool(params.get("CastShadowAsMasked", False)):
+			rb.fail(f"{name}: Cast Dynamic Shadow as Masked is {have}, INSTANCES asks for {bool(params.get('CastShadowAsMasked', False))}")
 
 
 def main() -> None:

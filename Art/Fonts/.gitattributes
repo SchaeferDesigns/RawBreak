@@ -1,0 +1,3 @@
+# The fonts and their licence files are pinned by SHA-256 (fonts.lock.json, Tools/art/fetch_fonts.py --verify): byte-exact,
+# never line-ending converted (text=auto + core.autocrlf would rewrite the licence .txt files on a Windows checkout). Owner: M2-B.
+* -text

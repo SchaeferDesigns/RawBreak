@@ -4,6 +4,7 @@
   python Tools/unreal/rbue.py py Tools/unreal/editor/rb_dev_m2b.py                    # import + checks + dev level
   python Tools/unreal/rbue.py py Tools/unreal/editor/rb_dev_m2b.py -- --import-only
   python Tools/unreal/rbue.py py Tools/unreal/editor/rb_dev_m2b.py -- --level-only
+  python Tools/unreal/rbue.py py Tools/unreal/editor/rb_dev_m2b.py -- --only CueRack Sign_CashOnly   # re-import some, then the level
   python Tools/unreal/rbue.py py Tools/unreal/editor/rb_dev_m2b.py -- --ledger-negative   # DB-0: the ledger check must refuse once
 
 Import (the M2-B side of the pipeline; M2-A's rb_import_divebar.py does the same for the level and may reuse import_asset()):
@@ -109,7 +110,9 @@ def interchange_import(fbx: str, dest: str, nanite: bool) -> None:
 	params.set_editor_property("is_automated", True)
 	params.set_editor_property("replace_existing", True)
 	params.set_editor_property("override_pipelines", [unreal.SoftObjectPath(pipeline.get_path_name())])
-	unreal.InterchangeManager.get_interchange_manager_scripted().import_asset(dest, source, params)
+	manager = unreal.InterchangeManager.get_interchange_manager_scripted()
+	manager.import_asset(dest, source, params)
+	manager.wait_until_all_tasks_done(False)  # False: wait for queued work, do not cancel it (as M2-A's importer)
 
 
 def import_asset(json_path: str, rows: dict) -> dict:
@@ -169,12 +172,17 @@ def import_asset(json_path: str, rows: dict) -> dict:
 	return meta
 
 
-def import_all() -> dict:
+def import_all(only=None) -> dict:
+	"""Imports every exported prop (or the asset ids in only)."""
 	rows = ledger_rows()
 	metas = {}
 	for path in asset_jsons():
+		if only and os.path.basename(os.path.dirname(path)) not in only:
+			continue
 		meta = import_asset(path, rows)
 		metas[meta["asset_id"]] = meta
+	if only and len(metas) != len(set(only)):
+		rb.fail(f"--only: no export for {sorted(set(only) - set(metas))}")
 	rb.log(f"imported {len(metas)} props (VDB-T4 bounds and VDB-T7 ledger checks passed)")
 	return metas
 
@@ -402,7 +410,8 @@ def props(metas: dict, rng: random.Random) -> None:
 			("Can_OldCastor", 1640.0 - 9.0, 668.0))):
 		prop(asset, (x, y, 107.0), rng.uniform(0, 360), label=f"LedgeItem_{k}", profile="RbVenueProp", metas=metas)
 	# chalk cubes on the long rails (rail top 0.791), the quarters queue on the wall-side rail near the foot-right corner (A6)
-	prop("ChalkCube", (1340.0, 491.0, 79.1), 12.0, label="Chalk_RailL", profile="RbVenueProp", metas=metas)
+	# on the flat cap, clear of the cushion (rail Y 4.754 - 4.919 incl. ~5 cm of cushion: Y 4.91 hung over the cushion's slope)
+	prop("ChalkCube", (1340.0, 482.0, 79.1), 12.0, label="Chalk_RailL", profile="RbVenueProp", metas=metas)
 	prop("ChalkCube", (1420.0, 601.8, 79.1), -20.0, label="Chalk_RailR", profile="RbVenueProp", metas=metas)
 	for s in range(3):
 		for k in range(4 + s):
@@ -677,7 +686,15 @@ def main() -> None:
 	if "--ledger-negative" in argv:
 		ledger_negative()
 		return
-	metas = load_metas() if "--level-only" in argv else import_all()
+	only = []
+	if "--only" in argv:
+		for arg in argv[argv.index("--only") + 1:]:
+			if arg.startswith("--"):
+				break
+			only.append(arg)
+	metas = load_metas()
+	if "--level-only" not in argv:
+		metas.update(import_all(only))
 	ledger_negative()
 	if "--import-only" not in argv:
 		build_level(metas)

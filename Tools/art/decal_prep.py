@@ -112,13 +112,15 @@ def polar(x, y, cx=0.0, cy=0.0):
 
 
 def normal_from_height(height: np.ndarray, strength: float) -> np.ndarray:
-	"""Sobel -> DirectX normal (green = -dh/dy in image space, rows top to bottom), RGB 0..1."""
+	"""Sobel -> DirectX normal, RGB 0..1. DirectX / Unreal: the tangent frame's +Y runs DOWN the image (rows top to bottom), so
+	n = (-dh/dcol, -dh/drow, 1): a slope rising downwards (gy > 0) tilts the normal up the image -> green BELOW 0.5 (the ambientCG
+	NormalDX / Poly Haven nor_dx maps follow it; the OpenGL sign made the decals' relief look lit from the wrong side)."""
 	h = height.astype(np.float32)
 	p = np.pad(h, 1, mode="edge")
 	gx = (p[:-2, 2:] + 2 * p[1:-1, 2:] + p[2:, 2:]) - (p[:-2, :-2] + 2 * p[1:-1, :-2] + p[2:, :-2])
 	gy = (p[2:, :-2] + 2 * p[2:, 1:-1] + p[2:, 2:]) - (p[:-2, :-2] + 2 * p[:-2, 1:-1] + p[:-2, 2:])
 	nx = -gx * strength
-	ny = gy * strength          # image rows grow downwards: +gy (height rising down) -> DirectX green positive
+	ny = -gy * strength
 	nz = np.ones_like(h)
 	inv = 1.0 / np.sqrt(nx * nx + ny * ny + nz * nz)
 	return np.stack([nx * inv * 0.5 + 0.5, ny * inv * 0.5 + 0.5, nz * inv * 0.5 + 0.5], axis=-1)

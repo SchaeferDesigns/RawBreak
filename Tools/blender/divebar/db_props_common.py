@@ -695,18 +695,126 @@ class Asset:
 		}
 		if meta:
 			data.update(meta)
-		out = Path(out_root)
-		path = rb_bl.export_asset(self.asset_id, [obj] + hulls, out, data)
-		# rb_bl counts the hull triangles too: record the render mesh alone as well.
-		js = json.loads(path.read_text(encoding="utf-8"))
-		js["bounds_with_hulls_min_m"], js["bounds_with_hulls_max_m"] = js["bounds_min_m"], js["bounds_max_m"]
-		js["bounds_min_m"] = [round(c, 5) for c in lo]
-		js["bounds_max_m"] = [round(c, 5) for c in hi]
-		js["triangles_render"] = rb_bl.triangle_count([obj])
-		js["geometry_sha256"] = geometry_hash(obj)
-		path.write_text(json.dumps(js, indent=1, sort_keys=True), encoding="utf-8")
+		path = write_export(self.asset_id, obj, hulls, Path(out_root), data, lo, hi)
 		ledger_own(f"SM_DB_{self.asset_id}", self.spec_id)
 		return path
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# export (M2-B's own: NOT rb_bl.export_asset / export_fbx)
+# --------------------------------------------------------------------------------------------------------------------
+#
+# Every M2-B asset is built in Blender axes and exported with the FBX defaults, so Interchange maps Blender (x, y, z) to Unreal
+# (x, -y, z) and the model looks the same in both (the `axis_convention` of every <Asset>.json; M2-A's importer reads its "-y" and
+# mirrors the bounds check, its level reads the *_ue_m fields as Unreal axes). That convention is frozen with the committed exports
+# and the dev / level placements. M2-A's rb_bl.py (Tools/blender/common, M2-A's file) is written for generators that build in the
+# venue frame: its export_fbx mirrors Y on export and its export_asset joins every mesh it is given into one object (the UCX hulls
+# too) and deletes the sources. Through it an M2-B asset would come out mirrored (labels read backwards), with its hulls welded into
+# the render mesh, and the generator would crash on the deleted object. So M2-B exports here and uses rb_bl only for helpers whose
+# behaviour both versions share (REPO, log, fail, args, rng, reset_scene, world_bounds, triangle_count, assert_dimensions).
+
+
+class _DeterministicFbx:
+	"""Makes Blender's FBX writer byte-reproducible for one export: a fixed CreationTimeStamp (it writes datetime.now()) and object
+	UIDs from SHA-256 instead of Python's per-process randomised str hash(), with the UID tables cleared first (they live for the
+	whole Blender process, so an asset's UIDs would otherwise depend on what was exported before it: db_build_all vs a single
+	generator). Equal geometry -> equal FBX bytes, so regenerating does not churn the LFS objects. Falls back to the plain writer
+	(and logs it) if the add-on's internals ever change."""
+
+	FIXED_TIME = (2026, 1, 1, 0, 0, 0)
+
+	def __enter__(self):
+		self.saved = None
+		try:
+			import datetime
+			from io_scene_fbx import export_fbx_bin as fbx_bin
+			from io_scene_fbx import fbx_utils
+
+			header, key_to_uuid = fbx_bin.fbx_header_elements, fbx_utils._key_to_uuid
+			fixed = datetime.datetime(*self.FIXED_TIME)
+
+			def header_fixed(root, scene_data, time=None):
+				return header(root, scene_data, fixed)
+
+			def key_to_uuid_sha(uuids, key):
+				if isinstance(key, int) and 0 <= key < 2 ** 63:
+					uuid = key
+				else:
+					uuid = int.from_bytes(hashlib.sha256(repr(key).encode("utf-8")).digest()[:8], "little") >> 1
+				if uuid > int(1e9) and uuid % int(1e9) not in uuids:
+					uuid %= int(1e9)
+				while uuid in uuids:
+					uuid += 1
+				return fbx_utils.UUID(uuid)
+
+			fbx_utils._keys_to_uuids.clear()
+			fbx_utils._uuids_to_keys.clear()
+			fbx_bin.fbx_header_elements, fbx_utils._key_to_uuid = header_fixed, key_to_uuid_sha
+			self.saved = (fbx_bin, fbx_utils, header, key_to_uuid)
+		except (ImportError, AttributeError) as error:
+			rb_bl.log(f"FBX writer internals changed ({error}): exporting without the byte-reproducibility patch")
+		return self
+
+	def __exit__(self, *exc):
+		if self.saved is not None:
+			fbx_bin, fbx_utils, header, key_to_uuid = self.saved
+			fbx_bin.fbx_header_elements, fbx_utils._key_to_uuid = header, key_to_uuid
+			fbx_utils._keys_to_uuids.clear()
+			fbx_utils._uuids_to_keys.clear()
+		return False
+
+
+def export_fbx(objects, path: Path) -> None:
+	"""FBX for Unreal in M2-B's convention (venue-dive-bar 13.4: metric, unit scale applied, modifiers applied, triangulated, FBX
+	default axes forward -Z / up Y, no leaf bones, no animation), byte-reproducible (_DeterministicFbx)."""
+	path.parent.mkdir(parents=True, exist_ok=True)
+	bpy.ops.object.select_all(action="DESELECT")
+	for obj in objects:
+		obj.select_set(True)
+	with _DeterministicFbx():
+		bpy.ops.export_scene.fbx(
+			filepath=str(path),
+			use_selection=True,
+			apply_unit_scale=True,
+			apply_scale_options="FBX_SCALE_UNITS",
+			use_mesh_modifiers=True,
+			mesh_smooth_type="FACE",
+			add_leaf_bones=False,
+			bake_anim=False,
+			use_custom_props=True,
+			use_triangles=True,
+			axis_forward="-Z",
+			axis_up="Y",
+		)
+
+
+def write_export(asset_id: str, obj, hulls: list, out_root: Path, data: dict, lo, hi) -> Path:
+	"""Writes Export/Props/<Asset>/SM_DB_<Asset>.fbx (render mesh + UCX hulls as separate objects) and <Asset>.json: the caller's
+	metadata plus bounds (render mesh: bounds_*; with the hulls: bounds_with_hulls_*), triangle counts (all objects / render mesh),
+	the geometry hash and the generator. Returns the JSON path."""
+	folder = out_root / asset_id
+	fbx = folder / f"SM_DB_{asset_id}.fbx"
+	objects = [obj] + list(hulls)
+	export_fbx(objects, fbx)
+	all_lo, all_hi = rb_bl.world_bounds(objects)
+	js = dict(data)
+	js.update({
+		"asset_id": asset_id,
+		"fbx": fbx.name,
+		"bounds_min_m": [round(c, 5) for c in lo],
+		"bounds_max_m": [round(c, 5) for c in hi],
+		"bounds_with_hulls_min_m": [round(c, 5) for c in all_lo],
+		"bounds_with_hulls_max_m": [round(c, 5) for c in all_hi],
+		"triangles": rb_bl.triangle_count(objects),
+		"triangles_render": rb_bl.triangle_count([obj]),
+		"geometry_sha256": geometry_hash(obj),
+		"generator": Path(sys.argv[sys.argv.index("--python") + 1]).name if "--python" in sys.argv else "",
+	})
+	path = folder / f"{asset_id}.json"
+	path.write_text(json.dumps(js, indent=1, sort_keys=True), encoding="utf-8")
+	rb_bl.log(f"exported {asset_id}: {js['triangles']} triangles ({js['triangles_render']} render, {len(hulls)} hulls), bounds "
+		f"{js['bounds_min_m']} .. {js['bounds_max_m']}")
+	return path
 
 
 def geometry_hash(obj) -> str:

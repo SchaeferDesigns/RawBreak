@@ -111,7 +111,8 @@ def rack(seed: int) -> pc.Asset:
 		strip = pc.bm_box((0.02, WIDTH, h), (0.01, 0.0, zc))
 		pc.bevel(strip, 0.003, 2)
 		asset.add(strip, "Wood_Stained", uv="box", grain="y")
-	rest = pc.bm_box((DEPTH - 0.01, WIDTH, 0.05), ((DEPTH - 0.01) / 2.0 + 0.005, 0.0, Z_CUP - 0.025))
+	# the butt rest is the deepest part: its front is the rack's 0.12 m protrusion (E12: to Y 7.20)
+	rest = pc.bm_box((DEPTH - 0.005, WIDTH, 0.05), ((DEPTH - 0.005) / 2.0 + 0.005, 0.0, Z_CUP - 0.025))
 	pc.bevel(rest, 0.005, 2)
 	asset.add(rest, "Wood_Stained", uv="box", grain="y", touch=0.5)
 	holder = pc.bm_box((DEPTH - 0.02, WIDTH, 0.035), ((DEPTH - 0.02) / 2.0 + 0.005, 0.0, Z_CLIP + 0.02))
@@ -196,8 +197,8 @@ def main() -> None:
 		frame_z = [vv.co.z for vv in obj.data.vertices if abs(vv.co.y) > WIDTH / 2.0 - 0.03]
 		if abs(min(frame_z) - Z_FRAME[0]) > pc.HERO_TOL or abs(max(frame_z) - Z_FRAME[1]) > pc.HERO_TOL:
 			rb_bl.fail(f"CueRack frame z {min(frame_z):.4f} .. {max(frame_z):.4f}, spec {Z_FRAME}")
-		if hi.x > DEPTH + pc.HERO_TOL:
-			rb_bl.fail(f"CueRack protrudes {hi.x:.4f} m, spec {DEPTH}")
+		if abs(hi.x - DEPTH) > pc.HERO_TOL:
+			rb_bl.fail(f"CueRack protrudes {hi.x:.4f} m, spec {DEPTH} (+-{pc.HERO_TOL})")
 		checks.append({"what": "frame z range / depth", "measured_m": [round(min(frame_z), 4), round(max(frame_z), 4), round(hi.x, 4)],
 			"spec_m": [Z_FRAME[0], Z_FRAME[1], DEPTH], "tolerance_m": pc.HERO_TOL})
 		asset.export(out, (hi.x - lo.x, hi.y - lo.y, hi.z - lo.z), pivot="wall_plane_bottom_centre", acoustic="wood_panel", meta={
