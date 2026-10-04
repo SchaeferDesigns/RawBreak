@@ -1,0 +1,31 @@
+{
+ "acoustic_material": "none",
+ "asset_id": "GB_FanBlade",
+ "bounds_max_m": [
+  0.66,
+  0.06462,
+  0.0184
+ ],
+ "bounds_min_m": [
+  0.05,
+  -0.06462,
+  -0.0184
+ ],
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Greybox",
+ "fbx": "SM_DB_GB_FanBlade.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Wood_Stained",
+  "MI_DB_Steel_Black"
+ ],
+ "mesh": "SM_DB_GB_FanBlade",
+ "notes": "ceiling-fan blade with iron (E24), pivot at the fan axis",
+ "owner": "M2-A",
+ "pivot": "center",
+ "profile": "RbVenueBlock",
+ "triangles": 24,
+ "ue_folder": "Arch/Greybox"
+}

@@ -1,0 +1,42 @@
+{
+ "acoustic_material": "glass_block",
+ "acoustic_surfaces": [
+  {
+   "area_m2": 7.8,
+   "material": "glass_block"
+  }
+ ],
+ "asset_id": "Arch_GlassBlock",
+ "bounds_max_m": [
+  -0.13,
+  4.77,
+  2.44
+ ],
+ "bounds_min_m": [
+  -0.25,
+  0.51,
+  0.61
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 1,
+ "external_inputs": [],
+ "family": "Architecture",
+ "fbx": "SM_DB_Arch_GlassBlock.fbx",
+ "frame": "venue",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_GlassBlock",
+  "MI_DB_Mortar",
+  "MI_DB_Steel_Black",
+  "MI_DB_Glass_Clear"
+ ],
+ "mesh": "SM_DB_Arch_GlassBlock",
+ "notes": "glass-block storefront infill: 150 blocks of 203 mm, clear pane for the window neons",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "priority": "mid",
+ "profile": "RbVenueBlock",
+ "translucent": false,
+ "triangles": 10908,
+ "ue_folder": "Arch"
+}

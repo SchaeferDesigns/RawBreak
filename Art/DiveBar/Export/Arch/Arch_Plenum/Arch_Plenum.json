@@ -1,0 +1,37 @@
+{
+ "acoustic_material": "steel",
+ "asset_id": "Arch_Plenum",
+ "bounds_max_m": [
+  16.46,
+  7.32,
+  3.36
+ ],
+ "bounds_min_m": [
+  0.0,
+  0.0,
+  2.77
+ ],
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Architecture",
+ "fbx": "SM_DB_Arch_Plenum.fbx",
+ "frame": "venue",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Tin_Painted",
+  "MI_DB_Steel_Zinc",
+  "MI_DB_Paint_White",
+  "MI_DB_Rubber_Black"
+ ],
+ "mesh": "SM_DB_Arch_Plenum",
+ "notes": "S9: pressed tin at 3.35 m, joists, knob-and-tube wiring above the missing tile",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "priority": "mid",
+ "profile": "RbVenueProp",
+ "tags": [
+  "RbDB_Ceiling"
+ ],
+ "triangles": 17958,
+ "ue_folder": "Arch"
+}

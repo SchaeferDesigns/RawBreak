@@ -1,0 +1,36 @@
+{
+ "acoustic_material": "none",
+ "asset_id": "GB_Box",
+ "bounds_max_m": [
+  0.5,
+  0.5,
+  0.5
+ ],
+ "bounds_min_m": [
+  -0.5,
+  -0.5,
+  -0.5
+ ],
+ "collision_hulls": 1,
+ "external_inputs": [],
+ "family": "Greybox",
+ "fbx": "SM_DB_GB_Box.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Greybox"
+ ],
+ "mesh": "SM_DB_GB_Box",
+ "notes": "unit box, centred",
+ "owner": "M2-A",
+ "pivot": "center",
+ "profile": "RbVenueBlock",
+ "target_m": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "tolerance_m": 0.001,
+ "triangles": 12,
+ "ue_folder": "Arch/Greybox"
+}

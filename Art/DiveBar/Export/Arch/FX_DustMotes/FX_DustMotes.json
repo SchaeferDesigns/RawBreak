@@ -1,0 +1,39 @@
+{
+ "acoustic_material": "none",
+ "asset_id": "FX_DustMotes",
+ "bounds_max_m": [
+  1.19921,
+  0.69996,
+  0.55008
+ ],
+ "bounds_min_m": [
+  -1.19929,
+  -0.69923,
+  -0.55005
+ ],
+ "box_m": [
+  2.4,
+  1.4,
+  1.1
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "FX",
+ "fbx": "SM_DB_FX_DustMotes.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "lods": false,
+ "material_slots": [
+  "MI_DB_FX_DustMote"
+ ],
+ "mesh": "SM_DB_FX_DustMotes",
+ "motes": 2500,
+ "notes": "dust motes in the lamp cone (4.7); material M_DBA_DustMote (rb_make_divebar_fx.py)",
+ "owner": "M2-A",
+ "pivot": "box centre",
+ "profile": "RbVenueProp",
+ "translucent": true,
+ "triangles": 5000,
+ "ue_folder": "FX"
+}

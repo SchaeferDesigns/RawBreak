@@ -1,0 +1,53 @@
+{
+ "acoustic_material": "glass",
+ "asset_id": "Neon_OldCastor",
+ "bounds_max_m": [
+  0.03,
+  2.58403,
+  1.651
+ ],
+ "bounds_min_m": [
+  -0.0925,
+  1.41429,
+  1.085
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 0,
+ "design": "Art/DiveBar/neon/N1.svg",
+ "electrodes": 4,
+ "external_inputs": [],
+ "family": "Neon",
+ "fbx": "SM_DB_Neon_OldCastor.fbx",
+ "frame": "venue",
+ "generator": "db_neon.py",
+ "material_slots": [
+  "MI_DB_Neon_ClearRed",
+  "MI_DB_Steel_Black",
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Neon_NoviolGold",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Rubber_Black",
+  "MI_DB_Steel_Zinc"
+ ],
+ "mesh": "SM_DB_Neon_OldCastor",
+ "min_bend_radius_m": 0.02,
+ "notes": "emissive tubes out of Lumen GI (the proxy rect light lights the room, 4.1); dead segments steady off (S8)",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "profile": "RbVenueProp",
+ "proxy_flux_lm": 592.1,
+ "sign": "N1",
+ "supports": 14,
+ "triangles": 9236,
+ "tube_diameter_m": 0.015,
+ "tube_flux_lm": {
+  "ClearRed": 911.1,
+  "NoviolGold": 949.1
+ },
+ "tube_flux_total_lm": 1860.2,
+ "tube_length_m": {
+  "ClearRed": 2.847,
+  "NoviolGold": 0.987
+ },
+ "ue_folder": "Lighting/Neon"
+}

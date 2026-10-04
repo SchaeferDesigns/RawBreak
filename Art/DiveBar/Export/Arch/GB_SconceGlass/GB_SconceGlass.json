@@ -1,0 +1,31 @@
+{
+ "acoustic_material": "none",
+ "asset_id": "GB_SconceGlass",
+ "bounds_max_m": [
+  0.074,
+  0.074,
+  0.089
+ ],
+ "bounds_min_m": [
+  -0.074,
+  -0.074,
+  -0.078
+ ],
+ "collision_hulls": 0,
+ "external_inputs": [],
+ "family": "Greybox",
+ "fbx": "SM_DB_GB_SconceGlass.fbx",
+ "frame": "local",
+ "generator": "db_arch.py",
+ "material_slots": [
+  "MI_DB_Glass_Frosted",
+  "MI_DB_Brass_Worn"
+ ],
+ "mesh": "SM_DB_GB_SconceGlass",
+ "notes": "booth sconce frosted globe on a brass fitter (L13-L15); pivot at the globe centre",
+ "owner": "M2-A",
+ "pivot": "center",
+ "profile": "RbVenueBlock",
+ "triangles": 572,
+ "ue_folder": "Arch/Greybox"
+}

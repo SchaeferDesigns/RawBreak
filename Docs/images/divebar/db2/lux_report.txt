@@ -1,0 +1,42 @@
+VDB-T1 lamp-only illuminance (venue-dive-bar 4.4), measured three ways:
+  1. rendered white card (this file's table): an 8 x 8 cm Lambertian card (albedo 0.80) on the point, every light group but the
+     lamp off, Lumen GI on, manual exposure; its pixels are read against 13 emissive reference cards in the same frame
+     (12.5-800 cd/m^2 lit-equivalent through calibration.json's EmissiveScale), E = pi L / 0.80;
+  2. the analytic 4.4 model on the placed bulbs and 3. the UE lights' direct light (traced), from ARbVenueInfo::ComputeLuxReport.
+
+Rendered white card:
+bed centre                 core (+0.0000, +0.0000, 0.000) m:   796.4 lux  band 750-910  ok   (card L 202.8 cd/m^2, per channel [359.6, 171.3, 53.4], card rgb [109.3, 63.9, 20.6], lux_1.png)
+rail cap side mid (-y)     core (+0.0000, -0.5905, 0.048) m:   491.0 lux  band 450-550  ok   (card L 125.0 cd/m^2, per channel [220.8, 105.7, 34.2], card rgb [77.2, 42.2, 10.7], lux_2.png)
+rail cap at a corner       core (+1.0985, -0.5905, 0.048) m:   132.4 lux  band 95-140  ok   (card L 33.7 cd/m^2, per channel [57.6, 28.9, 11.5] (extrapolated B), card rgb [22.7, 9.0, 1.6], lux_3.png)
+
+RESULT (rendered): PASS
+
+ARbVenueInfo::ComputeLuxReport:
+OK   lamp bulbs: 3 bulb light(s) in group table_lamp, 3 reflector share(s)
+INFO bulb: PointLight_0 at core (-0.4598, -0.0080, 1.0100) m, 1100 lm
+INFO bulb: PointLight_1 at core (0.0000, -0.0200, 1.0100) m, 1100 lm
+INFO bulb: PointLight_2 at core (0.4598, -0.0320, 1.0100) m, 1100 lm
+INFO lamp model: I0 = 355.9 cd (eta 0.60, cut-off 50.2 deg)
+VDB-T1 lamp-only lux (analytic 4.4 model | UE direct light of the placed lamp lights, traced) vs band:
+  bed centre                   core (+0.000, +0.000, 0.000):  827.0 ok   |  407.2 OUT    band 750-910
+  head spot                    core (-0.508, +0.000, 0.000):  664.1 ok   |  333.3 OUT    band 600-730
+  foot spot                    core (+0.508, +0.000, 0.000):  663.5 ok   |  333.0 OUT    band 600-730
+  side pocket nose (-y)        core (+0.000, -0.508, 0.000):  565.5 ok   |  293.4 OUT    band 490-610
+  rail cap side mid (-y)       core (+0.000, -0.591, 0.048):  518.5 ok   |  276.0 OUT    band 450-550
+  side pocket nose (+y)        core (+0.000, +0.508, 0.000):  533.5 ok   |  279.1 OUT    band 490-610
+  rail cap side mid (+y)       core (+0.000, +0.591, 0.048):  484.5 ok   |  260.4 OUT    band 450-550
+  rail cap end centre (head)   core (-1.099, +0.000, 0.048):  257.7 ok   |  141.7 OUT    band 220-300
+  corner pocket nose           core (-1.016, -0.508, 0.000):  214.7 ok   |  120.0 OUT    band 170-250
+  rail cap at a corner         core (-1.099, -0.591, 0.048):  117.7 ok   |   66.3 OUT    band 95-140
+  corner pocket nose           core (-1.016, +0.508, 0.000):  209.4 ok   |  117.4 OUT    band 170-250
+  rail cap at a corner         core (-1.099, +0.591, 0.048):  115.1 ok   |   65.1 OUT    band 95-140
+  rail cap end centre (foot)   core (+1.099, +0.000, 0.048):  257.4 ok   |  141.5 OUT    band 220-300
+  corner pocket nose           core (+1.016, -0.508, 0.000):  219.2 ok   |  122.0 OUT    band 170-250
+  rail cap at a corner         core (+1.099, -0.591, 0.048):  121.7 ok   |   68.2 OUT    band 95-140
+  corner pocket nose           core (+1.016, +0.508, 0.000):  205.0 ok   |  115.4 OUT    band 170-250
+  rail cap at a corner         core (+1.099, +0.591, 0.048):  111.2 ok   |   63.2 OUT    band 95-140
+OK   VDB-T1 analytic 4.4 model, every point in its band: see table above
+INFO VDB-T1 UE lights (direct only, lamp only): below the bands; Lumen adds the shade-interior bounce - the in-engine check is the rendered white card, Tools/unreal/capture_divebar.py --lux -> Docs/images/divebar/db2/lux_report.txt
+OK   VDB-T1 bed + rails minimum >= 90 lux: min 92.4, max 827.3, U0 0.11 (spec 99 / 828 / 0.12)
+INFO WPA: >= 520 lux everywhere: not met (failed by design, 4.4)
+INFO all lights (informational): bed centre 407.2 lux (direct, every visible light)

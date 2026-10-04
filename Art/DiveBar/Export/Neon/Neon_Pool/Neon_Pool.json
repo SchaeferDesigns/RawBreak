@@ -1,0 +1,52 @@
+{
+ "acoustic_material": "glass",
+ "asset_id": "Neon_Pool",
+ "bounds_max_m": [
+  14.28571,
+  7.32,
+  2.38403
+ ],
+ "bounds_min_m": [
+  13.31597,
+  7.2375,
+  1.83
+ ],
+ "cast_shadow": false,
+ "collision_hulls": 0,
+ "design": "Art/DiveBar/neon/N4.svg",
+ "electrodes": 4,
+ "external_inputs": [],
+ "family": "Neon",
+ "fbx": "SM_DB_Neon_Pool.fbx",
+ "frame": "venue",
+ "generator": "db_neon.py",
+ "material_slots": [
+  "MI_DB_Neon_ClearRed",
+  "MI_DB_Steel_Black",
+  "MI_DB_Paint_Cabinet",
+  "MI_DB_Neon_NoviolGold",
+  "MI_DB_Plastic_Black",
+  "MI_DB_Rubber_Black"
+ ],
+ "mesh": "SM_DB_Neon_Pool",
+ "min_bend_radius_m": 0.02,
+ "notes": "emissive tubes out of Lumen GI (the proxy rect light lights the room, 4.1); dead segments steady off (S8)",
+ "owner": "M2-A",
+ "pivot": "venue origin",
+ "profile": "RbVenueProp",
+ "proxy_flux_lm": 524.0,
+ "sign": "N4",
+ "supports": 9,
+ "triangles": 4064,
+ "tube_diameter_m": 0.015,
+ "tube_flux_lm": {
+  "ClearRed": 582.4,
+  "NoviolGold": 1063.8
+ },
+ "tube_flux_total_lm": 1646.2,
+ "tube_length_m": {
+  "ClearRed": 1.82,
+  "NoviolGold": 1.106
+ },
+ "ue_folder": "Lighting/Neon"
+}

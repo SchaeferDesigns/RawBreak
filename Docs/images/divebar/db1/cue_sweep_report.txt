@@ -1,0 +1,83 @@
+VDB-T3 cue-sweep statistics (venue-dive-bar 2.5, engine sweep model) - 57600 samples (5 cm x 5 deg)
+
+class                          share     2.5    diff
+free                          67.58 %   68.1  -0.52 OUT
+shortened                      4.63 %    4.9  -0.27 ok
+52                             3.91 %    2.7  +1.21 OUT
+48                             1.19 %    1.1  +0.09 ok
+none                           0.26 %    0.3  -0.04 ok
+body                           0.23 %    0.4  -0.17 ok
+reach                         22.20 %   22.6  -0.40 ok
+room-shaped (sum)             10.22 %  (2.5: about 9 %)
+
+58-in blocked with the full 0.30 m backswing, by blocker (overlapping; 2.5: right wall 6.1, cue rack 4.1, column 0.7, jukebox 0.5, back wall 0.3, back ledge 0.2, C3 shelf 0.1 %):
+  right_wall      5.83 %
+  cue_rack        4.18 %
+  column_c3       0.73 %
+  jukebox         0.43 %
+  back_wall       0.28 %
+  back_ledge      0.24 %
+  c3_shelf        0.09 %
+  chalkboard      0.03 %
+
+perpendicular thresholds: ball-centre distance from the nose for a free sweep (2.5, +-2 cm)
+  wall   58 in, backswing 0.30 m: 0.431 m (2.5: 0.432) ok
+  wall   52 in, backswing 0.30 m: 0.279 m (2.5: 0.280) ok
+  wall   48 in, backswing 0.30 m: 0.173 m (2.5: 0.174) ok
+  wall   58 in, backswing 0.10 m: 0.230 m (2.5: 0.231) ok
+  wall   52 in, backswing 0.10 m: 0.058 m (2.5: 0.059) ok
+  wall   48 in, backswing 0.10 m: 0.030 m (2.5: 0.030) ok
+  rack   58 in, backswing 0.30 m: 0.551 m (2.5: 0.552) ok
+  rack   52 in, backswing 0.30 m: 0.399 m (2.5: 0.400) ok
+  rack   48 in, backswing 0.30 m: 0.298 m (2.5: 0.299) ok
+  rack   58 in, backswing 0.10 m: 0.351 m (2.5: 0.352) ok
+  rack   52 in, backswing 0.10 m: 0.197 m (2.5: 0.198) ok
+  rack   48 in, backswing 0.10 m: 0.082 m (2.5: 0.083) ok
+  column 58 in, backswing 0.30 m: 0.614 m (2.5: 0.615) ok
+  column 52 in, backswing 0.30 m: 0.462 m (2.5: 0.463) ok
+  column 48 in, backswing 0.30 m: 0.361 m (2.5: 0.362) ok
+  column 58 in, backswing 0.10 m: 0.414 m (2.5: 0.415) ok
+  column 52 in, backswing 0.10 m: 0.262 m (2.5: 0.263) ok
+  column 48 in, backswing 0.10 m: 0.156 m (2.5: 0.157) ok
+
+foot end: frozen ball, free backswing 0.225 m (2.5: 0.224); 0.10 m off the cushion: 0.300 m (2.5: the full 0.30) ok
+jukebox (TS-4): diagonal from the head-right corner, free 58-in full-backswing sweep from 0.305 m along the diagonal
+
+scripted cases for the in-engine check (RawBreak.Functional.DiveBar.CueSweeps):
+{
+ "thresholds": {
+  "wall_58_full": 0.4309,
+  "wall_52_full": 0.2789,
+  "wall_48_full": 0.1734,
+  "wall_58_short": 0.2301,
+  "wall_52_short": 0.0578,
+  "wall_48_short": 0.0302,
+  "rack_58_full": 0.5509,
+  "rack_52_full": 0.3989,
+  "rack_48_full": 0.2976,
+  "rack_58_short": 0.3514,
+  "rack_52_short": 0.1968,
+  "rack_48_short": 0.0819,
+  "column_58_full": 0.6139,
+  "column_52_full": 0.4619,
+  "column_48_full": 0.3606,
+  "column_58_short": 0.4144,
+  "column_52_short": 0.2621,
+  "column_48_short": 0.1562
+ },
+ "foot_frozen_backswing_m": 0.2248,
+ "foot_off10_backswing_m": 0.3,
+ "jukebox": {
+  "corner_core": [
+   -1.016,
+   -0.508
+  ],
+  "direction_core": [
+   0.8944271909999159,
+   0.4472135954999579
+  ],
+  "threshold_m": 0.3051
+ }
+}
+
+RESULT: FAIL

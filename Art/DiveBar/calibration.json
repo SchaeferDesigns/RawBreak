@@ -1,0 +1,14 @@
+{
+ "EmissiveScale": 0.923,
+ "method": "venue-dive-bar 6.1: a Lambertian white card (albedo 0.80) lit to 100 cd/m^2 by a 392.7 cd point light at 1 m vs emissive cards of 50-200 cd/m^2 (M_DBA_Fallback, EmissiveScale 1), manual exposure, same tone curve; the lit card matches an emissive of 92.3 cd/m^2",
+ "pixel_values": {
+  "white_100": 143.7,
+  "emissive_50": 98.0,
+  "emissive_70.7": 123.0,
+  "emissive_100": 149.9,
+  "emissive_141.4": 174.6,
+  "emissive_200": 195.0
+ },
+ "measured_by": "Tools/unreal/capture_divebar.py --calibrate",
+ "engine": "UE 5.8.3, Substrate, Lumen HWRT"
+}

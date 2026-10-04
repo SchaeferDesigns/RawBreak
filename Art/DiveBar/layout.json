@@ -1,0 +1,330 @@
+{
+ "schema": 1,
+ "venue": "DiveBar",
+ "name": "The Low Bridge Tavern",
+ "source": "Docs/specs/venue-dive-bar.md v1.1: 2.1-2.6 (shell, elements, tight spots), 3.2 (table condition), 4.4 (lamp), 10 (audio anchors), 12.2 / 12.3 (cameras); Docs/specs/ui-ux.md 6.3 (menu stations). Venue frame V = UE world axes, metres (UE = x 100 cm). Boxes are [[x0, x1], [y0, y1], [z0, z1]]. Owner: M2-A.",
+ "seed": 1958,
+ "age": 0.80,
+
+ "shell": {
+  "main_room": {"x": [0.0, 16.46], "y": [0.0, 7.32]},
+  "ceiling_z": 2.74,
+  "structure_z": 3.35,
+  "wall_top_z": 3.45,
+  "front_wall": {"x": [-0.33, 0.0], "material": "MI_DB_Brick_PaintedGreen", "acoustic": "brick_painted"},
+  "left_wall": {"y": [-0.33, 0.0], "material": "MI_DB_Brick_PaintedGreen", "acoustic": "brick_painted"},
+  "right_wall": {"y": [7.32, 7.65], "material": "MI_DB_Brick_PaintedGreen", "acoustic": "brick_painted"},
+  "back_wall": {"x": [16.46, 16.66], "material": "MI_DB_Block_Painted", "acoustic": "block_painted"},
+  "upper_walls": {"z": [1.22, 2.74], "bar_zone_x": [0.0, 10.10], "bar_material": "MI_DB_Plaster_Cream", "pool_material": "MI_DB_Plaster_Oxblood", "note": "plaster above the wainscot: cream (nicotine) in the bar zone, oxblood in the pool room (6.3)"},
+  "paneling": {"z": [0.0, 1.22], "x": [10.10, 16.46], "walls": ["left", "right", "back"], "groove_pitch": 0.203, "material": "MI_DB_Paneling_Dark", "acoustic": "wood_panel", "note": "1970s grooved paneling near the table (H16); the dings band S10 is M2-B decal work"},
+  "baseboard": {"height": 0.10, "depth": 0.015, "material": "MI_DB_Paint_BlackSteel"},
+  "soffit": {"y": [3.48, 3.84], "z": [2.44, 2.74], "x": [0.0, 16.46], "material": "MI_DB_Plaster_Cream"},
+  "pressed_tin": {"z": 3.35, "void": {"x": [6.10, 7.32], "y": [1.22, 1.83]}, "material": "MI_DB_Tin_Painted"},
+  "ceiling_grid": {"tile": [1.22, 0.61], "origin": [0.0, 0.0], "tbar_width": 0.024, "tbar_depth": 0.035, "tile_material": "MI_DB_CeilingTile", "grid_material": "MI_DB_Paint_White", "acoustic": "ceiling_tile_mineral", "lifted_every": 12, "lifted_max_m": 0.008, "stained": 3},
+  "columns": [
+   {"id": "C1", "x": 4.57, "y": 3.66, "d": 0.114, "z": [0.0, 2.44]},
+   {"id": "C2", "x": 9.14, "y": 3.66, "d": 0.114, "z": [0.0, 2.44]},
+   {"id": "C3", "x": 13.72, "y": 3.66, "d": 0.114, "z": [0.0, 2.44]}
+  ],
+  "column_material": "MI_DB_Paint_BlackSteel",
+  "floor": {"tile": 0.305, "z": 0.0, "thickness": 0.10, "material": "MI_DB_VCT_Oxblood", "corridor_material": "MI_DB_VCT_Beige", "acoustic": "vct_on_concrete", "phys_material": "PM_RbSurface_Vct"},
+  "rear": {
+   "x": [16.66, 20.12], "outer_wall_x": [20.12, 20.32], "ceiling_z": 2.44, "ceiling_tile": [0.61, 0.61],
+   "left_wall_y": [-0.33, 0.30], "right_wall_y": [7.12, 7.65],
+   "corridor": {"x": [16.66, 20.12], "y": [0.30, 1.40]},
+   "partitions": [
+    {"id": "corridor_wall", "box": [[16.66, 20.12], [1.40, 1.52], [0.0, 2.44]]},
+    {"id": "restroom_divider", "box": [[18.24, 18.36], [1.52, 4.27], [0.0, 2.44]]},
+    {"id": "keg_wall", "box": [[16.66, 20.12], [4.27, 4.47], [0.0, 2.44]]}
+   ],
+   "rooms": {
+    "mens": {"x": [16.66, 18.24], "y": [1.52, 4.27]},
+    "womens": {"x": [18.36, 20.12], "y": [1.52, 4.27]},
+    "keg_cooler": {"x": [16.66, 20.12], "y": [4.47, 7.12]}
+   },
+   "material": "MI_DB_Block_Painted"
+  }
+ },
+
+ "openings": [
+  {"id": "E01", "name": "Storefront glass block", "wall": "front", "y": [0.51, 4.77], "z": [0.61, 2.44], "fill": "glass_block", "block": 0.203, "clear_pane": {"y": [1.32, 3.96], "z": [1.02, 1.63]}, "sill_depth": 0.30},
+  {"id": "E02", "name": "Entrance door", "wall": "front", "y": [5.64, 6.55], "z": [0.0, 2.13], "fill": "door_steel", "vision_panel": [0.25, 0.76], "push_bar": true, "transom": {"z": [2.13, 2.44], "fill": "transom_black"}},
+  {"id": "E18", "name": "Corridor opening", "wall": "back", "y": [0.30, 1.40], "z": [0.0, 2.13], "fill": "cased"},
+  {"id": "E19", "name": "Storage door EMPLOYEES ONLY", "wall": "back", "y": [4.55, 5.46], "z": [0.0, 2.13], "fill": "door_wood", "push_plate": true},
+  {"id": "E20m", "name": "Men's room door", "wall": "corridor_wall", "x": [17.00, 17.81], "z": [0.0, 2.03], "fill": "door_wood"},
+  {"id": "E20w", "name": "Women's room door", "wall": "corridor_wall", "x": [18.70, 19.51], "z": [0.0, 2.03], "fill": "door_wood"},
+  {"id": "E21", "name": "Back exit", "wall": "rear_outer", "y": [0.35, 1.25], "z": [0.0, 2.13], "fill": "door_steel", "push_bar": true}
+ ],
+
+ "tables": [
+  {"table_index": 0, "preset": "SevenFootBar", "ball_set": "OldBarOversizedCue", "location_m": [13.759, 5.427, 0.0], "yaw_deg": 0.0,
+   "bed_height_m": 0.743, "rail_top_z_m": 0.791, "outer": [[12.578, 14.940], [4.754, 6.100]], "noses": [[12.743, 14.775], [4.919, 5.935]],
+   "head_string_x": 13.251, "foot_spot": [14.267, 5.427],
+   "lamp_underside_height_m": 0.86, "lamp_footprint_core_m": {"min": [-0.650, -0.210], "max": [0.650, 0.170]},
+   "venue_kind": "DiveBar", "venue_seed": 1958, "first_career_table": false, "player_table": true,
+   "roll_off_target_azimuth_v_deg": 147.9, "roll_off_tolerance_deg": 25.0,
+   "note": "venue_seed: the first seed >= 1958 whose seeded slope rolls a ball toward the jukebox (3.2, VDB-T10), searched and checked by RawBreak.Unit.Venue.RollOffSeed (both FirstCareerTable values)"}
+ ],
+
+ "lamp": {
+  "id": "E14", "asset": "TableLamp", "centre": [13.759, 5.447], "yaw_deg": 1.5, "bulb_z": 1.753, "shade_bottom_z": 1.603, "shade_diameter": 0.36, "shade_depth": 0.23,
+  "shade_spacing": 0.46, "bar_z": 1.88, "bar_length": 1.22, "overall_length": 1.28, "chain_top_z": 2.74, "bulb_above_rim": 0.15, "cutoff_deg": 50.2, "efficiency": 0.60,
+  "note": "centre = cloth centre + 2 cm V-Y, 1.5 deg yaw (9.2); bulbs L1-L3 in lights.json"
+ },
+
+ "elements": [
+  {"id": "E01r", "name": "Radiator under the glass block", "asset": "Radiator", "box": [[0.05, 0.20], [1.5, 2.7], [0.15, 0.75]], "profile": "RbVenueBlock", "greybox_mat": "radiator", "acoustic": "steel"},
+  {"id": "E02c", "name": "Draft curtain (pushed aside)", "asset": "DraftCurtain", "box": [[0.08, 0.26], [6.55, 6.98], [0.02, 2.30]], "profile": "RbVenueProp", "greybox_mat": "velour", "acoustic": "fabric_curtain"},
+  {"id": "E02m", "name": "Walk-off mat", "asset": "WalkOffMat", "box": [[0.10, 1.30], [5.55, 6.65], [0.0, 0.012]], "profile": "RbVenueProp", "greybox_mat": "rubber_mat", "acoustic": "rubber_mat"},
+  {"id": "E03", "name": "ATM Tellerline", "asset": "ATM", "box": [[0.45, 0.95], [6.90, 7.32], [0.0, 1.45]], "profile": "RbVenueBlock", "greybox_mat": "atm", "facing": "-Y",
+   "parts": [{"shape": "box", "box": [[0.52, 0.88], [6.885, 6.90], [0.98, 1.24]], "mat": "atm_screen"}]},
+  {"id": "E04", "name": "Back bar", "asset": "BackBar", "box": [[1.83, 9.45], [0.0, 0.66], [0.0, 2.60]], "profile": "RbVenueBlock", "greybox_mat": "dark_wood", "acoustic": "wood_panel",
+   "parts": [
+    {"shape": "box", "box": [[1.83, 9.45], [0.0, 0.62], [0.0, 0.91]], "mat": "dark_wood"},
+    {"shape": "box", "box": [[1.80, 9.48], [0.0, 0.66], [0.91, 0.95]], "mat": "bar_top"},
+    {"shape": "box", "box": [[1.83, 9.45], [0.0, 0.03], [1.10, 2.20]], "mat": "mirror"},
+    {"shape": "box", "box": [[1.83, 9.45], [0.0, 0.30], [1.36, 1.372]], "mat": "glass"},
+    {"shape": "box", "box": [[1.83, 9.45], [0.0, 0.30], [1.64, 1.652]], "mat": "glass"},
+    {"shape": "box", "box": [[1.83, 9.45], [0.0, 0.30], [1.92, 1.932]], "mat": "glass"},
+    {"shape": "box", "box": [[1.78, 1.83], [0.0, 0.34], [0.95, 2.62]], "mat": "dark_wood"},
+    {"shape": "box", "box": [[9.45, 9.50], [0.0, 0.34], [0.95, 2.62]], "mat": "dark_wood"},
+    {"shape": "box", "box": [[1.78, 9.50], [0.0, 0.34], [2.20, 2.24]], "mat": "dark_wood"},
+    {"shape": "box", "box": [[1.95, 5.95], [0.0, 0.26], [2.24, 2.60]], "mat": "dark_wood"}
+   ]},
+  {"id": "E04c3", "name": "3-door back-bar cooler", "asset": "Cooler_3Door", "box": [[2.20, 4.03], [0.02, 0.63], [0.06, 0.86]], "profile": "RbVenueBlock", "greybox_mat": "cooler_body",
+   "parts": [{"shape": "box", "box": [[2.24, 3.99], [0.63, 0.645], [0.10, 0.82]], "mat": "cooler_glass"}]},
+  {"id": "E04c2", "name": "2-door back-bar cooler", "asset": "Cooler_2Door", "box": [[7.30, 8.50], [0.02, 0.63], [0.06, 0.86]], "profile": "RbVenueBlock", "greybox_mat": "cooler_body",
+   "parts": [{"shape": "box", "box": [[7.34, 8.46], [0.63, 0.645], [0.10, 0.82]], "mat": "cooler_glass"}]},
+  {"id": "E04p", "name": "POS register", "asset": "POS", "box": [[5.10, 5.50], [0.25, 0.60], [0.95, 1.25]], "profile": "RbVenueProp", "greybox_mat": "black_plastic",
+   "parts": [{"shape": "box", "box": [[5.15, 5.45], [0.60, 0.61], [1.02, 1.22]], "mat": "pos_screen"}]},
+  {"id": "E04t", "name": "TV-1 55in (bar)", "asset": "TV_55", "box": [[6.19, 7.41], [0.30, 0.40], [1.95, 2.66]], "profile": "RbVenueBlock", "greybox_mat": "black_plastic",
+   "parts": [{"shape": "box", "box": [[6.21, 7.39], [0.40, 0.405], [1.97, 2.64]], "mat": "tv_screen"}, {"shape": "box", "box": [[6.76, 6.84], [0.33, 0.37], [2.66, 2.74]], "mat": "black_steel"}]},
+  {"id": "E05", "name": "Bartender aisle rubber mats", "asset": "BarMats", "box": [[1.95, 9.30], [0.70, 1.55], [0.0, 0.015]], "profile": "RbVenueProp", "greybox_mat": "rubber_mat", "acoustic": "rubber_mat", "phys_material": "PM_RbSurface_Rubber"},
+  {"id": "E06", "name": "Bar counter", "asset": "BarCounter", "box": [[1.83, 9.75], [1.60, 2.39], [0.0, 1.07]], "profile": "RbVenueBlock", "greybox_mat": "plank_wall", "acoustic": "wood_panel", "phys_material": "PM_RbSurface_Wood",
+   "parts": [
+    {"shape": "box", "box": [[1.83, 9.75], [1.60, 2.13], [0.0, 1.03]], "mat": "plank_wall"},
+    {"shape": "box", "box": [[1.83, 9.75], [2.10, 2.13], [0.0, 0.10]], "mat": "black_rubber"},
+    {"shape": "box", "box": [[1.80, 9.78], [1.58, 2.34], [1.03, 1.07]], "mat": "bar_top"},
+    {"shape": "cyl_x", "center": [5.79, 2.335, 1.055], "radius": 0.052, "length": 7.96, "mat": "vinyl_oxblood"},
+    {"shape": "cyl_x", "center": [5.79, 2.30, 0.20], "radius": 0.0255, "length": 7.80, "mat": "brass"}
+   ]},
+  {"id": "E06pop", "name": "Popcorn machine", "asset": "PopcornMachine", "box": [[1.90, 2.40], [1.70, 2.05], [1.07, 1.62]], "profile": "RbVenueProp", "greybox_mat": "popcorn_glass",
+   "parts": [{"shape": "box", "box": [[1.90, 2.40], [1.70, 2.05], [1.07, 1.13]], "mat": "red_paint"}, {"shape": "box", "box": [[1.90, 2.40], [1.70, 2.05], [1.56, 1.62]], "mat": "red_paint"}, {"shape": "box", "box": [[1.92, 2.38], [1.72, 2.03], [1.13, 1.56]], "mat": "popcorn_glass"}]},
+  {"id": "E06tap", "name": "Beer tap tower (6 handles)", "asset": "TapTower", "box": [[4.90, 5.50], [1.62, 1.80], [1.07, 1.52]], "profile": "RbVenueProp", "greybox_mat": "chrome",
+   "parts": [{"shape": "box", "box": [[4.92, 5.48], [1.66, 1.76], [1.30, 1.38]], "mat": "chrome"}, {"shape": "cyl_z", "center": [5.05, 1.71, 1.18], "radius": 0.025, "length": 0.22, "mat": "chrome"}, {"shape": "cyl_z", "center": [5.35, 1.71, 1.18], "radius": 0.025, "length": 0.22, "mat": "chrome"}]},
+  {"id": "E07", "name": "Bar stools #1-#10", "asset": "BarStool", "variants": ["A", "B", "C"], "array": {"x0": 2.30, "dx": 0.70, "count": 10, "y": 2.62}, "seat_z": 0.76, "seat_d": 0.38, "jitter_m": 0.03, "yaw_jitter_deg": 25.0, "profile": "RbVenueBlock", "greybox_mat": "vinyl_oxblood", "acoustic": "vinyl_upholstery", "special": {"10": "Deacon's stool (brass plate RESERVED - DEACON - SINCE 1979)"}},
+  {"id": "E08", "name": "Booths B1-B3", "asset": "Booth", "table_asset": "BoothTable", "sets": [[2.13, 4.06], [4.06, 5.99], [5.99, 7.92]], "y": [6.25, 7.32], "seat_z": 0.46, "back_top_z": 1.07, "seat_depth": 0.51, "back_thickness": 0.075, "table": {"size": [0.76, 1.07], "z": 0.76}, "profile": "RbVenueBlock", "greybox_mat": "vinyl_oxblood", "acoustic": "vinyl_upholstery"},
+  {"id": "E08s", "name": "Booth sconces", "asset": "Sconce", "points": [[3.095, 7.22, 1.50], [5.025, 7.22, 1.50], [6.955, 7.22, 1.50]], "profile": "RbVenueProp", "greybox_mat": "frosted_glass"},
+  {"id": "E08c", "name": "Beer clock above B2 (Hollenbeck Light)", "asset": "BeerClock", "box": [[4.84, 5.20], [7.25, 7.32], [1.85, 2.20]], "profile": "RbVenueProp", "greybox_mat": "clock_face",
+   "parts": [{"shape": "box", "box": [[4.84, 5.20], [7.25, 7.32], [1.85, 2.20]], "mat": "frame_black"}, {"shape": "box", "box": [[4.865, 5.175], [7.245, 7.25], [1.87, 2.18]], "mat": "clock_face"}]},
+  {"id": "E08w", "name": "Polaroid and flyer wall (S14)", "asset": "PolaroidWall", "box": [[6.00, 8.50], [7.30, 7.32], [1.20, 2.40]], "profile": "RbVenueProp", "greybox_mat": "paper", "scatter": {"count": 44, "size": [0.089, 0.108], "flyers": 6, "flyer_size": [0.216, 0.279]}},
+  {"id": "E09", "name": "Dart machine Hawkline 360", "asset": "DartMachine", "box": [[8.57, 9.23], [6.66, 7.32], [0.0, 2.13]], "profile": "RbVenueBlock", "greybox_mat": "dart_cabinet", "board": {"face_y": 7.02, "bull_z": 1.73},
+   "parts": [{"shape": "box", "box": [[8.57, 9.23], [6.66, 7.32], [0.0, 1.10]], "mat": "dart_cabinet"}, {"shape": "box", "box": [[8.57, 9.23], [7.02, 7.32], [1.10, 1.90]], "mat": "dart_cabinet"}, {"shape": "box", "box": [[8.62, 9.18], [6.99, 7.02], [1.47, 1.99]], "mat": "dart_board"}, {"shape": "box", "box": [[8.57, 9.23], [6.80, 7.32], [1.90, 2.13]], "mat": "dart_cabinet"}, {"shape": "box", "box": [[8.60, 9.20], [6.795, 6.80], [1.92, 2.11]], "mat": "dart_marquee"}]},
+  {"id": "E09t", "name": "Dart throw line tape", "asset": "DartThrowLine", "box": [[8.60, 9.20], [4.555, 4.605], [0.0, 0.002]], "profile": "RbVenueProp", "greybox_mat": "tape"},
+  {"id": "E10", "name": "Jukebox Marquee Starlite CD-100", "asset": "Jukebox", "box": [[10.90, 11.70], [6.62, 7.32], [0.0, 1.47]], "profile": "RbVenueBlock", "greybox_mat": "jukebox_body", "facing": "-Y",
+   "parts": [{"shape": "box", "box": [[10.90, 11.70], [6.62, 7.32], [0.0, 0.90]], "mat": "jukebox_body"}, {"shape": "box", "box": [[10.93, 11.67], [6.64, 7.32], [0.90, 1.47]], "mat": "jukebox_body"}, {"shape": "box", "box": [[11.00, 11.60], [6.605, 6.62], [0.20, 0.80]], "mat": "jukebox_panel"}, {"shape": "box", "box": [[11.00, 11.60], [6.625, 6.64], [0.95, 1.40]], "mat": "jukebox_strips"}]},
+  {"id": "E11", "name": "House rules + queue chalkboard (score slate)", "asset": "Chalkboard", "box": [[12.30, 13.20], [7.27, 7.32], [1.15, 1.90]], "profile": "RbVenueBlock", "greybox_mat": "chalkboard",
+   "parts": [{"shape": "box", "box": [[12.30, 13.20], [7.285, 7.32], [1.15, 1.90]], "mat": "dark_wood"}, {"shape": "box", "box": [[12.33, 13.17], [7.28, 7.29], [1.18, 1.87]], "mat": "chalkboard"}, {"shape": "box", "box": [[12.33, 13.17], [7.24, 7.29], [1.13, 1.16]], "mat": "dark_wood"}]},
+  {"id": "E12", "name": "Wall cue rack", "asset": "CueRack", "box": [[13.30, 14.30], [7.20, 7.32], [0.25, 1.60]], "profile": "RbVenueBlock", "greybox_mat": "stained_wood", "cues": 8,
+   "parts": [{"shape": "box", "box": [[13.30, 14.30], [7.29, 7.32], [0.25, 0.40]], "mat": "stained_wood"}, {"shape": "box", "box": [[13.30, 14.30], [7.24, 7.32], [1.40, 1.46]], "mat": "stained_wood"}, {"shape": "box", "box": [[13.30, 13.34], [7.20, 7.32], [0.25, 1.60]], "mat": "stained_wood"}, {"shape": "box", "box": [[14.26, 14.30], [7.20, 7.32], [0.25, 1.60]], "mat": "stained_wood"}]},
+  {"id": "E15", "name": "Column C3 drink shelf", "asset": "ColumnShelf", "center": [13.72, 3.66], "radius": 0.20, "z": [1.10, 1.12], "hook_z": 1.40, "profile": "RbVenueBlock", "greybox_mat": "plywood_painted", "acoustic": "wood_panel"},
+  {"id": "E16", "name": "Back ledge (drink rail)", "asset": "BackLedge", "box": [[16.26, 16.46], [5.60, 7.10], [1.032, 1.07]], "profile": "RbVenueBlock", "greybox_mat": "stained_wood", "phys_material": "PM_RbSurface_Wood"},
+  {"id": "E16t", "name": "TV-2 43in (pool room)", "asset": "TV_43", "box": [[16.36, 16.46], [5.90, 6.85], [1.95, 2.50]], "profile": "RbVenueBlock", "greybox_mat": "black_plastic", "facing": "-X",
+   "parts": [{"shape": "box", "box": [[16.355, 16.36], [5.92, 6.83], [1.97, 2.48]], "mat": "tv_screen"}]},
+  {"id": "E17", "name": "Left-wall ledge", "asset": "WallLedge", "box": [[10.40, 15.80], [0.0, 0.25], [1.032, 1.07]], "profile": "RbVenueBlock", "greybox_mat": "stained_wood", "phys_material": "PM_RbSurface_Wood"},
+  {"id": "E17s", "name": "Spectator stools", "asset": "SpectatorStool", "points": [[11.2, 0.55], [12.6, 0.55], [14.0, 0.55]], "seat_z": 0.76, "seat_d": 0.36, "profile": "RbVenueBlock", "greybox_mat": "stained_wood"},
+  {"id": "E22", "name": "Payphone (dead, OUT OF ORDER 2011)", "asset": "Payphone", "box": [[17.25, 17.55], [0.30, 0.45], [0.95, 1.65]], "profile": "RbVenueBlock", "greybox_mat": "payphone"},
+  {"id": "E23", "name": "Ceiling troffers 2x4 ft (Lights-Up only)", "asset": "Troffer", "cells": [[3.05, 1.525], [6.71, 5.795], [11.59, 1.525], [15.25, 5.795]], "size": [1.22, 0.61], "depth": 0.11, "ceiling": true, "profile": "RbVenueProp", "greybox_mat": "troffer_lens"},
+  {"id": "E24", "name": "Ceiling fan (40 rpm, blades cast no shadow)", "asset": "CeilingFan", "center": [3.0, 5.2], "blade_z": 2.30, "blades": 4, "diameter": 1.32, "rpm": 40.0, "ceiling": true, "profile": "RbVenueProp", "greybox_mat": "dark_wood"},
+  {"id": "S1", "name": "LOW CLEARANCE 10'-6\" road sign over the corridor opening", "asset": "Sign_LowClearance", "box": [[16.42, 16.46], [0.40, 1.30], [2.18, 2.58]], "profile": "RbVenueProp", "greybox_mat": "sign_yellow"},
+  {"id": "M16d", "name": "HVAC diffusers", "asset": "HvacDiffuser", "cells": [[2.135, 4.575], [8.845, 2.745], [8.845, 6.405], [12.505, 1.525], [15.555, 2.745]], "size": [0.61, 0.61], "depth": 0.04, "ceiling": true, "profile": "RbVenueProp", "greybox_mat": "diffuser"},
+  {"id": "C02", "name": "Back-bar bottles (greybox scatter until M2-B's lathe library)", "asset": "Bottle", "shelves_z": [0.95, 1.372, 1.652, 1.932], "x": [1.95, 9.35], "y": [0.06, 0.26], "spacing": [0.085, 0.13], "skip_x": [[6.10, 7.50]], "profile": "RbVenueProp", "greybox_mat": "bottle"}
+ ],
+
+ "hero_props": [
+  {"id": "H06a", "asset": "ChalkCube", "at": [13.30, 4.836, 0.791], "yaw_deg": 17.0, "note": "chalk on the left (column-side) rail cap (H06)"},
+  {"id": "H06b", "asset": "ChalkCube", "at": [14.20, 6.018, 0.791], "yaw_deg": -8.0, "note": "chalk on the right (wall-side) rail cap"},
+  {"id": "H06c", "asset": "ChalkCube", "at": [13.84, 3.60, 1.12], "yaw_deg": 33.0, "note": "chalk on the C3 shelf"},
+  {"id": "H06d", "asset": "ChalkCube", "at": [14.05, 5.08, 0.0], "yaw_deg": 61.0, "note": "chalk under the table"},
+  {"id": "C08", "asset": "Ashtray_Glass", "at": [13.62, 3.54, 1.12], "note": "the old glass ashtray as the coin dish on the C3 shelf (S5)"},
+  {"id": "H14a", "asset": "Glass_Pint_Beer", "at": [13.60, 3.76, 1.12], "note": "the opponent's pint on the C3 shelf (W1, A7)"},
+  {"id": "H14b", "asset": "Glass_Pint_Beer", "at": [12.66, 4.93, 0.791], "note": "a pint left on the head rail (A7, bad etiquette)"},
+  {"id": "H14c", "asset": "Can_LanternFlats", "at": [16.36, 6.05, 1.07], "yaw_deg": 40.0, "note": "a can on the back ledge (W2)"},
+  {"id": "H14d", "asset": "Glass_Rocks", "at": [16.34, 6.55, 1.07], "note": "a rocks glass on the back ledge"},
+  {"id": "H14e", "asset": "Glass_Pint", "at": [8.52, 1.93, 1.07], "note": "an empty pint on the bar at Deacon's stool (V02 foreground)"},
+  {"id": "H14f", "asset": "Bottle_OldCastor", "at": [3.66, 1.95, 1.07], "yaw_deg": 70.0, "note": "Ray's beer at stool #3"},
+  {"id": "H07a", "asset": "Coin_Quarter", "at": [14.36, 6.018, 0.791], "stack": 6, "stack_step_m": 0.00175, "note": "queue quarters on the rail (A6, HF-76)"},
+  {"id": "H07b", "asset": "Coin_Quarter", "at": [14.44, 6.018, 0.791], "stack": 6, "stack_step_m": 0.00175},
+  {"id": "H07c", "asset": "Coin_Quarter", "at": [14.52, 6.018, 0.791], "stack": 4, "stack_step_m": 0.00175}
+ ],
+
+ "decor": [
+  {"id": "D01", "name": "Stan behind the bar, 1958 (S2)", "wall": "left", "at": [1.20, 1.62], "size": [0.30, 0.38], "kind": "photo", "frame": "black", "border": 0.035},
+  {"id": "D02", "name": "Band flyer", "wall": "left", "at": [9.95, 1.55], "size": [0.28, 0.40], "kind": "poster", "tilt_deg": 1.5},
+  {"id": "D03", "name": "Framed brewery poster", "wall": "left", "at": [11.05, 1.72], "size": [0.46, 0.62], "kind": "poster", "frame": "black"},
+  {"id": "D04", "name": "League team photo 1987", "wall": "left", "at": [12.35, 1.62], "size": [0.55, 0.40], "kind": "photo", "frame": "wood", "border": 0.04},
+  {"id": "D05", "name": "Karaoke Thursday poster", "wall": "left", "at": [13.55, 1.72], "size": [0.43, 0.56], "kind": "poster", "tilt_deg": -2.0},
+  {"id": "D06", "name": "Framed photo, league night", "wall": "left", "at": [14.70, 1.60], "size": [0.40, 0.50], "kind": "photo", "frame": "black"},
+  {"id": "D07", "name": "Lost-dog flyer", "wall": "left", "at": [15.60, 1.75], "size": [0.22, 0.30], "kind": "poster", "tilt_deg": 3.0},
+  {"id": "D08", "name": "Walleye plaque stand-in above B1 (M13)", "wall": "right", "at": [3.10, 1.95], "size": [0.62, 0.24], "kind": "photo", "frame": "wood", "border": 0.05},
+  {"id": "D09", "name": "Band gig poster", "wall": "right", "at": [9.95, 1.60], "size": [0.45, 0.60], "kind": "poster", "tilt_deg": -1.0},
+  {"id": "D10", "name": "Framed photo, 1996 jukebox delivery", "wall": "right", "at": [10.45, 2.05], "size": [0.32, 0.25], "kind": "photo", "frame": "gold"},
+  {"id": "D11", "name": "League night poster", "wall": "right", "at": [14.75, 1.55], "size": [0.42, 0.56], "kind": "poster"},
+  {"id": "D12", "name": "Framed photo, 2019 champions", "wall": "right", "at": [15.55, 1.65], "size": [0.50, 0.38], "kind": "photo", "frame": "black"},
+  {"id": "D13", "name": "NO SMOKING - Ohio law sign (S5)", "wall": "right", "at": [1.60, 1.60], "size": [0.20, 0.26], "kind": "sign_white"},
+  {"id": "D14", "name": "Poster by the corridor", "wall": "back", "at": [1.85, 1.35], "size": [0.40, 0.55], "kind": "poster", "tilt_deg": 1.0},
+  {"id": "D15", "name": "Poster by the storage door", "wall": "back", "at": [3.95, 1.30], "size": [0.45, 0.60], "kind": "poster"},
+  {"id": "D16", "name": "League standings (framed)", "wall": "back", "at": [4.00, 2.05], "size": [0.40, 0.30], "kind": "poster", "frame": "black"},
+  {"id": "D17", "name": "EMPLOYEES ONLY sign on the storage door", "wall": "back", "at": [5.005, 1.62], "size": [0.30, 0.10], "kind": "sign_red"},
+  {"id": "D18", "name": "CASH ONLY - ATM INSIDE (S19)", "wall": "front", "at": [5.25, 1.70], "size": [0.30, 0.22], "kind": "sign_white"},
+  {"id": "D19", "name": "Poster above the ATM", "wall": "front", "at": [7.05, 1.85], "size": [0.36, 0.48], "kind": "poster", "tilt_deg": -1.5},
+  {"id": "D20", "name": "Corridor flyer", "wall": "corridor_wall", "at": [16.85, 1.45], "size": [0.22, 0.30], "kind": "poster", "tilt_deg": 4.0},
+  {"id": "D21", "name": "Corridor poster between the restroom doors", "wall": "corridor_wall", "at": [18.25, 1.50], "size": [0.40, 0.55], "kind": "poster"},
+  {"id": "D22", "name": "Corridor flyer", "wall": "corridor_wall", "at": [19.80, 1.40], "size": [0.22, 0.30], "kind": "poster", "tilt_deg": -3.0},
+  {"id": "D23", "name": "Flyer by the payphone", "wall": "corridor_left", "at": [17.85, 1.55], "size": [0.22, 0.30], "kind": "poster", "tilt_deg": 2.0},
+  {"id": "D24", "name": "Poster in the corridor", "wall": "corridor_left", "at": [18.95, 1.45], "size": [0.30, 0.42], "kind": "poster"}
+ ],
+
+ "neon": {
+  "note": "Neon signs N1-N5 (venue-dive-bar 4.3, 5.2 M07; designs Art/DiveBar/neon/N*.svg, geometry Tools/blender/divebar/db_neon.py). center = middle of the tube plane (V frame, m); right = the reading direction as seen from the sign's front; front = the direction the lettering faces (N1 / N2 face the street and read mirrored from inside, R8); mount window = black frame on chains in the clear pane's reveal, wall = standoffs + frame against the wall plane.",
+  "signs": [
+   {"id": "N1", "asset": "Neon_OldCastor", "center": [-0.085, 2.00, 1.325], "right": [0, 1, 0], "front": [-1, 0, 0], "mount": "window", "hang_z": 1.66, "gases": ["ClearRed", "NoviolGold"]},
+   {"id": "N2", "asset": "Neon_Open", "center": [-0.085, 3.42, 1.325], "right": [0, 1, 0], "front": [-1, 0, 0], "mount": "window", "hang_z": 1.66, "gases": ["ClearRed", "StdBlue"]},
+   {"id": "N3", "asset": "Neon_Hollenbeck", "center": [8.50, 0.075, 2.45], "right": [1, 0, 0], "front": [0, 1, 0], "mount": "wall", "wall": 0.0, "gases": ["StdBlue", "White"]},
+   {"id": "N4", "asset": "Neon_Pool", "center": [13.80, 7.245, 2.175], "right": [-1, 0, 0], "front": [0, -1, 0], "mount": "wall", "wall": 7.32, "gases": ["ClearRed", "NoviolGold"]},
+   {"id": "N5", "asset": "Neon_LanternFlats", "center": [16.385, 2.90, 1.675], "right": [0, 1, 0], "front": [-1, 0, 0], "mount": "wall", "wall": 16.46, "gases": ["CobaltBlue", "RubyRed"]}
+  ]
+ },
+
+ "player_start": {"location": [12.20, 5.43, 1.00], "yaw_deg": 0.0},
+
+ "ball_return": {"id": "RbBallReturn_BehindBar", "box": [[1.83, 9.75], [0.62, 1.60], [0.0, 0.35]], "note": "13.5 (4): a loose ball that ends behind the bar is handed back by Terri"},
+
+ "kick_plates": [
+  {"id": "KP_Radiator", "box": [[0.0, 0.20], [1.50, 2.70], [0.0, 0.15]]},
+  {"id": "KP_Cooler3", "box": [[2.20, 4.03], [0.58, 0.64], [0.0, 0.08]]},
+  {"id": "KP_Cooler2", "box": [[7.30, 8.50], [0.58, 0.64], [0.0, 0.08]]},
+  {"id": "KP_Jukebox", "box": [[10.88, 11.72], [6.60, 7.32], [0.0, 0.10]]},
+  {"id": "KP_ATM", "box": [[0.43, 0.97], [6.88, 7.32], [0.0, 0.10]]}
+ ],
+
+ "npc_markers": [
+  {"id": "W1", "name": "Column C3 shelf (opponent waiting spot)", "location": [13.72, 3.90, 0.0], "yaw_deg": 90.0},
+  {"id": "W2", "name": "Back ledge (hustler, money nights)", "location": [16.10, 6.40, 0.0], "yaw_deg": 180.0},
+  {"id": "W3a", "name": "Left-wall ledge stool 1", "location": [11.2, 0.55, 0.0], "yaw_deg": 90.0},
+  {"id": "W3b", "name": "Left-wall ledge stool 2", "location": [12.6, 0.55, 0.0], "yaw_deg": 90.0},
+  {"id": "W3c", "name": "Left-wall ledge stool 3", "location": [14.0, 0.55, 0.0], "yaw_deg": 90.0},
+  {"id": "W4", "name": "Stool #10 (Deacon, mentor)", "location": [8.60, 2.62, 0.0], "yaw_deg": 30.0},
+  {"id": "Ray", "name": "Stool #3 (Ray watches TV-1)", "location": [3.70, 2.62, 0.0], "yaw_deg": -90.0},
+  {"id": "Bartender", "name": "Terri behind the bar", "location": [6.0, 1.10, 0.0], "yaw_deg": 90.0}
+ ],
+
+ "chore_anchors": [
+  {"id": "A1", "name": "Coin slide, foot-end face", "location": [14.95, 5.427, 0.62]},
+  {"id": "A2", "name": "Ball tray below the trap window", "location": [14.95, 5.43, 0.375]},
+  {"id": "A3", "name": "Cue-ball return cup (foot-end apron, wall side)", "location": [14.93, 5.98, 0.42]},
+  {"id": "A4", "name": "Coin door (wall-side face)", "location": [14.325, 6.10, 0.50]},
+  {"id": "A5", "name": "Triangle rack hook under the C3 shelf", "location": [13.72, 3.78, 1.40]},
+  {"id": "A6", "name": "Quarters on the rail (right rail cap, foot-right)", "location": [14.45, 6.02, 0.791]},
+  {"id": "A7", "name": "Drink spots (C3 shelf, back ledge, head rail)", "location": [13.72, 3.90, 1.12]}
+ ],
+
+ "traffic_paths": {
+  "P1": [[0.6, 6.1], [2.0, 3.8], [9.8, 3.8]],
+  "P2": [[9.8, 3.8], [12.0, 2.2], [15.5, 1.8], [16.56, 0.85]],
+  "P3": [[9.45, 1.9], [12.2, 4.4], [15.3, 4.4], [15.4, 5.4]],
+  "P4": [[5.0, 5.9], [5.0, 2.8]],
+  "P5": [[9.45, 1.9], [12.0, 4.3], [13.7, 4.35], [16.0, 4.6], [16.56, 5.0]]
+ },
+
+ "audio_anchors": [
+  {"anchor": "RoomTone", "location": [8.845, 2.745, 2.72], "note": "HVAC diffuser (M16)"},
+  {"anchor": "RoomTone2", "location": [12.505, 1.525, 2.72]},
+  {"anchor": "CoolerCompressor1", "location": [3.11, 0.30, 0.20]},
+  {"anchor": "CoolerCompressor2", "location": [7.90, 0.30, 0.20]},
+  {"anchor": "IceMachine", "location": [17.50, 5.00, 0.90], "note": "behind the storage door E19"},
+  {"anchor": "Jukebox", "location": [11.30, 6.90, 0.95]},
+  {"anchor": "CeilingSpeaker1", "location": [5.49, 5.18, 2.72]},
+  {"anchor": "CeilingSpeaker2", "location": [12.20, 2.44, 2.72]},
+  {"anchor": "TV1", "location": [6.80, 0.40, 2.30]},
+  {"anchor": "TV2", "location": [16.36, 6.375, 2.22]},
+  {"anchor": "DartMachine", "location": [8.90, 6.90, 1.73]},
+  {"anchor": "StreetDoor", "location": [0.05, 6.10, 1.10]},
+  {"anchor": "StreetWindow", "location": [0.05, 2.64, 1.50]},
+  {"anchor": "Restrooms", "location": [18.30, 1.46, 1.00]},
+  {"anchor": "NeonN1", "location": [0.06, 2.05, 1.32]},
+  {"anchor": "NeonN2", "location": [0.06, 3.45, 1.32]},
+  {"anchor": "NeonN3", "location": [8.50, 0.05, 2.41]},
+  {"anchor": "NeonN4", "location": [13.80, 7.28, 2.17]},
+  {"anchor": "NeonN5", "location": [16.44, 2.90, 1.67]},
+  {"anchor": "PopcornMachine", "location": [2.15, 1.87, 1.30]},
+  {"anchor": "CeilingFan", "location": [3.0, 5.2, 2.45]}
+ ],
+
+ "acoustic_zones": [
+  {"id": "MainRoom", "box": [[0.0, 16.46], [0.0, 7.32], [0.0, 2.74]]},
+  {"id": "BarCounter", "box": [[1.83, 9.75], [0.0, 2.39], [0.0, 2.74]]},
+  {"id": "RestroomCorridor", "box": [[16.46, 20.12], [0.30, 1.40], [0.0, 2.44]]},
+  {"id": "KegCooler", "box": [[16.66, 20.12], [4.47, 7.12], [0.0, 2.44]]},
+  {"id": "Outside", "box": [[-6.0, -0.33], [-2.0, 9.0], [0.0, 4.0]]}
+ ],
+
+ "sweep_obstacles": {
+  "note": "3D obstacles of the cue sweep (2.5, VDB-T3; Tools/blender/divebar/cue_sweep_check.py): walls, closed doors, column C3 + shelf, jukebox, cue rack, chalkboard, back ledge, TV-2, lamp shades, ceiling. Cylinders: centre, radius, z.",
+  "boxes": [
+   {"id": "right_wall", "box": [[0.0, 16.46], [7.32, 7.65], [0.0, 2.74]], "body": true},
+   {"id": "back_wall", "box": [[16.46, 16.66], [0.0, 7.32], [0.0, 2.74]], "body": true},
+   {"id": "left_wall", "box": [[0.0, 16.46], [-0.33, 0.0], [0.0, 2.74]], "body": true},
+   {"id": "jukebox", "box": [[10.90, 11.70], [6.62, 7.32], [0.0, 1.47]], "body": true},
+   {"id": "cue_rack", "box": [[13.30, 14.30], [7.20, 7.32], [0.25, 1.60]], "body": true},
+   {"id": "chalkboard", "box": [[12.30, 13.20], [7.27, 7.32], [1.13, 1.90]], "body": true},
+   {"id": "back_ledge", "box": [[16.26, 16.46], [5.60, 7.10], [1.032, 1.07]], "body": true},
+   {"id": "tv2", "box": [[16.36, 16.46], [5.90, 6.85], [1.95, 2.50]], "body": false},
+   {"id": "wall_ledge", "box": [[10.40, 15.80], [0.0, 0.25], [1.032, 1.07]], "body": true},
+   {"id": "dart_machine", "box": [[8.57, 9.23], [6.66, 7.32], [0.0, 2.13]], "body": true},
+   {"id": "ceiling", "box": [[0.0, 16.46], [0.0, 7.32], [2.74, 2.80]], "body": false}
+  ],
+  "cylinders": [
+   {"id": "column_c3", "center": [13.72, 3.66], "radius": 0.057, "z": [0.0, 2.74], "body": true},
+   {"id": "c3_shelf", "center": [13.72, 3.66], "radius": 0.20, "z": [1.10, 1.12], "body": true},
+   {"id": "column_c2", "center": [9.14, 3.66], "radius": 0.057, "z": [0.0, 2.74], "body": true}
+  ],
+  "lamp_shades": true
+ },
+
+ "cameras": {
+  "views": [
+   {"tag": "RbCam_DB_V01", "name": "Entrance", "eye": [0.90, 6.00, 1.65], "target": [12.0, 4.5, 1.0], "ev100": [3.0, 4.0]},
+   {"tag": "RbCam_DB_V02", "name": "Deacon's stool", "eye": [8.60, 2.62, 1.55], "target": [13.76, 5.43, 0.85], "ev100": [4.5, 5.5]},
+   {"tag": "RbCam_DB_V03", "name": "Head end, standing", "eye": [12.00, 5.43, 1.62], "target": [14.30, 5.43, 0.76], "ev100": [6.5, 7.5]},
+   {"tag": "RbCam_DB_V04", "name": "Chin on cue", "eye": [12.78, 5.43, 0.90], "target": [14.27, 5.43, 0.77], "ev100": [7.8, 8.4], "chin_on_cue": {"cue_ball_core": [-0.508, 0.0], "aim_point_core": [0.508, 0.0], "elevation_deg": 4.0}},
+   {"tag": "RbCam_DB_V05", "name": "Back bar", "eye": [5.20, 2.90, 1.60], "target": [5.20, 0.30, 1.50], "ev100": [4.5, 5.5]},
+   {"tag": "RbCam_DB_V06", "name": "Ball macro", "eye": [14.50, 5.18, 0.80], "target": [14.27, 5.43, 0.77]},
+   {"tag": "RbCam_DB_V07", "name": "Coin slide", "eye": [15.40, 5.60, 1.10], "target": [14.94, 5.43, 0.60]},
+   {"tag": "RbCam_DB_V08", "name": "Corridor", "eye": [15.80, 1.00, 1.60], "target": [20.10, 0.85, 1.70], "ev100": [4.0, 5.0]},
+   {"tag": "RbCam_DB_V09", "name": "Wall side", "eye": [13.90, 6.95, 1.50], "target": [13.90, 5.43, 0.76]},
+   {"tag": "RbCam_DB_V10", "name": "Plan", "eye": [10.16, 3.66, 12.0], "target": [10.16, 3.66, 0.0], "ortho_width_m": 21.0, "hide_ceiling": true},
+   {"tag": "RbCam_DB_V11", "name": "Window from inside", "eye": [2.50, 3.50, 1.50], "target": [0.00, 3.00, 1.45]},
+   {"tag": "RbCam_DB_V12", "name": "Lights-Up", "eye": [0.90, 6.00, 1.65], "target": [12.0, 4.5, 1.0], "state": "LightsUp", "ev100": [5.5, 6.5]}
+  ],
+  "trailer": [
+   {"tag": "RbCam_DB_TH1", "name": "Cold open, phone POV", "eye": [11.80, 5.90, 1.45], "target": [14.27, 5.00, 1.00], "hfov_deg": 69.0, "preset": "Headcam"},
+   {"tag": "RbCam_DB_TH2", "name": "Masse from the C3 shelf", "eye": [13.20, 3.90, 1.25], "target": [13.90, 7.32, 1.60], "preset": "Headcam"},
+   {"tag": "RbCam_DB_TH3", "name": "Break macro at ball level", "eye": [13.95, 5.20, 0.775], "target": [14.27, 5.43, 0.772], "focal_mm": 100.0, "fstop": 2.8},
+   {"tag": "RbCam_DB_TH4", "name": "Reverse from the bar, neon bokeh", "eye": [8.90, 2.62, 1.55], "target": [13.76, 5.43, 0.85], "focal_mm": 50.0, "fstop": 1.8},
+   {"tag": "RbCam_DB_TH5", "name": "Coin slide + hands", "eye": [15.35, 5.30, 0.95], "target": [14.94, 5.43, 0.62], "focal_mm": 35.0},
+   {"tag": "RbCam_DB_TH6", "name": "Pocket drop, foot-right", "eye": [14.78, 5.94, 1.05], "target": [14.78, 5.94, 0.70], "focal_mm": 35.0},
+   {"tag": "RbCam_DB_TH7", "name": "Door opens", "eye": [1.60, 6.40, 1.60], "target": [0.0, 6.1, 1.4], "preset": "Headcam"}
+  ],
+  "menu": [
+   {"tag": "RbCam_Menu_S0", "name": "Overview", "eye": [9.40, 3.20, 1.60], "target": [13.76, 5.43, 0.85], "vfov_deg": 50.0, "ev100": [3.0, 4.0]},
+   {"tag": "RbCam_Menu_S1", "name": "Career (phone on the bar)", "eye": [9.15, 2.80, 1.45], "target": [8.90, 2.05, 1.08], "vfov_deg": 30.0, "phone_anchor": [8.90, 2.05, 1.07]},
+   {"tag": "RbCam_Menu_S2", "name": "Play", "eye": [12.00, 5.43, 1.62], "target": [14.30, 5.43, 0.76], "vfov_deg": 50.0},
+   {"tag": "RbCam_Menu_S3", "name": "Practice (pawn eye point, head end)", "eye": [12.20, 5.43, 1.62], "target": [14.30, 5.43, 0.76], "vfov_deg": 50.0},
+   {"tag": "RbCam_Menu_S4", "name": "Replays (TV-1)", "eye": [6.80, 3.00, 1.55], "target": [6.80, 0.35, 2.30], "vfov_deg": 40.0},
+   {"tag": "RbCam_Menu_S5", "name": "Settings (current station)", "eye": [9.40, 3.20, 1.60], "target": [13.76, 5.43, 0.85], "vfov_deg": 50.0},
+   {"tag": "RbCam_Menu_S6", "name": "Quit (front door)", "eye": [2.60, 5.20, 1.60], "target": [0.00, 6.10, 1.30], "vfov_deg": 50.0},
+   {"tag": "RbCam_Menu_S7", "name": "Credits (Polaroid wall)", "eye": [7.25, 5.45, 1.60], "target": [7.25, 7.32, 1.80], "vfov_deg": 40.0}
+  ]
+ }
+}
