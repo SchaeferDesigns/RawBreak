@@ -38,12 +38,21 @@ namespace RbAudio
 		}
 		ENoiseKind GetKind() const { return Kind; }
 
+		// Film-style slow motion / fast forward (audio.md 5.2): the band moved by Factor (s^0.5 for playback rate s: x0.25 -> one octave
+		// down), still unit RMS (the noise power of the band scales with its width). Keeps the filter state (no reset click); two
+		// biquad designs, no allocation (render thread). Initialize resets the factor to 1.
+		void SetPitch(double Factor);
+		double GetPitch() const { return Pitch; }
+
 	private:
 		ENoiseKind Kind = ENoiseKind::RollingCloth;
 		FNoise Rng;
 		FBiquad A;
 		FBiquad B;
 		double Norm = 1.0;
+		double BaseNorm = 1.0;
+		double SampleRate = 48000.0;
+		double Pitch = 1.0;
 	};
 
 	// Gully seam bumps (click_synth.py gully_noise): 1 + 0.6 max(0, sin(2 pi (0.8 / 0.06) t))^8, t since the run started.

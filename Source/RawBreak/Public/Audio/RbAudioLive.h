@@ -11,6 +11,8 @@
 #include "RbAudio/RbAudioDspTypes.h"
 #include "RbAudio/RbNoiseSynth.h"
 
+struct FRbTableContext;
+
 // A loose ball hitting the floor (or a wall / stool base: any hard plane).
 struct FRbFloorHitParams
 {
@@ -29,6 +31,16 @@ namespace RbAudioLive
 {
 	// ESTIMATE contact of a ball on a floor surface (audio.md 2.2 AU-25: VCT on concrete T(1 m/s) 0.30 ms, e 0.55, no structure bank).
 	RAWBREAK_API void FloorContact(RbAudio::EFloorSurface Surface, double& OutContactTime1, double& OutRestitution, double& OutReflection);
+
+	// The acoustic ball of a loose ball (radius, mass, material): the ball of the table's set (exactly the plan builder's
+	// FRbAudioPlanBuilder::BallAcoustics, whose radiation kernels the table's voices prewarm on a worker) when the table and the ball
+	// are known, else a standard ball. Never the physics body's mass: the kernel cache is keyed by the exact values, so any other
+	// mass (0.17, a float-rounded body mass) designs a new kernel set on the game thread (~30 ms per value) and grows the cache.
+	RAWBREAK_API RbAudio::FBallAcoustics LooseBallAcoustics(const FRbTableContext* Context, int32 BallId);
+
+	// Shot-independent caches of the live sounds (floor contact shapes of every surface, the standard ball's kernels) for a device
+	// rate; called by FRbAudioPlanBuilder::Prewarm on its worker, so a loose ball's first floor hit computes nothing on the game thread.
+	RAWBREAK_API void Prewarm(double SampleRate);
 
 	// The impact event of a floor hit (ball radiation along the contact axis, direct path + the image in the floor plane), gains
 	// referred to RefDistance, delays relative to the contact.

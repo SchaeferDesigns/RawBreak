@@ -194,7 +194,7 @@ namespace RbAudioTestKit
 	}
 
 	URbImpactVoiceComponent* SpawnTestVoice(AActor* Owner, USoundSubmix* Submix, int32 Channel, const FRbShotAudioClockPtr& Clock, FName Name,
-		USoundSubmix* ReverbSubmix, float ReverbSend, double RefDistance)
+		USoundSubmix* ReverbSubmix, float ReverbSend, double RefDistance, bool bSendOnly)
 	{
 		if (!Owner)
 		{
@@ -207,6 +207,7 @@ namespace RbAudioTestKit
 		{
 			V->SetTestChannel(Channel);
 		}
+		V->SetBaseSubmixEnabled(!bSendOnly);
 		V->SetClock(Clock);
 		V->RegisterComponent();
 		V->StartVoice();

@@ -70,17 +70,27 @@ void URbTableAudioComponent::BuildShotPlans(const FRbShot& Shot, const FRbTableC
 
 void URbTableAudioComponent::SetRouting(const FRbTableAudioRouting& InRouting)
 {
+	const bool bChanged = InRouting.TableSubmix != Routing.TableSubmix || InRouting.ReverbSubmix != Routing.ReverbSubmix
+		|| InRouting.ReverbSend != Routing.ReverbSend;
 	Routing = InRouting;
+	if (bChanged && (Voices.Num() > 0 || ReverbFeedVoice))
+	{
+		bRoutingDirty = true; // TickComponent creates the voices again once no shot is sounding
+	}
 }
 
 void URbTableAudioComponent::SetReverbSendGain(float Gain)
 {
 	Routing.ReverbSendGain = Gain;
+	if (ReverbFeedVoice)
+	{
+		ReverbFeedVoice->SetReverbSendGain(Gain);
+	}
 	for (URbImpactVoiceComponent* Voice : Voices)
 	{
 		if (Voice)
 		{
-			Voice->SetReverbSendGain(Gain);
+			Voice->SetReverbSendGain(Gain); // no send on the table voices (the feed carries the reverb): a no-op, kept for safety
 		}
 	}
 }
@@ -95,6 +105,10 @@ void URbTableAudioComponent::SetProfile(FRbAudioRenderProfilePtr InProfile)
 			Voice->SetProfile(Profile);
 		}
 	}
+	if (ReverbFeedVoice)
+	{
+		ReverbFeedVoice->SetProfile(Profile); // the feed's render time belongs to the table's (T19)
+	}
 }
 
 void URbTableAudioComponent::SetTier(ERbTableAudioTier NewTier)
@@ -104,12 +118,13 @@ void URbTableAudioComponent::SetTier(ERbTableAudioTier NewTier)
 	// A tier whose voices could not be created yet (the table's context appears in its BeginPlay, which can run after the audio
 	// subsystem's OnWorldBeginPlay) is completed as soon as the context exists (TickComponent retries).
 	const bool bComplete = Voices.Num() == FRbAudioPlanBuilder::NumVoices(NewTier);
-	if ((NewTier == Tier && bComplete) || (bSounding && Voices.Num() > 0))
+	if ((NewTier == Tier && bComplete && !bRoutingDirty) || (bSounding && Voices.Num() > 0))
 	{
 		return;
 	}
 	DestroyVoices();
 	Tier = NewTier;
+	bRoutingDirty = false;
 	CreateVoices();
 }
 
@@ -141,24 +156,48 @@ void URbTableAudioComponent::CreateVoices()
 			}
 		}, LowLevelTasks::ETaskPriority::BackgroundNormal);
 	}
+	auto SetTiming = [Settings](URbImpactVoiceComponent* Voice)
+	{
+		FRbVoiceSharedPtr Shared = Voice->GetShared();
+		Shared->OutputLatencySeconds = Settings->OutputLatencySeconds;
+		Shared->LeadMinBlocks = Settings->LeadMinBlocks;
+		Shared->LeadMarginFrames = Settings->LeadMarginFrames;
+	};
 	for (int32 V = 0; V < Count; ++V)
 	{
 		const FName Name = MakeUniqueObjectName(Table, URbImpactVoiceComponent::StaticClass(),
 			FName(*FString::Printf(TEXT("RbVoice_T%d_%s"), Table->TableIndex, FRbAudioPlanBuilder::VoiceName(Tier, V))));
 		URbImpactVoiceComponent* Voice = NewObject<URbImpactVoiceComponent>(Table, Name, RF_Transient);
 		Voice->SetupAttachment(Table->GetRootComponent());
-		Voice->ConfigureVoice(true, Routing.TableSubmix, Routing.ReverbSubmix, Routing.ReverbSend, Settings->RefDistanceMeters, Settings->AttenuationRangeMeters);
-		Voice->SetReverbSendGain(Routing.ReverbSendGain);
+		// No reverb send: the voice's signal is the listener's DIRECTIONAL one (a click heard side-on is ~20 dB down), the room is
+		// excited by the radiated power through the reverb feed below (audio.md 3.6 / 6.4).
+		Voice->ConfigureVoice(true, Routing.TableSubmix, nullptr, 0.0f, Settings->RefDistanceMeters, Settings->AttenuationRangeMeters);
 		Voice->SetClock(Clock);
 		Voice->SetProfile(Profile);
-		FRbVoiceSharedPtr Shared = Voice->GetShared();
-		Shared->OutputLatencySeconds = Settings->OutputLatencySeconds;
-		Shared->LeadMinBlocks = Settings->LeadMinBlocks;
-		Shared->LeadMarginFrames = Settings->LeadMarginFrames;
+		SetTiming(Voice);
 		Voice->RegisterComponent();
 		Voice->SetWorldLocation(Table->CoreToWorld(EmitterPositionsCore[V]));
 		Voice->StartVoice();
 		Voices.Add(Voice);
+	}
+	// The reverb feed: non-spatialised mono (it reaches each channel of the reverb submix at the gain of a centred positional voice,
+	// AU-0 probes, so the voices' compensation and ReverbSendScale hold), send-only, at the table's centre.
+	if (Routing.ReverbSubmix && Routing.ReverbSend > 0.0f)
+	{
+		const FName Name = MakeUniqueObjectName(Table, URbImpactVoiceComponent::StaticClass(),
+			FName(*FString::Printf(TEXT("RbVoice_T%d_ReverbFeed"), Table->TableIndex)));
+		URbImpactVoiceComponent* Feed = NewObject<URbImpactVoiceComponent>(Table, Name, RF_Transient);
+		Feed->SetupAttachment(Table->GetRootComponent());
+		Feed->ConfigureVoice(false, Routing.TableSubmix, Routing.ReverbSubmix, Routing.ReverbSend, Settings->RefDistanceMeters, Settings->AttenuationRangeMeters);
+		Feed->SetBaseSubmixEnabled(false);
+		Feed->SetReverbSendGain(Routing.ReverbSendGain);
+		Feed->SetClock(Clock);
+		Feed->SetProfile(Profile);
+		SetTiming(Feed);
+		Feed->RegisterComponent();
+		Feed->SetWorldLocation(Table->CoreToWorld(rb::Vec3(0.0, 0.0, 0.0)));
+		Feed->StartVoice();
+		ReverbFeedVoice = Feed;
 	}
 }
 
@@ -173,6 +212,12 @@ void URbTableAudioComponent::DestroyVoices()
 		}
 	}
 	Voices.Reset();
+	if (ReverbFeedVoice)
+	{
+		ReverbFeedVoice->Stop();
+		ReverbFeedVoice->DestroyComponent();
+		ReverbFeedVoice = nullptr;
+	}
 }
 
 FVector URbTableAudioComponent::ListenerWorld() const
@@ -281,6 +326,7 @@ void URbTableAudioComponent::HandlePlaybackStarted(const TSharedRef<const FRbSho
 	{
 		VoiceShared.Add(Voice ? Voice->GetShared() : nullptr);
 	}
+	const FRbVoiceSharedPtr FeedShared = ReverbFeedVoice ? ReverbFeedVoice->GetShared() : nullptr;
 	{
 		FScopeLock Guard(&PlanShared->Lock);
 		PlanShared->bPending = true;
@@ -291,7 +337,7 @@ void URbTableAudioComponent::HandlePlaybackStarted(const TSharedRef<const FRbSho
 	}
 	TSharedPtr<FPlanShared, ESPMode::ThreadSafe> Shared = PlanShared;
 	FRbShotAudioClockPtr ClockPtr = Clock;
-	auto Task = [Shared, ClockPtr, VoiceShared, Shot, Context, ListenerCore, Options, Serial]()
+	auto Task = [Shared, ClockPtr, VoiceShared, FeedShared, Shot, Context, ListenerCore, Options, Serial]()
 	{
 		TSharedPtr<FRbShotAudioPlan, ESPMode::ThreadSafe> Plan = MakeShared<FRbShotAudioPlan, ESPMode::ThreadSafe>();
 		FRbAudioPlanBuilder::Build(Shot->Result, *Context, ListenerCore, Options, *Plan);
@@ -306,6 +352,10 @@ void URbTableAudioComponent::HandlePlaybackStarted(const TSharedRef<const FRbSho
 		for (int32 V = 0; V < VoiceShared.Num() && V < Plan->Voices.Num(); ++V)
 		{
 			URbImpactVoiceComponent::PushPlan(VoiceShared[V], MakeShared<const RbAudio::FVoicePlan, ESPMode::ThreadSafe>(Plan->Voices[V]));
+		}
+		if (FeedShared.IsValid())
+		{
+			URbImpactVoiceComponent::PushPlan(FeedShared, MakeShared<const RbAudio::FVoicePlan, ESPMode::ThreadSafe>(Plan->ReverbFeed));
 		}
 		FScopeLock Guard(&Shared->Lock);
 		if (Shared->PendingSerial != Serial)
@@ -452,7 +502,7 @@ void URbTableAudioComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		}
 	}
 	const bool bIncomplete = Voices.Num() != FRbAudioPlanBuilder::NumVoices(PendingTier);
-	if ((PendingTier != Tier || bIncomplete) && !bPlaying && !bClockRunning && !IsPlanPending())
+	if ((PendingTier != Tier || bIncomplete || bRoutingDirty) && !bPlaying && !bClockRunning && !IsPlanPending())
 	{
 		const ARbTable* Table = GetTable();
 		if (PendingTier != Tier || (Table && Table->HasContext()))

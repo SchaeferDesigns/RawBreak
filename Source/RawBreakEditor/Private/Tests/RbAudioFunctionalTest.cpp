@@ -323,6 +323,7 @@ namespace RbAudioFunctional
 			float ReverbSend = 0.0f;
 			double OutputGain = 0.1;                // plan output gain
 			double WaitSeconds = 0.7;               // after the click (reverb tails)
+			bool bSendOnly = false;                 // no base submix output (the table's reverb feed)
 			TWeakObjectPtr<URbImpactVoiceComponent> Voice;
 			RbAudioTestKit::FClockState Shot;
 			double GainL = 0.0;
@@ -339,6 +340,8 @@ namespace RbAudioFunctional
 		int32 Block = 0;
 		bool bDiagnosed = false;
 	};
+
+	constexpr int32 Au0NumProbes = 6;
 
 	URbImpactVoiceComponent* MakeTestVoice(AActor* Owner, USoundSubmix* Submix, int32 Channel, const FRbShotAudioClockPtr& Clock, const TCHAR* Name)
 	{
@@ -396,7 +399,7 @@ bool FRbAudioAu0Test::RunTest(const FString& Parameters)
 			Audio->GetReverbSubmix(), 1.0f, 1.0);
 		FVector Location, Front, Right;
 		PlayWorld()->GetFirstPlayerController()->GetAudioListenerPosition(Location, Front, Right);
-		S->Probes.SetNum(5);
+		S->Probes.SetNum(Au0NumProbes);
 		S->Probes[0].Name = TEXT("positional mono 1 m ahead");
 		S->Probes[0].OffsetCm = FVector(100.0, 0.0, 0.0);
 		S->Probes[1].Name = TEXT("positional mono 2 m ahead");
@@ -418,12 +421,21 @@ bool FRbAudioAu0Test::RunTest(const FString& Parameters)
 			T.ReverbSend = Settings->RefDistanceMeters * Settings->ReverbSendScale * Audio->GetVenueProfile().VoiceReverbSend;
 			T.OutputGain = 0.1 * Settings->PanCompensation;
 			T.WaitSeconds = 1.8;
+			// The table's reverb feed as URbTableAudioComponent configures it: non-spatialised mono, send-only (no dry output), the
+			// voices' send and compensation. Its reverb must reach the diffuse-field level of the same click at 1 m (review M2-C: the
+			// room is excited by the radiated power through this voice, audio.md 3.6 / 6.4).
+			FAu0State::FGainProbe& F = S->Probes[5];
+			F = T;
+			F.Name = TEXT("table reverb feed (calibration)");
+			F.Channel = -2;
+			F.bSendOnly = true;
 		}
 		for (int32 I = 0; I < S->Probes.Num(); ++I)
 		{
 			FAu0State::FGainProbe& P = S->Probes[I];
 			URbImpactVoiceComponent* V = RbAudioTestKit::SpawnTestVoice(S->Actor.Get(), Audio->GetSubmix(ERbAudioBus::Table), P.Channel, S->Clock,
-				FName(*FString::Printf(TEXT("RbAu0Probe%d"), I)), P.ReverbSend > 0.0f ? Audio->GetReverbSubmix() : nullptr, P.ReverbSend, P.RefDistance);
+				FName(*FString::Printf(TEXT("RbAu0Probe%d"), I)), P.ReverbSend > 0.0f ? Audio->GetReverbSubmix() : nullptr, P.ReverbSend, P.RefDistance,
+				P.bSendOnly);
 			V->SetWorldLocation(Location + Front * P.OffsetCm.X + Right * P.OffsetCm.Y);
 			P.Voice = V;
 		}
@@ -494,7 +506,7 @@ bool FRbAudioAu0Test::RunTest(const FString& Parameters)
 		S->ShotC = RbAudioTestKit::ReadClock(S->Clock);
 		return S->ShotC.bAnchored && S->ShotC.ShotId == 103 && T > 1.8;
 	}});
-	for (int32 I = 0; I < 5; ++I)
+	for (int32 I = 0; I < Au0NumProbes; ++I)
 	{
 		const uint64 Id = 104 + I;
 		Steps.Add({FString::Printf(TEXT("gain probe %d: one click"), I), 5.0, [S, I, Id](double, int32)
@@ -593,10 +605,11 @@ bool FRbAudioAu0Test::RunTest(const FString& Parameters)
 			P.GainR = 20.0 * std::log10(FMath::Max(PeakAbs(Window(R, F - D.First - Pre, N), 0, N), 1e-12) / RefPeak);
 			AddInfo(FString::Printf(TEXT("gain probe '%s': %+.2f / %+.2f dB (L / R) of the voice's output"), P.Name, P.GainL, P.GainR));
 		}
-		// The table-voice calibration probe: direct sound per ear vs physical, reverb per ear vs the diffuse field.
-		if (S->Probes.Num() == 5)
+		// The calibration probes: direct sound per ear vs physical, reverb per ear vs the diffuse field. 4: a table voice (positional,
+		// before the review its reverb send carried the room); 5: the table's reverb feed (send-only, non-spatialised).
+		for (int32 ProbeIndex = 4; ProbeIndex < FMath::Min(S->Probes.Num(), Au0NumProbes); ++ProbeIndex)
 		{
-			const FAu0State::FGainProbe& P = S->Probes[4];
+			const FAu0State::FGainProbe& P = S->Probes[ProbeIndex];
 			const int64 F = P.Shot.AnchorFrame + std::llround((0.100 - P.Shot.OriginShotTime) * Fs);
 			const double Pref = PeakAbs(Ref, 0, N) * 0.1; // the voice's pressure output (p at RefDistance, digital)
 			const double DirectWant = Pref * P.RefDistance / 2.0;
@@ -621,15 +634,23 @@ bool FRbAudioAu0Test::RunTest(const FString& Parameters)
 				const double IrEnergy = RbAudioTestKit::WavChannelEnergy(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/audio/out/ref/IR_RB_TestRoom.wav")), C);
 				RevDb[C] = 10.0 * std::log10(FMath::Max(ETail, 1e-30) / FMath::Max(ERef1m * IrEnergy, 1e-30));
 			}
-			AddInfo(FString::Printf(TEXT("table-voice calibration (2 m ahead): direct %+.2f / %+.2f dB vs physical, reverb %+.2f / %+.2f dB vs the diffuse field (L / R)"),
+			AddInfo(FString::Printf(TEXT("%s: direct %+.2f / %+.2f dB vs physical, reverb %+.2f / %+.2f dB vs the diffuse field (L / R)"), P.Name,
 				DirL, DirR, RevDb[0], RevDb[1]));
-			TestTrue(FString::Printf(TEXT("table voice: the direct sound arrives physically at each ear (%+.2f / %+.2f dB, +-0.5)"), DirL, DirR),
-				FMath::Abs(DirL) <= 0.5 && FMath::Abs(DirR) <= 0.5);
+			if (P.bSendOnly)
+			{
+				TestTrue(FString::Printf(TEXT("%s: no dry output (%+.1f / %+.1f dB re the physical level, want <= -60)"), P.Name, DirL, DirR),
+					DirL <= -60.0 && DirR <= -60.0);
+			}
+			else
+			{
+				TestTrue(FString::Printf(TEXT("%s: the direct sound arrives physically at each ear (%+.2f / %+.2f dB, +-0.5)"), P.Name, DirL, DirR),
+					FMath::Abs(DirL) <= 0.5 && FMath::Abs(DirR) <= 0.5);
+			}
 			// The convolution feeds about -12 dB of each input channel into the other output (left-only probe above), so a centred source
 			// comes out of the right channel ~1.8 dB hotter than the left; the send scale calibrates the mean of both ears.
 			const double MeanDb = 10.0 * std::log10(0.5 * (FMath::Pow(10.0, RevDb[0] / 10.0) + FMath::Pow(10.0, RevDb[1] / 10.0)));
-			TestTrue(FString::Printf(TEXT("table voice: the reverb reaches the diffuse-field level (%+.2f dB mean of both ears, +-1.0; %+.2f / %+.2f dB, +-2.5 each)"),
-				MeanDb, RevDb[0], RevDb[1]), FMath::Abs(MeanDb) <= 1.0 && FMath::Abs(RevDb[0]) <= 2.5 && FMath::Abs(RevDb[1]) <= 2.5);
+			TestTrue(FString::Printf(TEXT("%s: the reverb reaches the diffuse-field level (%+.2f dB mean of both ears, +-1.0; %+.2f / %+.2f dB, +-2.5 each)"),
+				P.Name, MeanDb, RevDb[0], RevDb[1]), FMath::Abs(MeanDb) <= 1.0 && FMath::Abs(RevDb[0]) <= 2.5 && FMath::Abs(RevDb[1]) <= 2.5);
 		}
 		if (S->Probes.Num() >= 4)
 		{
@@ -1133,6 +1154,11 @@ bool FRbAudioAu0Test::RunTest(const FString& Parameters)
 			{
 				bAll &= V && V->IsRendering();
 			}
+			// The table's reverb feed (the room hears the radiated power through it; review M2-C).
+			if (Audio->GetReverbSubmix())
+			{
+				bAll &= TableAudio->GetReverbFeedVoice() && TableAudio->GetReverbFeedVoice()->IsRendering();
+			}
 			for (URbAmbienceVoiceComponent* V : Audio->GetAmbienceVoices())
 			{
 				bAll &= V && V->IsRendering();
@@ -1423,7 +1449,8 @@ bool FRbAudioMixTest::RunTest(const FString& Parameters)
 	{
 		URbAudioSubsystem* Audio = URbAudioSubsystem::Get(PlayWorld());
 		URbTableAudioComponent* TableAudio = S->TableAudio.Get();
-		if (!Audio || !TableAudio || TableAudio->GetVoices().Num() == 0 || !TableAudio->GetVoices()[0]->IsRendering() || T < 1.0)
+		if (!Audio || !TableAudio || TableAudio->GetVoices().Num() == 0 || !TableAudio->GetVoices()[0]->IsRendering() || T < 1.0
+			|| (Audio->GetReverbSubmix() && !(TableAudio->GetReverbFeedVoice() && TableAudio->GetReverbFeedVoice()->IsRendering())))
 		{
 			return false;
 		}
@@ -1731,9 +1758,13 @@ bool FRbAudioMixTest::RunTest(const FString& Parameters)
 			}
 			AddInfo(FString::Printf(TEXT("two-ball shot x%.2f replay: first click %.1f samples of shot time after the anchor live, %.1f in the replay (ratio %.5f); the replay's click lands %+.3f samples from its film-style frame relative to live (tip strike %+.2f, two voices); replay mappings%s"),
 				S->Slow.Rate, ClickLiveShot, ClickSlowShot, Ratio, ShiftClick, ShiftTip, *Gens));
-			// The two windows are not the same signal (the ball voices stand elsewhere, the sliding hiss is other noise): a quarter
-			// sample (5 us) bounds the comparison.
-			TestTrue(FString::Printf(TEXT("slow motion x 0.25: the click lands at its film-style frame (%+.3f samples, +-0.25)"), ShiftClick), FMath::Abs(ShiftClick) <= 0.25);
+			// The two windows are not the same signal: the click is the sum of TWO moving ball voices whose clicks are up to ~8 samples
+			// apart (their own propagation delays), mixed with the engine's pan gains of wherever each voice stands when the click is
+			// heard (live: ~2 blocks after the last game-tick position update at full ball speed, x0.25: a quarter of that motion); the
+			// sum's group delay moves by a fraction of a sample with that mix (review M2-C measured +0.22 with the same code that gave
+			// +0.12 before). Half a sample (10 us) bounds the comparison; AU-0 measures the scheduling itself to 0.05 samples with fixed
+			// voices, and a wrong rate mapping would be off by thousands of samples (the ratio above).
+			TestTrue(FString::Printf(TEXT("slow motion x 0.25: the click lands at its film-style frame (%+.3f samples, +-0.5)"), ShiftClick), FMath::Abs(ShiftClick) <= 0.5);
 			TestTrue(FString::Printf(TEXT("slow motion x 0.25: impacts %.5f x farther apart (want 4 +- 0.0005)"), Ratio), FMath::Abs(Ratio - 4.0) <= 0.0005);
 		}
 		// Pause mid-shot: silent while held (after the 20 ms fade), no click at the hold / resume, resumes later.

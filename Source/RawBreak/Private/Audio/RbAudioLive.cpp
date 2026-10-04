@@ -1,5 +1,8 @@
 #include "Audio/RbAudioLive.h"
 
+#include "Audio/RbAudioPlan.h"
+#include "Simulation/RbTableContext.h"
+
 #include "RbAudio/RbAudioMath.h"
 #include "RbAudio/RbBallKernels.h"
 #include "RbAudio/RbContactShape.h"
@@ -21,6 +24,31 @@ namespace RbAudioLive
 		case RbAudio::EFloorSurface::Vct:
 		default: OutT1 = 0.30e-3; OutE = 0.55; OutReflection = 0.90; break;                               // AU-25 (ESTIMATE)
 		}
+	}
+
+	RbAudio::FBallAcoustics LooseBallAcoustics(const FRbTableContext* Context, int32 BallId)
+	{
+		if (Context && BallId >= 0 && BallId < FMath::Min(Context->Balls.Count, rb::kMaxBalls))
+		{
+			return FRbAudioPlanBuilder::BallAcoustics(*Context, BallId);
+		}
+		RbAudio::FBallAcoustics Std;
+		Std.Material = RbAudio::PhenolicMaterial();
+		return Std;
+	}
+
+	void Prewarm(double SampleRate)
+	{
+		using namespace RbAudio;
+		for (const EFloorSurface Surface : {EFloorSurface::Concrete, EFloorSurface::Vct, EFloorSurface::Rubber, EFloorSurface::Wood})
+		{
+			double T1 = 0.0;
+			double E = 0.0;
+			double Reflection = 0.0;
+			FloorContact(Surface, T1, E, Reflection);
+			GetContactShape(E);
+		}
+		GetBallKernels(LooseBallAcoustics(nullptr, INDEX_NONE), SampleRate, false);
 	}
 
 	RbAudio::FImpactEvent MakeFloorHitEvent(const FRbFloorHitParams& P, double SampleRate)

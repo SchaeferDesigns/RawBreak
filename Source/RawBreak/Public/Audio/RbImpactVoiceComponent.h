@@ -67,6 +67,14 @@ struct RAWBREAK_API FRbVoiceShared
 	double OutputLatencySeconds = 0.031;
 	int32 LeadMinBlocks = 1;
 	int32 LeadMarginFrames = 64;
+	// Live parameters that change every frame (a rolling loose ball, the mix ramps): plain atomic values the generator reads once
+	// per block, so the game thread never allocates a queue command per frame. The generator applies a new Live* set when
+	// LiveSerial changed (a torn read of the three values only lasts one block).
+	std::atomic<uint32> LiveSerial{0};
+	std::atomic<uint8> LiveKind{static_cast<uint8>(RbAudio::ENoiseKind::RollingFloor)};
+	std::atomic<double> LiveSpeedMps{0.0};
+	std::atomic<double> LiveGainPerMps{0.0};
+	std::atomic<double> LiveOutputGain{-1.0}; // < 0: not set (the renderer's default 1)
 	// Stats (written by the generator).
 	std::atomic<int32> RenderedImpacts{0};
 	std::atomic<int32> LateImpacts{0};
@@ -106,10 +114,14 @@ public:
 	// Thread-safe hand-over (any thread): replaces the voice's plan (null = only tails / live content).
 	void PushPlan(FRbVoicePlanPtr Plan);
 	static void PushPlan(const FRbVoiceSharedPtr& Shared, FRbVoicePlanPtr Plan);
-	// Live content (game thread): a pre-rendered one-shot [Pa at RefDistance], the live rolling layer, the live output gain.
+	// Live content (game thread): a pre-rendered one-shot [Pa at RefDistance] (one queued command per sound), the live rolling layer
+	// and the live output gain (atomics read once per block: per-frame updates allocate nothing).
 	void AddLivePcm(TArray<float>&& Pcm, int32 DelayFrames = 0);
 	void SetLiveContinuous(RbAudio::ENoiseKind Kind, double SpeedMps, double GainPerMps);
 	void SetLiveOutputGain(double Gain);
+
+	// Routes the voice only into its submix sends (no base submix output): the table's reverb feed (game thread, before Start).
+	void SetBaseSubmixEnabled(bool bEnable) { bEnableBaseSubmix = bEnable; }
 
 	// AU-0 / AU-T08 / AU-T21 test routing (before Start): a non-spatialised stereo voice that writes only to OutputChannel.
 	void SetTestChannel(int32 OutputChannel);

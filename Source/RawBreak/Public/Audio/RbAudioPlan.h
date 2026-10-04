@@ -61,6 +61,13 @@ struct FRbAudioPlanImpact
 struct FRbShotAudioPlan
 {
 	TArray<RbAudio::FVoicePlan> Voices;       // index = voice of the tier
+	// The table's reverb feed (audio.md 3.6 / 6.4: the room is excited by the RADIATED POWER, independent of the listener's
+	// direction; a side-on click still fills the room): every event of every voice, the ball radiation with the power weight
+	// 1 / sqrt(2n + 1) of each order instead of the listener's P_n(cos th) (no near field, no cloth image: the free-field radiated
+	// power, E_rad of 3.7), the structural banks and the continuous layers as on their voices, the same presentation envelope and
+	// output gain. One send-only voice per table renders it into the venue's reverb; the table voices themselves have no reverb
+	// send (their signal is the listener's directional one).
+	RbAudio::FVoicePlan ReverbFeed;
 	TArray<rb::Vec3> VoicePositionsCore;      // emitter of each voice [m, core frame] (balls: at the shot start)
 	TArray<FRbAudioPlanImpact> Impacts;       // one per physical impact, sorted by time
 	int32 NumGullyRuns = 0;
@@ -107,6 +114,9 @@ public:
 	// Builds the plan. ListenerCore: the listener [m, core frame] at plan time.
 	static void Build(const rb::ShotResult& Result, const FRbTableContext& Context, const rb::Vec3& ListenerCore, const FRbAudioPlanOptions& Options,
 		FRbShotAudioPlan& Out, bool bKeepMonoStem = false);
+
+	// Power weight of Legendre order N in the reverb feed: the RMS of P_n over the sphere, 1 / sqrt(2n + 1).
+	static double PowerWeight(int32 N);
 
 	// Offline render of the plan's impacts at the listener: sum of every voice's impacts scaled back to absolute pressure [Pa]
 	// (the presentation input, AU-T12 / T16 checks). StartTime: shot time of Out[0].

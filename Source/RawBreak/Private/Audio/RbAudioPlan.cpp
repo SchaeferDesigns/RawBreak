@@ -1,5 +1,6 @@
 #include "Audio/RbAudioPlan.h"
 
+#include "Audio/RbAudioLive.h"
 #include "Simulation/RbTableContext.h"
 
 #include "RbAudio/RbImpactSynth.h"
@@ -696,6 +697,36 @@ void FRbAudioPlanBuilder::Build(const rb::ShotResult& Result, const FRbTableCont
 	}
 	Out.Impacts.StableSort([](const FRbAudioPlanImpact& L, const FRbAudioPlanImpact& R) { return L.ShotTime < R.ShotTime; });
 
+	// The reverb feed (audio.md 3.6 / 6.4): every voice's events with the ball radiation at its radiated power (direction independent).
+	{
+		FVoicePlan& Feed = Out.ReverbFeed;
+		Feed.ShotId = Options.ShotId;
+		Feed.Seed = HashMix(Options.Seed, 0xFEED'0000ull);
+		Feed.OutputGain = Options.PanCompensation / Mode.FullScalePa();
+		for (const FVoicePlan& P : Out.Voices)
+		{
+			for (const FImpactEvent& E : P.Impacts)
+			{
+				FImpactEvent F = E;
+				if (F.Kernels.IsValid() && F.NumPaths > 0)
+				{
+					FRadiationPath& Path = F.Paths[0];
+					for (int32 N = 0; N <= 3; ++N)
+					{
+						Path.Weights[N] = (S.bReduced && N != 1) ? 0.0 : PowerWeight(N);
+					}
+					Path.NearField = 0.0;     // far field: the near-field term carries no radiated power
+					Path.bReflected = false;
+					F.NumPaths = 1;           // free-field power (E_rad of 3.7): the cloth image is a listener-side effect
+				}
+				Feed.Impacts.Add(MoveTemp(F));
+			}
+			Feed.Continuous.Append(P.Continuous);
+		}
+		Feed.Impacts.StableSort([](const FImpactEvent& L, const FImpactEvent& R) { return L.ShotTime < R.ShotTime; });
+		Feed.Continuous.StableSort([](const FContinuousSegment& L, const FContinuousSegment& R) { return L.StartTime < R.StartTime; });
+	}
+
 	// Presentation envelope of the table stem (audio.md 4.2): a mono render of every impact at the listener.
 	const uint64 PresentationCycles = FPlatformTime::Cycles64();
 	if (Options.bPresentation && Out.Impacts.Num() > 0)
@@ -721,6 +752,7 @@ void FRbAudioPlanBuilder::Build(const rb::ShotResult& Result, const FRbTableCont
 		{
 			P.Presentation = Out.Presentation;
 		}
+		Out.ReverbFeed.Presentation = Out.Presentation; // the room hears the presented stem (a 126 dB break must not overdrive the reverb)
 		if (bKeepMonoStem)
 		{
 			Out.MonoStemPa = MoveTemp(Mono);
@@ -729,6 +761,11 @@ void FRbAudioPlanBuilder::Build(const rb::ShotResult& Result, const FRbTableCont
 	}
 	Out.PresentationMilliseconds = FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64() - PresentationCycles);
 	Out.BuildMilliseconds = FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64() - StartCycles);
+}
+
+double FRbAudioPlanBuilder::PowerWeight(int32 N)
+{
+	return N >= 0 ? 1.0 / FMath::Sqrt(2.0 * N + 1.0) : 0.0;
 }
 
 bool FRbAudioPlanBuilder::CuePointCore(const rb::ShotResult& Result, rb::Vec3& OutCore)
@@ -776,6 +813,7 @@ void FRbAudioPlanBuilder::Prewarm(const FRbTableContext& Context, double SampleR
 	}
 	DecimationFir(SampleRate);
 	FShapedNoise::Prewarm(SampleRate); // the voices' rolling / sliding / gully noise (never normalised on the audio thread)
+	RbAudioLive::Prewarm(SampleRate);  // loose-ball floor hits: contact shapes of every floor, the standard ball
 }
 
 void FRbAudioPlanBuilder::EmitterPositions(const FRbTableContext& Context, ERbTableAudioTier Tier, TArray<rb::Vec3>& Out)

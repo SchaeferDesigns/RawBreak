@@ -65,8 +65,13 @@ namespace RbAudio
 
 	void FVoiceRenderer::AddLivePcm(TConstArrayView<float> Pcm, int32 DelayFrames)
 	{
+		AddLivePcm(TArray<float>(Pcm.GetData(), Pcm.Num()), DelayFrames);
+	}
+
+	void FVoiceRenderer::AddLivePcm(TArray<float>&& Pcm, int32 DelayFrames)
+	{
 		FLivePcm& L = PendingPcm.AddDefaulted_GetRef();
-		L.Samples = TArray<float>(Pcm.GetData(), Pcm.Num());
+		L.Samples = MoveTemp(Pcm);
 		L.DelayFrames = FMath::Max(0, DelayFrames);
 	}
 
@@ -230,6 +235,17 @@ namespace RbAudio
 				ContinuousCursor = 0;
 				bPlanStarted = true;
 				LastGeneration = Snap.Generation;
+				// The noise of every silent continuous kind restarts from the plan's seed: a replay of the shot on the same voice renders
+				// its rolling / sliding / gully noise bit-identically to the live shot (the noise sources live as long as the voice, so
+				// without this the replay would continue the live shot's random sequence). A kind still fading out of the previous
+				// shot keeps its state (no click).
+				for (int32 K = 0; K < 4; ++K)
+				{
+					if (bNoiseReady[K] && ContinuousLevel[K] == 0.0)
+					{
+						Noise[K].Initialize(static_cast<ENoiseKind>(K), SampleRate, HashMix(Plan->Seed, static_cast<uint64>(K) + 1));
+					}
+				}
 			}
 			else if (Snap.Generation != LastGeneration)
 			{
@@ -254,6 +270,16 @@ namespace RbAudio
 			if (Snap.IsPlaying())
 			{
 				ScheduleImpacts(Snap, BlockStartFrame, Frames);
+				// Film-style replay rates (audio.md 5.2): impacts keep their natural pitch (they are only spaced by 1 / s), the continuous
+				// layers' noise moves by s^0.5 (x0.25: an octave down) instead of a stretched rumble at full brightness.
+				const double Pitch = FMath::Sqrt(FMath::Clamp(Snap.Rate, 0.0025, 16.0));
+				for (int32 K = 0; K < 4; ++K)
+				{
+					if (bNoiseReady[K] && Noise[K].GetPitch() != Pitch)
+					{
+						Noise[K].SetPitch(Pitch);
+					}
+				}
 			}
 			LastOutputGain = Plan->OutputGain;
 		}

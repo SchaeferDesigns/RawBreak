@@ -152,6 +152,20 @@ namespace RbAudioVoicePrivate
 			{
 				(*Command)(Renderer);
 			}
+			// Per-frame live parameters (atomics, no queue: see FRbVoiceShared).
+			const uint32 Serial = Shared->LiveSerial.load(std::memory_order_acquire);
+			if (Serial != AppliedLiveSerial)
+			{
+				AppliedLiveSerial = Serial;
+				Renderer.SetLiveContinuous(static_cast<RbAudio::ENoiseKind>(Shared->LiveKind.load(std::memory_order_relaxed)),
+					Shared->LiveSpeedMps.load(std::memory_order_relaxed), Shared->LiveGainPerMps.load(std::memory_order_relaxed));
+			}
+			const double LiveGain = Shared->LiveOutputGain.load(std::memory_order_relaxed);
+			if (LiveGain >= 0.0 && LiveGain != AppliedLiveGain)
+			{
+				AppliedLiveGain = LiveGain;
+				Renderer.SetLiveOutputGain(LiveGain);
+			}
 			const int32 Frames = NumSamples / NumChannels;
 			if (Mono.Num() < Frames)
 			{
@@ -217,6 +231,8 @@ namespace RbAudioVoicePrivate
 		FRbVoiceSharedPtr Shared;
 		FAudioDevice* Device = nullptr;
 		int64 OwnFrame = 0;
+		uint32 AppliedLiveSerial = 0;
+		double AppliedLiveGain = -1.0;
 		RbAudio::FVoiceRenderer Renderer;
 		TArray<float> Mono;
 	};
@@ -351,17 +367,28 @@ void URbImpactVoiceComponent::PushPlan(FRbVoicePlanPtr Plan)
 
 void URbImpactVoiceComponent::AddLivePcm(TArray<float>&& Pcm, int32 DelayFrames)
 {
-	Shared->Commands.Enqueue([Samples = MoveTemp(Pcm), DelayFrames](RbAudio::FVoiceRenderer& R) { R.AddLivePcm(Samples, DelayFrames); });
+	// The closure owns the buffer; the renderer takes it over (no copy on the render thread).
+	Shared->Commands.Enqueue([Samples = MoveTemp(Pcm), DelayFrames](RbAudio::FVoiceRenderer& R) mutable { R.AddLivePcm(MoveTemp(Samples), DelayFrames); });
 }
 
 void URbImpactVoiceComponent::SetLiveContinuous(RbAudio::ENoiseKind Kind, double SpeedMps, double GainPerMps)
 {
-	Shared->Commands.Enqueue([Kind, SpeedMps, GainPerMps](RbAudio::FVoiceRenderer& R) { R.SetLiveContinuous(Kind, SpeedMps, GainPerMps); });
+	// Called every frame per rolling loose ball: atomics, no queue command (review M2-C: no per-frame allocation).
+	const bool bSame = Shared->LiveKind.load(std::memory_order_relaxed) == static_cast<uint8>(Kind)
+		&& Shared->LiveSpeedMps.load(std::memory_order_relaxed) == SpeedMps && Shared->LiveGainPerMps.load(std::memory_order_relaxed) == GainPerMps;
+	if (bSame && Shared->LiveSerial.load(std::memory_order_relaxed) != 0)
+	{
+		return;
+	}
+	Shared->LiveKind.store(static_cast<uint8>(Kind), std::memory_order_relaxed);
+	Shared->LiveSpeedMps.store(SpeedMps, std::memory_order_relaxed);
+	Shared->LiveGainPerMps.store(GainPerMps, std::memory_order_relaxed);
+	Shared->LiveSerial.fetch_add(1, std::memory_order_release);
 }
 
 void URbImpactVoiceComponent::SetLiveOutputGain(double Gain)
 {
-	Shared->Commands.Enqueue([Gain](RbAudio::FVoiceRenderer& R) { R.SetLiveOutputGain(Gain); });
+	Shared->LiveOutputGain.store(FMath::Max(0.0, Gain), std::memory_order_relaxed);
 }
 
 void URbImpactVoiceComponent::StartVoice()

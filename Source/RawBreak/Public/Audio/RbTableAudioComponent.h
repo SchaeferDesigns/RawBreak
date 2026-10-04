@@ -11,6 +11,9 @@
 //     to 3 s beyond the shot's stop time;
 //   * owns the table's voices by tier: T0 (player's table or < 3 m) 16 ball + 6 rail + 6 pocket + body + cue = 30; T1 (3-10 m) 4
 //     quadrant voices; T2 (> 10 m) 1 (audio.md 6.6). Ball voices follow their balls every frame; the others sit at their emitters;
+//   * plus ONE reverb-feed voice per table (any tier, when the venue has a reverb): non-spatialised, send-only (no base submix
+//     output), rendering FRbShotAudioPlan::ReverbFeed into the venue reverb, so the room is excited by the radiated power of each
+//     sound and not by the listener's directional signal (audio.md 3.6 / 6.4). The table voices carry no reverb send;
 //   * replays reuse the same path with the replay listener (the camera of that moment).
 // Owner: M2-C.
 
@@ -57,6 +60,8 @@ public:
 	// Creates / replaces the voices of a tier (only while no shot is sounding; otherwise the change waits).
 	void SetTier(ERbTableAudioTier NewTier);
 	ERbTableAudioTier GetTier() const { return Tier; }
+	// New routing (submixes, reverb). Voices take it when they are created; existing voices are created again as soon as no shot is
+	// sounding (a venue change during a shot).
 	void SetRouting(const FRbTableAudioRouting& InRouting);
 	// The Table bus volume on the voices' reverb send (now and for voices created later).
 	void SetReverbSendGain(float Gain);
@@ -64,6 +69,8 @@ public:
 	FRbShotAudioClockPtr GetClock() const { return Clock; }
 	ARbTable* GetTable() const;
 	const TArray<TObjectPtr<URbImpactVoiceComponent>>& GetVoices() const { return Voices; }
+	// The send-only voice that feeds the venue reverb with the table's radiated power (null without a reverb submix).
+	URbImpactVoiceComponent* GetReverbFeedVoice() const { return ReverbFeedVoice.Get(); }
 
 	// Listener used for the next plans (world); unset = the local player's audio listener.
 	void SetListenerOverride(TOptional<FVector> InListener) { ListenerOverride = InListener; }
@@ -101,6 +108,11 @@ protected:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<URbImpactVoiceComponent>> Voices;
+
+	UPROPERTY(Transient)
+	TObjectPtr<URbImpactVoiceComponent> ReverbFeedVoice;
+	// SetRouting changed the routing while the table was sounding: the voices are created again once it is quiet.
+	bool bRoutingDirty = false;
 
 	TWeakObjectPtr<URbShotPlaybackComponent> BoundPlayback;
 	FDelegateHandle StartedHandle;

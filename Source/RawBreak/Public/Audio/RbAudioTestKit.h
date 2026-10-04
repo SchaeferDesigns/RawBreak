@@ -57,9 +57,9 @@ namespace RbAudioTestKit
 	// A test voice (AU-0), registered and started (the editor module does not link the AudioMixer module that USynthComponent::Start
 	// lives in): Channel >= 0 = a non-spatialised stereo voice writing only to that output channel; Channel == -1 = a positional mono
 	// voice (1 / r beyond RefDistance) like the table voices; Channel == -2 = a non-spatialised mono voice (the engine's mono upmix).
-	// Optional reverb send (pre distance attenuation).
+	// Optional reverb send (pre distance attenuation); bSendOnly: no base submix output (the table's reverb-feed configuration).
 	RAWBREAK_API URbImpactVoiceComponent* SpawnTestVoice(AActor* Owner, USoundSubmix* Submix, int32 Channel, const FRbShotAudioClockPtr& Clock, FName Name,
-		USoundSubmix* ReverbSubmix = nullptr, float ReverbSend = 0.0f, double RefDistance = 1.0);
+		USoundSubmix* ReverbSubmix = nullptr, float ReverbSend = 0.0f, double RefDistance = 1.0, bool bSendOnly = false);
 
 	// Diagnostics of a voice: component active / playing, generator alive, blocks rendered.
 	RAWBREAK_API FString DescribeVoice(const URbImpactVoiceComponent* Voice);

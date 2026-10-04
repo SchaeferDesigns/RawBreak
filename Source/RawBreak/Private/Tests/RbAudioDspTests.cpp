@@ -753,6 +753,120 @@ bool FRbAudioDspVoiceHold::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbAudioDspVoiceReplay, "RawBreak.Unit.Audio.Dsp.VoiceRenderer_ReplayOnSameVoice", RB_UNIT_TEST_FLAGS)
+bool FRbAudioDspVoiceReplay::RunTest(const FString& Parameters)
+{
+	// A replay plays the same shot (a new plan id, the same seed) on the SAME voice that played it live (the voices live as long as
+	// the table's tier). It must render exactly what a fresh voice renders: the continuous layers' noise restarts from the plan's
+	// seed instead of continuing the live shot's random sequence (Docs/ue-architecture.md 18.5: replays render identically).
+	const double Fs = 48000.0;
+	const TSharedPtr<FVoicePlan, ESPMode::ThreadSafe> Live = MakeTestPlan(Fs, 7);
+	TSharedPtr<FVoicePlan, ESPMode::ThreadSafe> Replay = MakeShared<FVoicePlan, ESPMode::ThreadSafe>(*Live);
+	Replay->ShotId = 8;
+	const int64 ReplayStart = 49152; // 1.02 s: the live shot's impacts, tails and rolling have ended
+	const int32 Frames = 24576;
+
+	FShotAudioClock Clock;
+	Clock.StartShotAnchored(7, 1024, 0.0, 1.0, Fs);
+	FVoiceRenderer Same;
+	Same.Initialize(Fs, 512);
+	Same.SetPlan(Live);
+	TArray<float> Block;
+	Block.SetNumZeroed(512);
+	double LiveEnergy = 0.0;
+	for (int64 F = 0; F < ReplayStart; F += 512)
+	{
+		Same.RenderBlock(&Clock, F, Block);
+		for (const float S : Block)
+		{
+			LiveEnergy += static_cast<double>(S) * S;
+		}
+	}
+	TestTrue(TEXT("the live shot sounds"), LiveEnergy > 0.0);
+	Same.SetPlan(Replay);
+	Clock.StartShotAnchored(8, ReplayStart + 1024, 0.0, 1.0, Fs);
+	FShotAudioClock FreshClock;
+	FreshClock.StartShotAnchored(8, ReplayStart + 1024, 0.0, 1.0, Fs);
+	FVoiceRenderer Fresh;
+	Fresh.Initialize(Fs, 512);
+	Fresh.SetPlan(Replay);
+	TArray<float> FreshBlock;
+	FreshBlock.SetNumZeroed(512);
+	int32 Diff = 0;
+	double Energy = 0.0;
+	for (int64 F = ReplayStart; F < ReplayStart + Frames; F += 512)
+	{
+		Same.RenderBlock(&Clock, F, Block);
+		Fresh.RenderBlock(&FreshClock, F, FreshBlock);
+		for (int32 I = 0; I < 512; ++I)
+		{
+			Diff += Block[I] != FreshBlock[I] ? 1 : 0;
+			Energy += static_cast<double>(FreshBlock[I]) * FreshBlock[I];
+		}
+	}
+	TestTrue(TEXT("the replay sounds"), Energy > 0.0);
+	TestEqual(TEXT("a replay on the voice that played the live shot is bit-identical to a fresh voice (noise reseeded per plan)"), Diff, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbAudioDspSlowRolling, "RawBreak.Unit.Audio.Dsp.VoiceRenderer_SlowMotionRolling", RB_UNIT_TEST_FLAGS)
+bool FRbAudioDspSlowRolling::RunTest(const FString& Parameters)
+{
+	// audio.md 5.2 film style: at a replay rate s the impacts keep their pitch (only spaced by 1 / s), the rolling noise moves down
+	// by s^0.5 (x0.25: one octave) at the same level for the same ball speed. Measured on a ball rolling at a constant 1.5 m/s: the
+	// zero-crossing rate of band noise scales with its band.
+	const double Fs = 48000.0;
+	TSharedPtr<FVoicePlan, ESPMode::ThreadSafe> Plan = MakeShared<FVoicePlan, ESPMode::ThreadSafe>();
+	Plan->ShotId = 9;
+	Plan->Seed = 77;
+	Plan->OutputGain = 1.0;
+	FContinuousSegment Roll;
+	Roll.StartTime = 0.0;
+	Roll.EndTime = 2.0;
+	Roll.Speed0 = 1.5;
+	Roll.SpeedSlope = 0.0;
+	Roll.Gain = 1.0;
+	Roll.Kind = ENoiseKind::RollingCloth;
+	Plan->Continuous.Add(Roll);
+	auto Measure = [&Plan, Fs](double Rate, double& OutRms, double& OutZcr)
+	{
+		FShotAudioClock Clock;
+		Clock.StartShotAnchored(9, 0, 0.0, Rate, Fs);
+		FVoiceRenderer R;
+		R.Initialize(Fs, 512);
+		R.SetPlan(Plan);
+		TArray<float> Out;
+		TArray<float> Block;
+		Block.SetNumZeroed(512);
+		for (int64 F = 0; F < 48128; F += 512)
+		{
+			R.RenderBlock(&Clock, F, Block);
+			Out.Append(Block);
+		}
+		const int32 From = static_cast<int32>(0.1 * Fs);
+		const int32 To = static_cast<int32>(1.0 * Fs);
+		double E = 0.0;
+		int32 Crossings = 0;
+		for (int32 I = From; I < To; ++I)
+		{
+			E += static_cast<double>(Out[I]) * Out[I];
+			Crossings += (Out[I] >= 0.0f) != (Out[I - 1] >= 0.0f) ? 1 : 0;
+		}
+		OutRms = FMath::Sqrt(E / (To - From));
+		OutZcr = Crossings / ((To - From) / Fs);
+	};
+	double Rms1 = 0.0, Zcr1 = 0.0, RmsQ = 0.0, ZcrQ = 0.0;
+	Measure(1.0, Rms1, Zcr1);
+	Measure(0.25, RmsQ, ZcrQ);
+	const double Ratio = ZcrQ / FMath::Max(Zcr1, 1e-9);
+	const double LevelDb = 20.0 * std::log10(FMath::Max(RmsQ, 1e-30) / FMath::Max(Rms1, 1e-30));
+	AddInfo(FString::Printf(TEXT("rolling at 1.5 m/s: x1 %.0f zero crossings/s, x0.25 %.0f (ratio %.3f, want 0.5 = 0.25^0.5); level %+.2f dB"), Zcr1, ZcrQ, Ratio, LevelDb));
+	TestTrue(TEXT("the rolling layer sounds"), Rms1 > 0.0 && RmsQ > 0.0);
+	TestTrue(FString::Printf(TEXT("x0.25: the rolling noise is an octave lower (zero-crossing ratio %.3f, want 0.50 +- 0.08)"), Ratio), FMath::Abs(Ratio - 0.5) <= 0.08);
+	TestTrue(FString::Printf(TEXT("x0.25: the same level for the same ball speed (%+.2f dB, want +-1.5)"), LevelDb), FMath::Abs(LevelDb) <= 1.5);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbAudioDspPresentation, "RawBreak.Unit.Audio.Dsp.Presentation_Meters", RB_UNIT_TEST_FLAGS)
 bool FRbAudioDspPresentation::RunTest(const FString& Parameters)
 {

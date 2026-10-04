@@ -550,6 +550,10 @@ void URbAudioSubsystem::PlayFootstep(const FRbFootstep& Step, bool bOwnSteps)
 		FHitResult Hit;
 		FCollisionQueryParams Query(SCENE_QUERY_STAT(RbFootstepSurface), false);
 		Query.bReturnPhysicalMaterial = true;
+		if (const URbCameraRigComponent* Rig = BoundRig.Get())
+		{
+			Query.AddIgnoredActor(Rig->GetOwner()); // the walker's own capsule / body must not be the "floor" under its foot
+		}
 		if (World->LineTraceSingleByChannel(Hit, Step.WorldLocation + FVector(0.0, 0.0, 20.0), Step.WorldLocation - FVector(0.0, 0.0, 30.0), ECC_Visibility, Query)
 			&& Hit.PhysMaterial.IsValid())
 		{
@@ -625,18 +629,19 @@ void URbAudioSubsystem::HandleLooseBallImpact(const FRbLooseBallImpact& Impact)
 	}
 	FRbFloorHitParams Params;
 	Params.NormalSpeed = Impact.NormalSpeed > 0.0 ? Impact.NormalSpeed : Impact.NormalImpulse / FMath::Max(Impact.MassKg, 1e-3);
-	Params.BallMass = Impact.MassKg > 0.0 ? Impact.MassKg : RbAudio::StdBallMass;
-	Params.BallRadius = RbAudio::StdBallRadius;
+	// The acoustic ball is the table's ball (its kernels are prewarmed with the table's voices), never the physics body's mass: an
+	// exact-key cache miss would design a new kernel set on the game thread (~30 ms hitch) at every new mass value (review M2-C).
+	const FRbTableContext* Context = nullptr;
 	if (URbTableSubsystem* Tables = URbTableSubsystem::Get(this))
 	{
 		if (const ARbTable* Table = Tables->FindTable(Impact.TableIndex))
 		{
-			if (Table->HasContext() && Impact.BallId >= 0 && Impact.BallId < Table->GetContext().Balls.Count)
-			{
-				Params.BallRadius = Table->GetContext().Balls.Balls[Impact.BallId].Radius;
-			}
+			Context = Table->HasContext() ? &Table->GetContext() : nullptr;
 		}
 	}
+	const RbAudio::FBallAcoustics Ball = RbAudioLive::LooseBallAcoustics(Context, Impact.BallId);
+	Params.BallMass = Ball.Mass;
+	Params.BallRadius = Ball.Radius;
 	Params.Surface = RbFloorSurfaceFor(Impact.Surface, Profile.Floor);
 	Params.PlaneNormal = Impact.Normal;
 	Params.ContactPointCm = Impact.WorldLocation;
@@ -930,6 +935,10 @@ int32 URbAudioSubsystem::RestartStalledVoices(double Now)
 		for (URbImpactVoiceComponent* Voice : Audio->GetVoices())
 		{
 			Check(Voice, Voice && Voice->IsRendering(), [Voice]() { Voice->StartVoice(); });
+		}
+		if (URbImpactVoiceComponent* Feed = Audio->GetReverbFeedVoice())
+		{
+			Check(Feed, Feed->IsRendering(), [Feed]() { Feed->StartVoice(); });
 		}
 	}
 	for (URbAmbienceVoiceComponent* Voice : AmbienceVoices)

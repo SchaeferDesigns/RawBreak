@@ -85,14 +85,42 @@ namespace RbAudio
 		}
 	}
 
-	void FShapedNoise::Initialize(ENoiseKind InKind, double SampleRate, uint64 Seed)
+	void FShapedNoise::Initialize(ENoiseKind InKind, double InSampleRate, uint64 Seed)
 	{
 		Kind = InKind;
+		SampleRate = InSampleRate;
+		Pitch = 1.0;
 		Rng.Reseed(Seed);
 		double Lo, Hi;
 		BandFor(Kind, Lo, Hi);
 		FBiquad::ButterBandPass2(Lo, Hi, SampleRate, A, B);
 		Norm = CachedUnitRmsNorm(Kind, A, B, SampleRate);
+		BaseNorm = Norm;
+	}
+
+	void FShapedNoise::SetPitch(double Factor)
+	{
+		Factor = FMath::Clamp(Factor, 0.05, 4.0);
+		if (Factor == Pitch)
+		{
+			return;
+		}
+		Pitch = Factor;
+		double Lo, Hi;
+		BandFor(Kind, Lo, Hi);
+		FBiquad NewA, NewB;
+		FBiquad::ButterBandPass2(Lo * Factor, Hi * Factor, SampleRate, NewA, NewB);
+		NewA.Z1 = A.Z1;
+		NewA.Z2 = A.Z2;
+		NewB.Z1 = B.Z1;
+		NewB.Z2 = B.Z2;
+		A = NewA;
+		B = NewB;
+		// The band's noise power is proportional to its width (the same shape on a log axis: Lo and Hi both scale with the factor; the
+		// high edge is clamped at 0.45 fs by ButterBandPass2, so the scaling uses the clamped width).
+		const double Width1 = FMath::Min(Hi, 0.45 * SampleRate) - Lo;
+		const double WidthF = FMath::Min(Hi * Factor, 0.45 * SampleRate) - Lo * Factor;
+		Norm = BaseNorm * FMath::Sqrt(Width1 / FMath::Max(WidthF, 1e-9));
 	}
 
 	void FShapedNoise::Prewarm(double SampleRate)

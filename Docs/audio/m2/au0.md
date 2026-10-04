@@ -70,6 +70,12 @@ positioning.
      no source at all.
 5. Sends: the reverb send is taken **pre distance attenuation** (the diffuse field does not fall with distance) and is scaled
    by the voice's bus volume (`SetReverbSendGain`), because the reverb submix is shared by all buses.
+6. (Review) The **table voices have no reverb send**: their signal is the listener's directional one (a click heard in its
+   dipole null is ~20 dB down, on its axis +4.8 dB over its radiated power). One **reverb-feed voice per table** (non-spatialised
+   mono, send-only: `bEnableBaseSubmix` off) renders `FRbShotAudioPlan::ReverbFeed`, every event with the ball radiation at its
+   radiated power (weights 1 / sqrt(2n + 1)), into the venue reverb (audio.md 3.6 / 6.4). Probe "table reverb feed (calibration)":
+   no dry output (-205.6 dB), reverb -0.96 / +0.03 dB vs the diffuse field (L / R), the same as the positional probe, because a
+   non-spatialised mono source reaches each channel at the same -6.01 dB as a centred positional one.
 
 ## Not covered
 

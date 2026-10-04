@@ -29,6 +29,8 @@
 #include "HAL/PlatformTime.h"
 #include "Misc/Paths.h"
 
+#include "rb/Physics/Playback.h"
+
 #include <cmath>
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -84,25 +86,28 @@ namespace RbAudioTests
 		return O;
 	}
 
-	// Renders every voice of a plan offline through FVoiceRenderer (anchored at frame 0), Frames frames, BlockFrames per block.
-	void RenderVoices(const FRbShotAudioPlan& Plan, double Fs, int32 BlockFrames, int32 Frames, TArray<TArray<float>>& Out, TArray<double>* OutBlockMicros = nullptr)
+	// Renders every voice of a plan offline through FVoiceRenderer (anchored at frame 0), Frames frames, BlockFrames per block; with
+	// bWithFeed the table's reverb feed is rendered as the last entry of Out (it runs on the audio thread like the voices).
+	void RenderVoices(const FRbShotAudioPlan& Plan, double Fs, int32 BlockFrames, int32 Frames, TArray<TArray<float>>& Out, TArray<double>* OutBlockMicros = nullptr,
+		bool bWithFeed = true)
 	{
 		FShotAudioClock Clock;
 		Clock.StartShotAnchored(1, 0, 0.0, 1.0, Fs);
+		const int32 NumRenderers = Plan.Voices.Num() + (bWithFeed ? 1 : 0);
 		TArray<FVoiceRenderer> Renderers;
-		Renderers.SetNum(Plan.Voices.Num());
-		Out.SetNum(Plan.Voices.Num());
-		for (int32 V = 0; V < Plan.Voices.Num(); ++V)
+		Renderers.SetNum(NumRenderers);
+		Out.SetNum(NumRenderers);
+		for (int32 V = 0; V < NumRenderers; ++V)
 		{
 			Renderers[V].Initialize(Fs, BlockFrames);
-			Renderers[V].SetPlan(MakeShared<const FVoicePlan, ESPMode::ThreadSafe>(Plan.Voices[V]));
+			Renderers[V].SetPlan(MakeShared<const FVoicePlan, ESPMode::ThreadSafe>(V < Plan.Voices.Num() ? Plan.Voices[V] : Plan.ReverbFeed));
 			Out[V].Reset();
 		}
 		TArray<float> Block;
 		for (int64 F = 0; F < Frames; F += BlockFrames)
 		{
 			const uint64 T0 = FPlatformTime::Cycles64();
-			for (int32 V = 0; V < Plan.Voices.Num(); ++V)
+			for (int32 V = 0; V < NumRenderers; ++V)
 			{
 				Block.SetNumZeroed(BlockFrames);
 				Renderers[V].RenderBlock(&Clock, F, Block);
@@ -314,7 +319,7 @@ bool FRbAudioT19::RunTest(const FString& Parameters)
 		}
 	}
 	const double BlockMicros = 512.0 / Fs * 1e6;
-	AddInfo(FString::Printf(TEXT("densest block %d (%.1f ms into the shot): all 30 voices rendered in %.0f us on one thread = %.1f %% of a %.2f ms block"),
+	AddInfo(FString::Printf(TEXT("densest block %d (%.1f ms into the shot): all 30 voices + the reverb feed rendered in %.0f us on one thread = %.1f %% of a %.2f ms block"),
 		At, At * 512.0 / Fs * 1e3, Max, 100.0 * Max / BlockMicros, BlockMicros / 1000.0));
 	TestTrue(FString::Printf(TEXT("AU-T19 (offline, one thread): %.0f us <= 60 %% of a block (%.0f us)"), Max, 0.6 * BlockMicros), Max <= 0.6 * BlockMicros);
 	return true;
@@ -394,6 +399,140 @@ bool FRbAudioPlanTiers::RunTest(const FString& Parameters)
 	return true;
 }
 
+	// Renders one voice plan offline (anchored at frame 0) and returns its energy.
+	double RenderEnergy(const FVoicePlan& Plan, double Fs, int32 Frames)
+	{
+		FShotAudioClock Clock;
+		Clock.StartShotAnchored(Plan.ShotId, 0, 0.0, 1.0, Fs);
+		FVoiceRenderer R;
+		R.Initialize(Fs, 512);
+		R.SetPlan(MakeShared<const FVoicePlan, ESPMode::ThreadSafe>(Plan));
+		TArray<float> Block;
+		Block.SetNumZeroed(512);
+		double Energy = 0.0;
+		for (int64 F = 0; F < Frames; F += 512)
+		{
+			R.RenderBlock(&Clock, F, Block);
+			for (const float S : Block)
+			{
+				Energy += static_cast<double>(S) * S;
+			}
+		}
+		return Energy;
+	}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbAudioPlanReverbFeed, "RawBreak.Unit.Audio.Plan_ReverbFeed_RadiatedPower", RB_UNIT_TEST_FLAGS)
+bool FRbAudioPlanReverbFeed::RunTest(const FString& Parameters)
+{
+	// audio.md 3.6 / 6.4: the room is excited by the radiated power of a sound, independent of where the listener hears it from. The
+	// table voices carry the listener's directional signal (a click heard in its dipole's null is ~20 dB down); the reverb feed must
+	// not: the same break planned for a listener on the first click's axis (the breaker) and for one beside it (in its null) feeds
+	// the reverb with the same energy.
+	const FBreak B = MakeBreak(true);
+	if (!TestTrue(TEXT("break simulated"), B.Shot.IsValid()))
+	{
+		return false;
+	}
+	const rb::ShotResult& R = B.Shot->Result;
+	const rb::ShotEvent* First = nullptr;
+	for (const rb::ShotEvent& E : R.Events)
+	{
+		if (E.Type == rb::ShotEventType::BallBall)
+		{
+			First = &E;
+			break;
+		}
+	}
+	if (!TestNotNull(TEXT("the break has a ball-ball click"), First))
+	{
+		return false;
+	}
+	rb::BallState Cue;
+	rb::StateAt(R, First->A, First->Time, Cue);
+	const double Nl = rb::Length(rb::Planar(First->Normal));
+	const rb::Vec3 Axis = Nl > 1e-9 ? rb::Planar(First->Normal) / Nl : rb::Vec3(1.0, 0.0, 0.0);
+	const rb::Vec3 Side = Cue.Position + rb::Vec3(-Axis.y, Axis.x, 0.0) * 1.2 + rb::Vec3(0.0, 0.0, 0.36);
+	FRbAudioPlanOptions O = Options(ERbTableAudioTier::T0, EDynamicRangeMode::Wide, B.Shot->ResultHash);
+	O.bPresentation = false; // the envelope depends on the listener; the feed's directivity is what is tested here
+	FRbShotAudioPlan OnAxis, SideOn;
+	FRbAudioPlanBuilder::Build(R, *B.Shot->Request.Table, B.Head, O, OnAxis);
+	FRbAudioPlanBuilder::Build(R, *B.Shot->Request.Table, Side, O, SideOn);
+
+	// The feed holds every voice's events and continuous layers.
+	int32 VoiceEvents = 0;
+	int32 VoiceSegments = 0;
+	for (const FVoicePlan& V : OnAxis.Voices)
+	{
+		VoiceEvents += V.Impacts.Num();
+		VoiceSegments += V.Continuous.Num();
+	}
+	TestEqual(TEXT("the feed holds every voice event"), OnAxis.ReverbFeed.Impacts.Num(), VoiceEvents);
+	TestEqual(TEXT("the feed holds every continuous layer"), OnAxis.ReverbFeed.Continuous.Num(), VoiceSegments);
+	TestTrue(TEXT("the feed plays under the voices' shot id"), OnAxis.ReverbFeed.ShotId == OnAxis.Voices[0].ShotId);
+
+	// The voices are directional: the first click on the cue ball's voice is near its axis for the breaker, near the null beside it.
+	auto FirstClickWeight = [First](const FRbShotAudioPlan& P)
+	{
+		for (const FImpactEvent& E : P.Voices[First->A].Impacts)
+		{
+			if (E.Kind == EImpactKind::BallBall)
+			{
+				return FMath::Abs(E.Paths[0].Weights[1]);
+			}
+		}
+		return 0.0;
+	};
+	const double WOn = FirstClickWeight(OnAxis);
+	const double WSide = FirstClickWeight(SideOn);
+	TestTrue(FString::Printf(TEXT("the voices are directional: first click |P_1| %.3f for the breaker, %.3f beside it (>= 10 dB apart)"), WOn, WSide),
+		WOn >= 3.16 * WSide);
+
+	// The feed is not: power weights 1 / sqrt(2n + 1), no near field, no image, identical for both listeners.
+	bool bPower = OnAxis.ReverbFeed.Impacts.Num() == SideOn.ReverbFeed.Impacts.Num();
+	int32 BallEvents = 0;
+	for (int32 I = 0; bPower && I < OnAxis.ReverbFeed.Impacts.Num(); ++I)
+	{
+		const FImpactEvent& A = OnAxis.ReverbFeed.Impacts[I];
+		const FImpactEvent& S = SideOn.ReverbFeed.Impacts[I];
+		bPower &= A.ImpactId == S.ImpactId && A.Kind == S.Kind && A.Bank == S.Bank && A.Kernels == S.Kernels;
+		if (A.Kernels.IsValid())
+		{
+			++BallEvents;
+			bPower &= A.NumPaths == 1 && S.NumPaths == 1 && A.Paths[0].NearField == 0.0 && A.Paths[0].Gain == S.Paths[0].Gain;
+			for (int32 N = 0; N <= 3; ++N)
+			{
+				bPower &= A.Paths[0].Weights[N] == FRbAudioPlanBuilder::PowerWeight(N) && S.Paths[0].Weights[N] == A.Paths[0].Weights[N];
+			}
+		}
+	}
+	TestTrue(FString::Printf(TEXT("feed: %d ball events at their radiated power (weights 1 / sqrt(2n + 1)), the same for both listeners"), BallEvents),
+		bPower && BallEvents > 0);
+	const double Fs = 48000.0;
+	const int32 Frames = static_cast<int32>(8.0 * Fs);
+	const double EOn = RenderEnergy(OnAxis.ReverbFeed, Fs, Frames);
+	const double ESide = RenderEnergy(SideOn.ReverbFeed, Fs, Frames);
+	const double FeedDb = 10.0 * std::log10(FMath::Max(EOn, 1e-30) / FMath::Max(ESide, 1e-30));
+	AddInfo(FString::Printf(TEXT("reverb feed energy: breaker vs beside the first click %+.3f dB (direction independent)"), FeedDb));
+	// Only the propagation delays differ between the two feeds: overlapping clicks of the break cluster interfere a little differently.
+	TestTrue(FString::Printf(TEXT("the reverb feed energy is listener independent (%+.3f dB, want +-1.0)"), FeedDb), EOn > 0.0 && FMath::Abs(FeedDb) <= 1.0);
+
+	// Reduced tiers: order 1 only (at its power weight).
+	FRbShotAudioPlan Far;
+	FRbAudioPlanBuilder::Build(R, *B.Shot->Request.Table, Side, Options(ERbTableAudioTier::T1, EDynamicRangeMode::Wide, 1), Far);
+	bool bOrder1 = Far.ReverbFeed.Impacts.Num() > 0;
+	for (const FImpactEvent& E : Far.ReverbFeed.Impacts)
+	{
+		if (E.Kernels.IsValid())
+		{
+			bOrder1 &= E.Paths[0].Weights[0] == 0.0 && E.Paths[0].Weights[2] == 0.0 && E.Paths[0].Weights[3] == 0.0
+				&& E.Paths[0].Weights[1] == FRbAudioPlanBuilder::PowerWeight(1);
+		}
+	}
+	TestTrue(TEXT("T1 feed: order 1 only, at 1 / sqrt 3"), bOrder1);
+	TestTrue(TEXT("the feed carries the presentation envelope of the stem"), Far.ReverbFeed.Presentation.IsValid() && Far.ReverbFeed.Presentation == Far.Presentation);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbAudioLiveTest, "RawBreak.Unit.Audio.Live_FloorHitFootstep", RB_UNIT_TEST_FLAGS)
 bool FRbAudioLiveTest::RunTest(const FString& Parameters)
 {
@@ -442,6 +581,34 @@ bool FRbAudioLiveTest::RunTest(const FString& Parameters)
 	FFootstepSynth::Render(Step, Fs, AtOne);
 	RbAudioLive::RenderFootstep(Step, 0.25, Fs, AtRef);
 	TestTrue(TEXT("footstep referred to 0.25 m = 4 x the 1 m pressure"), AtOne.Num() == AtRef.Num() && FMath::IsNearlyEqual(AtRef[1000], 4.0f * AtOne[1000], 1e-6f));
+
+	// A loose ball sounds with the table's acoustic ball, so its floor hit reuses the kernels the table prewarmed (never a fresh
+	// kernel design on the game thread for the physics body's mass, e.g. 0.17 or a float-rounded 0.170097).
+	FRbShotRequest Request;
+	FString Error;
+	if (TestTrue(FString::Printf(TEXT("dive-bar table (%s)"), *Error), RbAudioScenarios::MakeDiveBarBreak8(Request, Error) && Request.Table.IsValid()))
+	{
+		const FRbTableContext& Context = *Request.Table;
+		const FBallAcoustics Table3 = FRbAudioPlanBuilder::BallAcoustics(Context, 3);
+		const FBallAcoustics Loose3 = RbAudioLive::LooseBallAcoustics(&Context, 3);
+		TestTrue(TEXT("a loose ball is the table's ball (radius, mass, material)"), Loose3 == Table3);
+		RbAudioLive::Prewarm(Fs);
+		const FBallKernelsPtr Prewarmed = GetBallKernels(Table3, Fs, false);
+		FRbFloorHitParams Hit;
+		Hit.NormalSpeed = 2.0;
+		Hit.BallRadius = Loose3.Radius;
+		Hit.BallMass = Loose3.Mass;
+		const FImpactEvent Ev = RbAudioLive::MakeFloorHitEvent(Hit, Fs);
+		TestTrue(TEXT("the floor hit reuses the table ball's cached kernels"), Ev.Kernels.IsValid() && Ev.Kernels == Prewarmed);
+		const FBallAcoustics Unknown = RbAudioLive::LooseBallAcoustics(nullptr, 3);
+		TestTrue(TEXT("unknown table: the standard ball"), Unknown.Radius == StdBallRadius && Unknown.Mass == StdBallMass && Unknown.Material == PhenolicMaterial());
+		TestTrue(TEXT("a ball id outside the set: the standard ball"), RbAudioLive::LooseBallAcoustics(&Context, 99) == Unknown);
+		const uint64 T0 = FPlatformTime::Cycles64();
+		TArray<float> Pcm;
+		RbAudioLive::RenderFloorHit(Hit, Fs, Pcm);
+		const double Ms = FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64() - T0);
+		AddInfo(FString::Printf(TEXT("a loose ball's floor hit with warm caches renders in %.2f ms on the calling (game) thread"), Ms));
+	}
 	return true;
 }
 

@@ -6,7 +6,9 @@
 //     into an overlap-add ring at its fractional device frame from the table's FShotAudioClock snapshot (sub-sample exact, and
 //     every voice of a table shares the anchor: AU-T08 / AU-T21);
 //   * continuous layers (rolling / sliding / gully) evaluated at the shot time of every output frame (frame-rate independent),
-//     faded out while the clock is held or stopped (pause without a click);
+//     faded out while the clock is held or stopped (pause without a click); at a replay rate s their noise band moves by s^0.5
+//     (film style, audio.md 5.2); a new plan restarts the noise of every silent kind from the plan's seed (a replay on the same voice
+//     renders like the live shot);
 //   * the plan-time presentation envelope of the table stem and the output gain (Pa -> digital) applied at the output;
 //   * mapping changes: forward re-anchors (rate, hold / resume) keep what was rendered; a backward seek re-renders from the new
 //     origin; a new plan starts from its clock origin;
@@ -51,6 +53,8 @@ namespace RbAudio
 		void SetLiveOutputGain(double Gain) { LiveOutputGain = Gain; }
 		// Adds a pre-rendered one-shot [Pa at the voice's reference distance]; it starts DelayFrames after the next block start.
 		void AddLivePcm(TConstArrayView<float> Pcm, int32 DelayFrames = 0);
+		// The same, taking the buffer over (no copy on the render thread).
+		void AddLivePcm(TArray<float>&& Pcm, int32 DelayFrames = 0);
 		// Live continuous layer (loose ball rolling on the floor): target speed [m/s] and amplitude per m/s; smoothed per frame.
 		void SetLiveContinuous(ENoiseKind Kind, double SpeedMps, double GainPerMps);
 
