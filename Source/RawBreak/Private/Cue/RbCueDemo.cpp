@@ -3,18 +3,18 @@
 #include "RawBreak.h"
 #include "Balls/RbBallSet.h"
 #include "Cue/RbCue.h"
+#include "Game/RbTableSubsystem.h"
 #include "Player/RbStrokeComponent.h"
 #include "Table/RbTable.h"
 
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
 
 #include "rb/Equipment/Cue.h"
 #include "rb/Human/HumanModel.h"
 #include "rb/Physics/CueStrike.h"
 
-// Owner: UE-4 (dev tool).
+// Owner: UE-4 (dev tool), M2-F.
 
 // File-local helpers in a named namespace (unity builds share one translation unit between files).
 namespace RbCueDemoPrivate
@@ -52,10 +52,10 @@ void ARbCueDemo::BuildScene()
 	}
 	if (!Table)
 	{
-		for (TActorIterator<ARbTable> It(World); It; ++It)
+		// The player's table (multi-table rule 18.6.2: no "first table found" outside URbTableSubsystem; M2-E's request).
+		if (const URbTableSubsystem* Tables = URbTableSubsystem::Get(this))
 		{
-			Table = *It;
-			break;
+			Table = Tables->GetPlayerTable();
 		}
 	}
 	if (!Table)

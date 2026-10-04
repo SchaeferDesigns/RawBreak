@@ -11,6 +11,7 @@
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "GameFramework/PlayerInput.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "InputActionValue.h"
@@ -65,17 +66,48 @@ void ARbPlayerController::SetupInputComponent()
 	RegisterMappingContext(); // SetPlayer (the local player is set) may run after BeginPlay
 }
 
+bool ARbPlayerController::NeutraliseMouseAxes(UPlayerInput* Input)
+{
+	if (!Input)
+	{
+		return false;
+	}
+	// M2-F (P3): the Look action must carry raw counts. Enhanced Input applies the legacy axis properties of a mouse key (BaseInput.ini:
+	// Sensitivity 0.07) as a hidden Scalar modifier when the mappings are rebuilt; DefaultInput.ini neutralises them, and this makes
+	// sure (a user / plugin ini cannot bring the 0.07 back).
+	bool bChanged = false;
+	for (const FKey& Key : {EKeys::MouseX, EKeys::MouseY, EKeys::Mouse2D})
+	{
+		FInputAxisProperties Props;
+		if (Input->GetAxisProperties(Key, Props) && (Props.Sensitivity != 1.0f || Props.DeadZone != 0.0f || Props.Exponent != 1.0f || Props.bInvert))
+		{
+			Props.Sensitivity = 1.0f;
+			Props.DeadZone = 0.0f;
+			Props.Exponent = 1.0f;
+			Props.bInvert = false;
+			Input->SetAxisProperties(Key, Props);
+			bChanged = true;
+		}
+	}
+	return bChanged;
+}
+
 void ARbPlayerController::RegisterMappingContext()
 {
 	if (!InputSetup || !InputSetup->Context || !IsLocalController())
 	{
 		return;
 	}
+	const bool bAxesChanged = NeutraliseMouseAxes(PlayerInput);
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
 		if (!Subsystem->HasMappingContext(InputSetup->Context))
 		{
 			Subsystem->AddMappingContext(InputSetup->Context, 0);
+		}
+		else if (bAxesChanged)
+		{
+			Subsystem->RequestRebuildControlMappings();
 		}
 	}
 }

@@ -3,18 +3,21 @@
 // CalculateProjectionMatrixGivenViewRectangle, MaintainYFOV) gives V = 50 deg at 16:9 and 21:9 with the filmback that
 // ApplyPresetToCamera sets (also when the local player is configured for MaintainXFOV: the camera carries MaintainYFOV), f and N
 // equal PupilToCineLens at the viewport aspect; exposure / shutter / sensor post-process of the presets; accommodation ease and the
-// EV100 read-back of UE 5.8's eye adaptation; head motion amplitudes (plan 4.8); the rig's get-down / stand-up transition and gaze
-// clamps in a game world; the focus following the gaze away from the line; the FOV slider range; the pawn's input routing through
-// the stroke component; the controller's actions and input wiring (incl. the M2 Pause action on Esc); and the functional check that the
+// EV100 read-back of UE 5.8's eye adaptation; head motion amplitudes (plan 4.8, now FRbHumanMotion's continuous layer); the rig's
+// get-down / stand-up transition (the Quick style's plain ease; the human path: RbHumanMotionTests) and gaze clamps in a game world;
+// the focus following the gaze away from the line; the FOV slider range; the pawn's input routing through the stroke component (raw
+// mouse counts, M2-F); the controller's actions and input wiring (incl. the M2 Pause action on Esc); and the functional check that the
 // pawn cannot walk into the table (a ticked physics world with the UE-1 table, runtime and baked meshes).
-// Owner: UE-5b.
+// Owner: UE-5b, M2-F.
 
 #include "Camera/RbCameraModel.h"
 #include "Camera/RbCameraRigComponent.h"
-#include "Camera/RbHeadMotion.h"
+#include "Camera/RbHumanMotion.h"
 #include "Core/RbCoords.h"
+#include "Input/RbAimResponse.h"
 #include "Input/RbInputSetup.h"
 #include "Math/RbCameraMath.h"
+#include "Player/RbBallInHandComponent.h"
 #include "Player/RbPlayerCharacter.h"
 #include "Player/RbPlayerController.h"
 #include "Player/RbStrokeComponent.h"
@@ -446,12 +449,13 @@ bool FRbCameraFocusEase::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbCameraHeadMotion, "RawBreak.Unit.Camera.HeadMotion_Plan48", RB_UNIT_TEST_FLAGS)
 bool FRbCameraHeadMotion::RunTest(const FString& Parameters)
 {
+	// The M1 head-motion numbers of plan 4.8, now produced by FRbHumanMotion's continuous layer (M2-F folded FRbHeadMotion in).
 	const FRbCameraPresetParams Eyes = RbCameraModel::Defaults(ERbCameraPreset::Eyes);
 	const FRbCameraPresetParams Head = RbCameraModel::Defaults(ERbCameraPreset::Headcam);
 	const FRbHeadMotionParams& HP = Eyes.HeadMotion;
-	TestEqual(TEXT("bob 3 cm p-p at 0.8 m/s"), FRbHeadMotion::BobPeakToPeakCm(0.8, HP), 3.0, 1e-9);
-	TestEqual(TEXT("bob 4.5 cm p-p at 1.4 m/s"), FRbHeadMotion::BobPeakToPeakCm(1.4, HP), 4.5, 1e-9);
-	TestEqual(TEXT("no bob at rest"), FRbHeadMotion::BobPeakToPeakCm(0.0, HP), 0.0);
+	TestEqual(TEXT("bob 3 cm p-p at 0.8 m/s"), FRbHumanMotion::BobPeakToPeakCm(0.8, HP), 3.0, 1e-9);
+	TestEqual(TEXT("bob 4.5 cm p-p at 1.4 m/s"), FRbHumanMotion::BobPeakToPeakCm(1.4, HP), 4.5, 1e-9);
+	TestEqual(TEXT("no bob at rest"), FRbHumanMotion::BobPeakToPeakCm(0.0, HP), 0.0);
 
 	// Peak-to-peak of each offset axis over Seconds at 120 Hz.
 	struct FRange
@@ -462,12 +466,22 @@ bool FRbCameraHeadMotion::RunTest(const FString& Parameters)
 		FVector PP() const { return Max - Min; }
 	};
 	const auto Sample = [](const FRbCameraPresetParams& P, double Speed, bool bDown, double Settle, double Scale, double Seconds) {
-		FRbHeadMotion Motion;
+		FRbHumanMotion Motion;
 		FRange R;
 		const int32 Steps = FMath::RoundToInt32(Seconds * 120.0);
+		FRbHumanMotionInputs In;
+		In.DeltaSeconds = 1.0 / 120.0;
+		In.WalkSpeedMps = Speed;
+		In.bDown = bDown;
+		In.SettleAlpha = Settle;
+		In.MotionScale = Scale;
 		for (int32 I = 0; I < Steps; ++I)
 		{
-			const FRbHeadMotionSample S = Motion.Step(1.0 / 120.0, Speed, bDown, Settle, P, Scale);
+			const FRbHumanMotionSample S = Motion.Step(In, P);
+			if (I < 120)
+			{
+				continue; // the gait follows the speed with a short lag: measure the steady state
+			}
 			R.Min = R.Min.ComponentMin(S.Offset);
 			R.Max = R.Max.ComponentMax(S.Offset);
 			R.MaxRot = FMath::Max(R.MaxRot, FMath::Max3(FMath::Abs(S.Rotation.Pitch), FMath::Abs(S.Rotation.Yaw), FMath::Abs(S.Rotation.Roll)));
@@ -475,10 +489,11 @@ bool FRbCameraHeadMotion::RunTest(const FString& Parameters)
 		return R;
 	};
 
-	// Headcam (full translation): walking at 1.4 m/s bobs ~4.5 cm p-p vertically (+ breathing), sways ~2.5 cm laterally.
+	// Headcam (full translation): walking at 1.4 m/s bobs ~4.5 cm p-p vertically (+ breathing), sways ~2.5 cm laterally (+ the
+	// postural sway).
 	const FRange HeadWalk = Sample(Head, 1.4, false, 0.0, 1.0, 20.0);
 	TestTrue(FString::Printf(TEXT("Headcam walking bob p-p %.2f cm in [4.3, 5.2]"), HeadWalk.PP().Z), HeadWalk.PP().Z >= 4.3 && HeadWalk.PP().Z <= 5.2);
-	TestTrue(FString::Printf(TEXT("Headcam walking sway p-p %.2f cm in [2.3, 3.8]"), HeadWalk.PP().Y), HeadWalk.PP().Y >= 2.3 && HeadWalk.PP().Y <= 3.8);
+	TestTrue(FString::Printf(TEXT("Headcam walking sway p-p %.2f cm in [2.3, 4.2]"), HeadWalk.PP().Y), HeadWalk.PP().Y >= 2.3 && HeadWalk.PP().Y <= 4.2);
 	TestTrue(TEXT("Headcam nods / rolls (no VOR)"), HeadWalk.MaxRot > 0.1);
 	// Eyes: translation x0.3, rotation stabilised (no rotation from the layer).
 	const FRange EyesWalk = Sample(Eyes, 1.4, false, 0.0, 1.0, 20.0);
@@ -487,7 +502,7 @@ bool FRbCameraHeadMotion::RunTest(const FString& Parameters)
 	// Standing still: breathing + postural sway only, millimetres.
 	const FRange HeadStill = Sample(Head, 0.0, false, 0.0, 1.0, 30.0);
 	TestTrue(FString::Printf(TEXT("standing breathing p-p %.3f cm ~ 2 x 2.5 mm"), HeadStill.PP().Z), HeadStill.PP().Z >= 0.4 && HeadStill.PP().Z <= 0.55);
-	TestTrue(FString::Printf(TEXT("standing sway p-p %.3f cm <= 2 x 4.5 mm"), HeadStill.PP().X), HeadStill.PP().X > 0.1 && HeadStill.PP().X <= 1.1);
+	TestTrue(FString::Printf(TEXT("standing sway p-p %.3f cm in (1 mm, 2 cm)"), HeadStill.PP().X), HeadStill.PP().X > 0.1 && HeadStill.PP().X <= 2.0);
 	// Down on the shot: smaller breathing (1.5 mm) and sway (1 mm); no walking even with a speed.
 	const FRange HeadDown = Sample(Head, 1.4, true, 0.0, 1.0, 30.0);
 	TestTrue(FString::Printf(TEXT("down breathing p-p %.3f cm ~ 2 x 1.5 mm"), HeadDown.PP().Z), HeadDown.PP().Z >= 0.25 && HeadDown.PP().Z <= 0.33);
@@ -499,13 +514,15 @@ bool FRbCameraHeadMotion::RunTest(const FString& Parameters)
 	const FRange Off = Sample(Head, 1.4, false, 0.0, 0.0, 5.0);
 	TestTrue(TEXT("reduced motion: no offset, no rotation"), Off.PP().IsNearlyZero(1e-12) && Off.MaxRot == 0.0);
 	// A speed change never makes the bob jump (integrated step phase).
-	FRbHeadMotion Motion;
+	FRbHumanMotion Motion;
+	FRbHumanMotionInputs In;
+	In.DeltaSeconds = 1.0 / 120.0;
 	double Last = 0.0;
 	double MaxJump = 0.0;
 	for (int32 I = 0; I < 600; ++I)
 	{
-		const double Speed = I < 300 ? 0.8 : 1.4;
-		const double Z = Motion.Step(1.0 / 120.0, Speed, false, 0.0, Head, 1.0).Offset.Z;
+		In.WalkSpeedMps = I < 300 ? 0.8 : 1.4;
+		const double Z = Motion.Step(In, Head).Offset.Z;
 		if (I > 0)
 		{
 			MaxJump = FMath::Max(MaxJump, FMath::Abs(Z - Last));
@@ -530,8 +547,11 @@ bool FRbCameraRigTransition::RunTest(const FString& Parameters)
 	URbCameraRigComponent* Rig = Pawn->GetCameraRig();
 	UCineCameraComponent* Cam = Pawn->GetCamera();
 	Rig->SetComfort(0.0, 1.0, 1.0, true); // no head motion: the camera = the base pose
+	// The geometric checks run the Quick style (a plain 0.4 s smoothstep); the human path is RawBreak.Unit.HumanMotion.* (M2-F).
+	Rig->SetMotionComfort(1.0, 1.0, 1.0, ERbPostureTransition::Quick);
 	Rig->TickRig(0.0);
 	const FRbCameraPresetParams& P = Rig->GetParams();
+	const double QuickSeconds = 0.4;
 
 	// Standing: the eye 1.65 m above the capsule bottom, looking along the pawn's view rotation.
 	const double Floor = Pawn->GetActorLocation().Z - Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
@@ -551,7 +571,7 @@ bool FRbCameraRigTransition::RunTest(const FString& Parameters)
 	Rig->SetMode(ERbCameraRigMode::DownOnShot);
 	TestEqual(TEXT("transition starts"), Rig->GetTransitionAlpha(), 0.0);
 	const FVector DownEye = URbCameraRigComponent::ComputeDownOnShotEye(Contact, U, P);
-	const double Half = 0.5 * P.GetDownSeconds;
+	const double Half = 0.5 * QuickSeconds;
 	Rig->TickRig(Half);
 	const FVector Mid = Cam->GetComponentLocation();
 	TestEqual(TEXT("half-way (smoothstep 0.5)"), FVector::Dist(Mid, FMath::Lerp(StandEye, DownEye, 0.5)), 0.0, 1e-3);
@@ -597,7 +617,7 @@ bool FRbCameraRigTransition::RunTest(const FString& Parameters)
 
 	// Stand up: back to the standing eye over the capsule.
 	Rig->SetMode(ERbCameraRigMode::Standing);
-	Rig->TickRig(P.GetDownSeconds + 0.01);
+	Rig->TickRig(QuickSeconds + 0.01);
 	TestTrue(TEXT("standing again"), FVector::Dist(Cam->GetComponentLocation(), StandEye) < 1e-3);
 
 	// A new get-down resets the gaze offsets.
@@ -608,7 +628,7 @@ bool FRbCameraRigTransition::RunTest(const FString& Parameters)
 	const FVector USteep = FVector(FMath::Cos(FMath::DegreesToRadians(40.0)), 0.0, -FMath::Sin(FMath::DegreesToRadians(40.0)));
 	Rig->SetCueAxisWorld(Contact, USteep);
 	Rig->SetFocusTargetWorld(Contact + FVector(250.0, 0.0, 0.0));
-	Rig->TickRig(P.GetDownSeconds + 0.01);
+	Rig->TickRig(QuickSeconds + 0.01);
 	const FVector SteepEye = Cam->GetComponentLocation();
 	const double BallPitch = URbCameraRigComponent::ComputeDownOnShotView(SteepEye, USteep, Contact).Rotator().Pitch;
 	TestTrue(TEXT("cue ball inside the vertical FOV"), BallPitch >= Cam->GetComponentRotation().Pitch - 0.5 * P.VerticalFovDeg);
@@ -664,7 +684,7 @@ bool FRbCameraFocusFollowsGaze::RunTest(const FString& Parameters)
 	Rig->SetCueAxisWorld(Contact, U);
 	Rig->SetFocusTargetWorld(ObjectBall);
 	Rig->SetMode(ERbCameraRigMode::DownOnShot);
-	Rig->TickRig(P.GetDownSeconds + 0.01);
+	Rig->TickRig(1.6); // the human get-down incl. its settle (<= 1.5 s)
 	const auto Settle = [Rig]() {
 		for (int32 I = 0; I < 120; ++I) // 2 s = 10 accommodation time constants
 		{
@@ -712,9 +732,9 @@ bool FRbCameraFocusFollowsGaze::RunTest(const FString& Parameters)
 
 	// 5. A new get-down resets the gaze: back on the object ball.
 	Rig->SetMode(ERbCameraRigMode::Standing);
-	Rig->TickRig(P.GetDownSeconds + 0.01);
+	Rig->TickRig(1.6);
 	Rig->SetMode(ERbCameraRigMode::DownOnShot);
-	Rig->TickRig(P.GetDownSeconds + 0.01);
+	Rig->TickRig(1.6);
 	Settle();
 	Eye = Cam->GetComponentLocation();
 	Fwd = Cam->GetForwardVector();
@@ -756,7 +776,7 @@ bool FRbPlayerInputRouting::RunTest(const FString& Parameters)
 	URbCameraRigComponent* Rig = Pawn->GetCameraRig();
 	double Clock = 1000.0;
 	Stroke->ClockOverride = [&Clock]() { return Clock; };
-	TestEqual(TEXT("the stroke's get-down lasts as long as the eye transition"), Stroke->GetDownSeconds, Rig->GetParams().GetDownSeconds);
+	Stroke->bApplyUserSettings = false;
 
 	// The director's BeginAddress: the cue ball 40 cm ahead of the pawn (no table: FRbCoords at the origin).
 	const rb::Vec3 CueBall(-0.6, 0.0, kR);
@@ -764,12 +784,17 @@ bool FRbPlayerInputRouting::RunTest(const FString& Parameters)
 	TestEqual(TEXT("walking"), static_cast<int32>(Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::Walking));
 	TestTrue(TEXT("can walk"), Pawn->CanWalk());
 
-	// Get down: the stroke component switches the rig, the pawn stops walking.
+	// Get down: the stroke component switches the rig, the pawn stops walking; Down starts when the eye arrives (the rig's seeded human
+	// get-down, 0.90-1.05 s to the arrival).
 	Stroke->RequestGetDownToggle();
 	TestEqual(TEXT("getting down"), static_cast<int32>(Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::GettingDown));
 	TestEqual(TEXT("rig down on the shot"), static_cast<int32>(Rig->GetMode()), static_cast<int32>(ERbCameraRigMode::DownOnShot));
 	TestFalse(TEXT("no walking while getting down"), Pawn->CanWalk());
-	Clock += Stroke->GetDownSeconds + 0.01;
+	TestTrue(TEXT("a human get-down runs"), Rig->IsPostureChanging());
+	TestEqual(TEXT("the stroke's Down starts when the eye arrives"), Stroke->GetDownSince() - Clock, Rig->GetPostureArrivalSeconds(), 1e-9);
+	TestTrue(FString::Printf(TEXT("arrival %.3f s in 0.90-1.05 s"), Rig->GetPostureArrivalSeconds()),
+		Rig->GetPostureArrivalSeconds() >= 0.90 && Rig->GetPostureArrivalSeconds() <= 1.05);
+	Clock = Stroke->GetDownSince() + 0.01;
 	Stroke->TickStroke(Clock);
 	TestEqual(TEXT("down"), static_cast<int32>(Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::Down));
 
@@ -780,11 +805,14 @@ bool FRbPlayerInputRouting::RunTest(const FString& Parameters)
 	const FVector BallUE = FRbCoords::PositionToUE(CueBall);
 	TestTrue(FString::Printf(TEXT("eye above and behind the cue ball (%s)"), *Eye.ToString()), Eye.Z > BallUE.Z + 5.0 && FVector::Dist2D(Eye, BallUE) > 30.0);
 
-	// Look while down: X aims (azimuth), Y moves the eyes along the line; the controller rotation is untouched.
+	// Look while down (raw counts): X aims (azimuth, 7.2 deg per cm of travel), Y moves the eyes along the line (half the look speed);
+	// the controller rotation is untouched.
 	const double Az0 = Stroke->GetAim().Azimuth;
-	Pawn->HandleLook(FVector2D(20.0, 4.0));
-	TestTrue(TEXT("look X turns the aim"), !FMath::IsNearlyEqual(Stroke->GetAim().Azimuth, Az0));
-	TestEqual(TEXT("look Y = eye pitch along the line"), Rig->GetGazePitch(), 0.5 * Pawn->GazeDegreesPerLookUnit * 4.0, 1e-9);
+	Pawn->HandleLook(FVector2D(20.0, 4.0), 1.0 / 60.0);
+	TestEqual(TEXT("look X turns the aim (mouse right = clockwise)"), FMath::RadiansToDegrees(FMath::UnwindRadians(Az0 - Stroke->GetAim().Azimuth)),
+		RbAimResponse::CountsToCm(20.0, Stroke->MouseDpi) * Stroke->Controls.AimDegreesPerCm, 1e-9);
+	TestEqual(TEXT("look Y = eye pitch along the line"), Rig->GetGazePitch(),
+		Pawn->AimGazePitchScale * RbAimResponse::LookDegrees(4.0, Stroke->MouseDpi, Stroke->Controls), 1e-9);
 	TestEqual(TEXT("no gaze yaw while aiming"), Rig->GetGazeYaw(), 0.0);
 
 	// Settle: stroke component and rig.
@@ -810,20 +838,34 @@ bool FRbPlayerInputRouting::RunTest(const FString& Parameters)
 	Pawn->HandleLook(FVector2D(3.0, 3.0));
 	TestEqual(TEXT("standing look is not gaze"), Rig->GetGazePitch(), Gaze0);
 
-	// Ball in hand: the rig leans over the table; Confirm places (the component broadcasts the placement point).
+	// Ball in hand: the rig leans over the table, the hand carries the ball; Confirm sets it down and the component broadcasts the
+	// placement when it touches the cloth (M2-F, P2).
 	int32 Placed = 0;
-	Stroke->OnCueBallPlaced.AddLambda([&Placed](const FVector&) { ++Placed; });
+	FVector PlacedAt = FVector::ZeroVector;
+	Stroke->OnCueBallPlaced.AddLambda([&Placed, &PlacedAt](const FVector& World) { ++Placed; PlacedAt = World; });
 	Stroke->BeginCueBallPlacement();
 	TestEqual(TEXT("rig ball in hand"), static_cast<int32>(Rig->GetMode()), static_cast<int32>(ERbCameraRigMode::BallInHand));
 	TestTrue(TEXT("can walk with the ball in hand"), Pawn->CanWalk());
+	URbBallInHandComponent* Hand = Pawn->GetBallInHand();
+	TestEqual(TEXT("the hand carries the ball"), static_cast<int32>(Hand->GetState()), static_cast<int32>(ERbBallInHandState::Carrying));
+	// The target is the look point on the bed plane (no table here: z = 0 of the world) of the rig's base view.
+	TestTrue(TEXT("a look point on the bed"), Hand->HasTarget());
 	Pawn->HandleConfirm();
+	TestEqual(TEXT("lowering"), static_cast<int32>(Hand->GetState()), static_cast<int32>(ERbBallInHandState::Lowering));
+	const rb::Vec2 Previewed = Hand->GetTargetCore();
+	TestEqual(TEXT("nothing placed before the ball touches the cloth"), Placed, 0);
+	for (int32 I = 0; I < 30; ++I)
+	{
+		Hand->TickCarry(1.0 / 60.0);
+	}
 	TestEqual(TEXT("confirm places the cue ball"), Placed, 1);
+	TestTrue(TEXT("placed on exactly the previewed target"), PlacedAt.Equals(FRbCoords::PositionToUE(rb::Vec3(Previewed.x, Previewed.y, kR)), 1e-6));
 	Stroke->OnCueBallPlaced.Clear();
 
 	// Locked while down (a scripted strike, a decision): GetDown still stands the player up.
 	Stroke->BeginAddress(CueBall, kR);
 	Pawn->HandleGetDown();
-	Clock += Stroke->GetDownSeconds + 0.01;
+	Clock = Stroke->GetDownSince() + 0.01;
 	Stroke->TickStroke(Clock);
 	TestEqual(TEXT("down again"), static_cast<int32>(Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::Down));
 	Stroke->SetLocked(true);

@@ -2,10 +2,12 @@
 // shaft-contact test (what you see is what hits); rail floor vs an independent brute force over the cushion profile; mesh
 // length / tip + butt radii = CueSpec / CueBodyState, closed outward lathe with section attributes, baked asset == builder;
 // SetPoseCore puts the tip dome centre exactly at the given point in a translated + yawed table (no dead band, no
-// teleport), visibility per drive; environment sweep blocked by a wall placed in a test world (+ short cue); the cue follows
+// teleport), visibility per drive; environment sweep blocked by a wall placed in a test world (+ short cue; M2-F: on the RbCueSweep
+// channel, venue furniture blocks, venue clutter never does); the cue follows
 // the stroke component's pose and floor. Owner: UE-4.
 
 #include "Balls/RbBallTestSupport.h"
+#include "Core/RbAssetPaths.h"
 #include "Core/RbCoords.h"
 #include "Cue/RbCue.h"
 #include "Cue/RbCueClearance.h"
@@ -227,8 +229,8 @@ namespace
 
 	const ERbCuePreset kPresets[] = {ERbCuePreset::Playing19oz, ERbCuePreset::Break21oz, ERbCuePreset::Jump9oz, ERbCuePreset::House19oz};
 
-	// A blocking box (BlockAll) with the given world transform and half extent [cm].
-	AActor* SpawnWall(UWorld* World, const FTransform& Transform, const FVector& Extent)
+	// A box with the given world transform, half extent [cm] and collision profile (default BlockAll: a wall).
+	AActor* SpawnWall(UWorld* World, const FTransform& Transform, const FVector& Extent, FName Profile = UCollisionProfile::BlockAll_ProfileName)
 	{
 		AActor* Wall = World->SpawnActor<AActor>(AActor::StaticClass(), Transform);
 		if (!Wall)
@@ -237,7 +239,7 @@ namespace
 		}
 		UBoxComponent* Box = NewObject<UBoxComponent>(Wall, TEXT("WallBox"));
 		Box->SetBoxExtent(Extent, false);
-		Box->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+		Box->SetCollisionProfileName(Profile);
 		Box->SetMobility(EComponentMobility::Static);
 		Wall->SetRootComponent(Box);
 		Box->SetWorldTransform(Transform);
@@ -912,6 +914,22 @@ bool FRbCueEnvironment::RunTest(const FString& Parameters)
 		Wall->Destroy();
 		return RbCueClearance::FindShortCueLength(World, Table, Body, Input, 25.0 * kDeg);
 	}(), 0.0);
+
+	// M2-F (18.3): the sweep runs on the RbCueSweep channel - venue architecture and furniture (RbVenueBlock) block the cue where
+	// the wall stood, venue clutter (RbVenueProp: bottles, glasses, an ashtray on a ledge) never does.
+	for (const TPair<FName, bool>& Case : {TPair<FName, bool>(RbAssetPaths::Collision::VenueBlockProfile, true),
+			 TPair<FName, bool>(RbAssetPaths::Collision::VenuePropProfile, false)})
+	{
+		AActor* Obstacle = SpawnWall(World, WallTransform, FVector(5.0, 200.0, 150.0), Case.Key);
+		if (!TestNotNull(TEXT("venue obstacle"), Obstacle))
+		{
+			return false;
+		}
+		const bool bBlocked = !RbCueClearance::SweepEnvironment(World, Table, Input, 0.0, Body);
+		TestEqual(FString::Printf(TEXT("%s %s the level cue (RbCueSweep channel)"), *Case.Key.ToString(), Case.Value ? TEXT("blocks") : TEXT("never blocks")),
+			bBlocked, Case.Value);
+		Obstacle->Destroy();
+	}
 	return true;
 }
 
