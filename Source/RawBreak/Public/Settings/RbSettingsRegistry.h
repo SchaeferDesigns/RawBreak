@@ -5,8 +5,9 @@
 // storage; engine rows through the UGameUserSettings setters, RAW BREAK quality rows through SetQualityOption, never direct
 // cvar writes). Owner: M2-D.
 //
-// Model: every row's value is a double - the enum index, the value of a range, 0 / 1 for a toggle. SetValue stores (snapped to
-// the row's step, clamped to its range) and never touches the renderer; Apply performs the row's live effect:
+// Model: every row's value is a double - the enum index, the value of a range, 0 / 1 for a toggle. SetValue stores (enums and
+// toggles rounded, ranges clamped - not snapped: a preset's 66.662 % must round-trip; the menu snaps its own keyboard steps and
+// slider positions to the row's step) and never touches the renderer; Apply performs the row's live effect:
 //   QualityRows      URbGameUserSettings::ApplyQualityRows (engine groups, then the RAW BREAK [RawBreak.*] rows) + notify
 //   NonResolution    ApplyNonResolutionSettings (v-sync, frame cap; it re-applies the quality rows and notifies)
 //   Resolution       ApplyResolutionSettings (window mode, resolution; the settings menu asks to keep them within 15 s)
@@ -79,6 +80,10 @@ struct FRbSettingDef
 	TFunction<FText(double)> Format;
 	// Enum labels that depend on the machine (the resolution list); overrides EnumLabels when set.
 	TFunction<TArray<FText>(const URbGameUserSettings&)> DynamicEnumLabels;
+	// The count and one label of a dynamic row without building every label (the menu asks for them in Slate attributes every
+	// frame: value text, both arrows); NumEnumValues / FormatValue fall back to DynamicEnumLabels without them.
+	TFunction<int32(const URbGameUserSettings&)> DynamicEnumCount;
+	TFunction<FText(const URbGameUserSettings&, int32 /*Index*/)> DynamicEnumLabel;
 	// False (with the reason shown in the description panel) when the row cannot be changed now ("Headcam only").
 	TFunction<bool(const URbGameUserSettings&, FText& /*OutReason*/)> IsAvailable;
 };
@@ -92,7 +97,7 @@ public:
 	static TArray<const FRbSettingDef*> RowsOnPage(ERbSettingsPage Page);
 
 	static double GetValue(const FRbSettingDef& Row, const URbGameUserSettings& Settings);
-	// Stores Value (snapped to the step, clamped to the range; enums wrap nothing - they clamp). No renderer / delegate work.
+	// Stores Value (enums / toggles rounded and clamped - no wrap; ranges clamped, not snapped). No renderer / delegate work.
 	static void SetValue(const FRbSettingDef& Row, URbGameUserSettings& Settings, double Value);
 	// The row's live effect (see the header comment).
 	static void Apply(const FRbSettingDef& Row, URbGameUserSettings& Settings);
@@ -116,7 +121,8 @@ public:
 	// "High" / "Custom (based on High)".
 	static FText PresetLabel(const URbGameUserSettings& Settings);
 
-	// Display rows (machine dependent): the supported resolutions (+ the current one), ascending.
+	// Display rows (machine dependent): the supported resolutions (+ the current one), ascending. The RHI's mode list is cached for
+	// a few seconds (enumerating it costs milliseconds; the Display page asks every frame).
 	static TArray<FIntPoint> ResolutionList(const URbGameUserSettings& Settings);
 	// The frame caps of the Display page (0 = unlimited, last).
 	static const TArray<float>& FrameCaps();

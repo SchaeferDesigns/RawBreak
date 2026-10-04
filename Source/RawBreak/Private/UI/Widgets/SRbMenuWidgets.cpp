@@ -17,6 +17,12 @@
 
 using namespace RbUi;
 
+bool RbUi::IsPointerMotion(const FPointerEvent& MouseEvent)
+{
+	const FVector2f Delta = MouseEvent.GetCursorDelta();
+	return !Delta.IsNearlyZero(0.01f);
+}
+
 // ---------------------------------------------------------------------------------------------------------------------------
 // SRbGradient
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -153,7 +159,10 @@ FSlateColor SRbMenuItem::LabelColor() const
 void SRbMenuItem::OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
 	SCompoundWidget::OnMouseEnter(MyGeometry, MouseEvent);
-	OnHovered.ExecuteIfBound();
+	if (IsPointerMotion(MouseEvent))
+	{
+		OnHovered.ExecuteIfBound();
+	}
 }
 
 FReply SRbMenuItem::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
@@ -346,6 +355,7 @@ void SRbOptionRow::Construct(const FArguments& InArgs)
 	OnHovered = InArgs._OnHovered;
 	OnStep = InArgs._OnStep;
 	OnSetFraction = InArgs._OnSetFraction;
+	OnActivate = InArgs._OnActivate;
 	check(Row);
 
 	TSharedRef<SWidget> Control = SNullWidget::NullWidget;
@@ -548,7 +558,10 @@ float SRbOptionRow::TrackFraction(float LocalX, float Width)
 void SRbOptionRow::OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
 	SCompoundWidget::OnMouseEnter(MyGeometry, MouseEvent);
-	OnHovered.ExecuteIfBound();
+	if (IsPointerMotion(MouseEvent))
+	{
+		OnHovered.ExecuteIfBound();
+	}
 }
 
 FReply SRbOptionRow::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
@@ -570,10 +583,20 @@ FReply SRbOptionRow::OnMouseButtonDown(const FGeometry& MyGeometry, const FPoint
 		OnStep.ExecuteIfBound(-1);
 		return FReply::Handled();
 	case EZone::Increment:
+		OnStep.ExecuteIfBound(1);
+		return FReply::Handled();
 	case EZone::Value:
 		if (Row->Type != ERbSettingType::Float)
 		{
-			OnStep.ExecuteIfBound(1);
+			// The value cycles like Enter (wrapping): clicking "Windowed" moves on to "Fullscreen" instead of doing nothing.
+			if (OnActivate.IsBound())
+			{
+				OnActivate.Execute();
+			}
+			else
+			{
+				OnStep.ExecuteIfBound(1);
+			}
 		}
 		return FReply::Handled();
 	case EZone::Track:
@@ -592,6 +615,11 @@ FReply SRbOptionRow::OnMouseMove(const FGeometry& MyGeometry, const FPointerEven
 	{
 		return FReply::Unhandled();
 	}
+	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+	{
+		bDragging = false; // the release went elsewhere: the bare cursor never moves the slider
+		return FReply::Handled().ReleaseMouseCapture();
+	}
 	const FVector2D Local = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 	OnSetFraction.ExecuteIfBound(TrackFraction(static_cast<float>(Local.X), static_cast<float>(MyGeometry.GetLocalSize().X)));
 	return FReply::Handled();
@@ -605,6 +633,12 @@ FReply SRbOptionRow::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointer
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 	return FReply::Unhandled();
+}
+
+void SRbOptionRow::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	SCompoundWidget::OnMouseCaptureLost(CaptureLostEvent);
+	bDragging = false; // Alt-Tab / a dialog took the mouse mid-drag: the next bare hover must not move the slider
 }
 
 #undef LOCTEXT_NAMESPACE

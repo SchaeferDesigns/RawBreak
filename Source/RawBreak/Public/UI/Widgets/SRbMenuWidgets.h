@@ -14,6 +14,14 @@
 struct FRbSettingDef;
 class URbGameUserSettings;
 
+namespace RbUi
+{
+	// True when a pointer event carries real cursor motion. Slate also sends OnMouseEnter when a widget moves under a still cursor
+	// (a list scrolls, a screen opens under the cursor: synthetic moves with zero delta); hover-to-focus only follows the hand, so a
+	// keyboard user's focus is never pulled to whatever the parked cursor happens to cover.
+	RAWBREAK_API bool IsPointerMotion(const FPointerEvent& MouseEvent);
+}
+
 // A horizontal gradient of ink.900 (the title's and the pause menu's left-side scrims): Stops = (x fraction, opacity).
 class RAWBREAK_API SRbGradient : public SLeafWidget
 {
@@ -44,7 +52,7 @@ public:
 };
 
 // A menu entry: focus bar + label (+ detail). Focus = the 4 px amber bar and chalk.100 (ui-ux 6.3); unfocused chalk.300;
-// disabled chalk.500 (still focusable to show why).
+// disabled chalk.500 (still focusable to show why). Hover moves the focus only when the cursor itself moves (IsPointerMotion).
 class RAWBREAK_API SRbMenuItem : public SCompoundWidget
 {
 public:
@@ -89,7 +97,7 @@ class RAWBREAK_API SRbHintButton : public SCompoundWidget
 public:
 	SLATE_BEGIN_ARGS(SRbHintButton) {}
 		SLATE_ARGUMENT(FText, Key)
-		SLATE_ARGUMENT(FText, Verb)
+		SLATE_ATTRIBUTE(FText, Verb)       // may follow the screen's state (the title's Esc: Back / Quit)
 		SLATE_EVENT(FSimpleDelegate, OnClicked)
 	SLATE_END_ARGS()
 
@@ -145,9 +153,12 @@ private:
 DECLARE_DELEGATE_OneParam(FRbOnRowStep, int32 /*Direction*/);
 DECLARE_DELEGATE_OneParam(FRbOnRowSetFraction, float /*Fraction 0..1*/);
 
-// One settings row (ui-ux 13.1 SRbOptionRow): label | control. Enum / toggle rows: "<  value  >" (click an arrow = one step, the
-// value = the next value); range rows: slider bar (click / drag = that fraction) + value text. The row maps the pointer to its
+// One settings row (ui-ux 13.1 SRbOptionRow): label | control. Enum / toggle rows: "<  value  >" (click an arrow = one step,
+// clamped; a click on the value = OnActivate, the screen's Enter: the next value, wrapping - else the last value of a list would be
+// a dead click); range rows: slider bar (click / drag = that fraction) + value text. The row maps the pointer to its
 // zones from its own geometry (the control column is the rightmost ControlWidth units), so tests can click it without a window.
+// A drag ends on the button release, on a move without the left button and when the mouse capture is lost (Alt-Tab, a dialog):
+// a lost release never leaves the slider following the bare cursor.
 class RAWBREAK_API SRbOptionRow : public SCompoundWidget
 {
 public:
@@ -163,6 +174,7 @@ public:
 		SLATE_EVENT(FSimpleDelegate, OnHovered)
 		SLATE_EVENT(FRbOnRowStep, OnStep)
 		SLATE_EVENT(FRbOnRowSetFraction, OnSetFraction)
+		SLATE_EVENT(FSimpleDelegate, OnActivate) // a click on an enum / toggle value (unbound: one step up)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -183,6 +195,8 @@ public:
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual void OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
+	bool IsDragging() const { return bDragging; }
 
 private:
 	float ValueFraction() const;
@@ -195,5 +209,6 @@ private:
 	FSimpleDelegate OnHovered;
 	FRbOnRowStep OnStep;
 	FRbOnRowSetFraction OnSetFraction;
+	FSimpleDelegate OnActivate;
 	bool bDragging = false;
 };

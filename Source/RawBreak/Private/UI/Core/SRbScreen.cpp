@@ -68,7 +68,7 @@ TSharedPtr<SWidget> SRbScreen::GetFocusedWidget() const
 	return FocusItems.IsValidIndex(FocusIndex) ? FocusItems[FocusIndex].Widget : TSharedPtr<SWidget>();
 }
 
-void SRbScreen::SetFocusIndex(int32 Index, bool /*bFromMouse*/)
+void SRbScreen::SetFocusIndex(int32 Index, bool bFromMouse)
 {
 	if (FocusItems.Num() == 0)
 	{
@@ -79,6 +79,7 @@ void SRbScreen::SetFocusIndex(int32 Index, bool /*bFromMouse*/)
 	if (Clamped != FocusIndex)
 	{
 		FocusIndex = Clamped;
+		bFocusFromMouse = bFromMouse;
 		OnFocusChanged();
 	}
 	MirrorFocus();
@@ -87,6 +88,7 @@ void SRbScreen::SetFocusIndex(int32 Index, bool /*bFromMouse*/)
 void SRbScreen::SetFocusItems(TArray<FRbFocusItem> Items, int32 PreferredIndex)
 {
 	FocusItems = MoveTemp(Items);
+	bFocusFromMouse = false;
 	int32 Index = PreferredIndex != INDEX_NONE ? PreferredIndex : FocusIndex;
 	if (FocusItems.Num() == 0)
 	{
@@ -133,8 +135,22 @@ void SRbScreen::OnActivated()
 	MirrorFocus();
 }
 
+bool SRbScreen::IsRepeatableKey(const FKey& Key)
+{
+	return Key == EKeys::Up || Key == EKeys::Down || Key == EKeys::Left || Key == EKeys::Right || Key == EKeys::Gamepad_DPad_Up ||
+		Key == EKeys::Gamepad_DPad_Down || Key == EKeys::Gamepad_DPad_Left || Key == EKeys::Gamepad_DPad_Right || Key == EKeys::Gamepad_LeftStick_Up ||
+		Key == EKeys::Gamepad_LeftStick_Down || Key == EKeys::Gamepad_LeftStick_Left || Key == EKeys::Gamepad_LeftStick_Right;
+}
+
 FReply SRbScreen::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	// The OS auto-repeats a held key. Only moving the focus and changing a row repeat; a held Enter / Space / Esc acts once, so it
+	// never chains through the menus (title: Play -> venue -> mode -> travel within a second) or toggles the pause menu shut again
+	// right after the Esc press that opened it.
+	if (InKeyEvent.IsRepeat() && !IsRepeatableKey(InKeyEvent.GetKey()))
+	{
+		return FReply::Handled();
+	}
 	return HandleKey(InKeyEvent.GetKey(), InKeyEvent.GetModifierKeys()) ? FReply::Handled() : FReply::Unhandled();
 }
 

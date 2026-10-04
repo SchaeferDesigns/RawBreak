@@ -5,6 +5,7 @@
 #include "UI/Screens/SRbConfirmDialog.h"
 #include "UI/Widgets/SRbMenuWidgets.h"
 
+#include "Layout/WidgetPath.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBackgroundBlur.h"
 #include "Widgets/Layout/SBox.h"
@@ -263,6 +264,11 @@ void SRbSettingsMenu::BuildRows()
 				const double Raw = Row->Min + Fraction * (Row->Max - Row->Min);
 				const double Snapped = Row->Step > 0.0 ? Row->Min + FMath::RoundToDouble((Raw - Row->Min) / Row->Step) * Row->Step : Raw;
 				ChangeRow(*Row, FMath::Clamp(Snapped, Row->Min, Row->Max));
+			})
+			.OnActivate_Lambda([this, Index]()
+			{
+				SetFocusIndex(Index, true);
+				ActivateFocused(); // a click on the value = Enter (the next value, wrapping)
 			});
 		if (Scroll.IsValid())
 		{
@@ -290,7 +296,9 @@ TSharedPtr<SRbOptionRow> SRbSettingsMenu::GetRowWidget(int32 Index) const
 
 void SRbSettingsMenu::OnFocusChanged()
 {
-	if (Scroll.IsValid() && RowWidgets.IsValidIndex(FocusIndex) && RowWidgets[FocusIndex].IsValid())
+	// Keyboard focus scrolls its row into view. A row focused by the pointer is under the cursor already: scrolling it would put
+	// the next row under the still cursor, which then takes the focus and scrolls again (the list ran to its end).
+	if (!bFocusFromMouse && Scroll.IsValid() && RowWidgets.IsValidIndex(FocusIndex) && RowWidgets[FocusIndex].IsValid())
 	{
 		Scroll->ScrollDescendantIntoView(RowWidgets[FocusIndex], false, EDescendantScrollDestination::IntoView, RowHeight);
 	}
@@ -308,6 +316,11 @@ void SRbSettingsMenu::ChangeRow(const FRbSettingDef& Row, double NewValue)
 	{
 		return;
 	}
+	// The video mode before the change (the revert target of the display rows). Stored as the mode itself, never as the row's
+	// value: the resolution row's value is an index into a list that contains the CURRENT resolution, so the indices shift when
+	// the resolution changes and the old index can name a different resolution afterwards.
+	const EWindowMode::Type OldWindowMode = S->GetFullscreenMode();
+	const FIntPoint OldResolution = S->GetScreenResolution();
 	FRbSettingsRegistry::SetValue(Row, *S, NewValue);
 	FRbSettingsRegistry::Apply(Row, *S);
 	bDirty = true;
@@ -317,7 +330,6 @@ void SRbSettingsMenu::ChangeRow(const FRbSettingDef& Row, double NewValue)
 	}
 	// Window mode / resolution: keep within 15 s or revert (ui-ux 13.2).
 	const TSharedPtr<FRbUiHost> H = Host;
-	const FRbSettingDef* RowPtr = &Row;
 	Host->PushScreen(SNew(SRbConfirmDialog)
 		.Host(Host)
 		.Title(LOCTEXT("KeepTitle", "Keep these display settings?"))
@@ -333,14 +345,24 @@ void SRbSettingsMenu::ChangeRow(const FRbSettingDef& Row, double NewValue)
 				Current->ConfirmVideoMode();
 			}
 		})
-		.OnCancel_Lambda([H, RowPtr, Old]()
+		.OnCancel_Lambda([H, OldWindowMode, OldResolution]()
 		{
 			if (URbGameUserSettings* Current = H->GetSettings ? H->GetSettings() : nullptr)
 			{
-				FRbSettingsRegistry::SetValue(*RowPtr, *Current, Old);
-				FRbSettingsRegistry::Apply(*RowPtr, *Current);
+				RevertVideoMode(*Current, OldWindowMode, OldResolution);
 			}
 		}));
+}
+
+void SRbSettingsMenu::RevertVideoMode(URbGameUserSettings& Settings, EWindowMode::Type WindowMode, const FIntPoint& Resolution)
+{
+	Settings.SetFullscreenMode(WindowMode);
+	if (Resolution.X > 0 && Resolution.Y > 0)
+	{
+		Settings.SetScreenResolution(Resolution);
+	}
+	Settings.ApplyResolutionSettings(false);
+	Settings.NotifySettingsChanged();
 }
 
 void SRbSettingsMenu::ActivateFocused()
@@ -449,6 +471,21 @@ bool SRbSettingsMenu::HandleKeyUp(const FKey& Key)
 		return true;
 	}
 	return false;
+}
+
+void SRbSettingsMenu::OnDeactivated()
+{
+	SRbScreen::OnDeactivated();
+	bPreview = false; // a dialog took the keys: the Space release would never reach this screen (the panel stayed invisible)
+}
+
+void SRbSettingsMenu::OnFocusChanging(const FWeakWidgetPath& PreviousFocusPath, const FWidgetPath& NewWidgetPath, const FFocusEvent& InFocusEvent)
+{
+	SRbScreen::OnFocusChanging(PreviousFocusPath, NewWidgetPath, InFocusEvent);
+	if (bPreview && !NewWidgetPath.ContainsWidget(this))
+	{
+		bPreview = false; // the keyboard left the screen (window switch) while Space was held
+	}
 }
 
 void SRbSettingsMenu::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)

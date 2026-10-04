@@ -806,36 +806,42 @@ void URbOverlayComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	{
 		CreateWidget();
 	}
-	RefreshCountdown -= RealDelta;
-	if (RefreshCountdown <= 0.0f || (!bDirectorOverride && FindDirector() != Director.Get()))
+	// The context (the player's match, the key hints) is read ten times a second, never per frame: finding the player's session
+	// walks the level's tables (URbTableSubsystem::GetPlayerTable: an actor iteration into a fresh, sorted array) and the hint
+	// model build + change detection allocate. The fades run every tick.
+	ContextCountdown -= RealDelta;
+	const bool bContextTick = ContextCountdown <= 0.0f;
+	if (bContextTick)
 	{
-		// Periodic refresh for what has no event (raw-input mode, replay rate); OnMatchChanged covers the match itself.
+		ContextCountdown = ContextInterval;
+	}
+	RefreshCountdown -= RealDelta;
+	if (RefreshCountdown <= 0.0f || (bContextTick && !bDirectorOverride && FindDirector() != Director.Get()))
+	{
+		// Periodic refresh for what has no event (raw-input mode, replay rate); OnMatchChanged covers the match itself; a
+		// different player table rebinds at the next context tick.
 		RefreshCountdown = 0.25f;
 		Refresh();
 	}
 	AdvanceOverlay(RealDelta);
 
-	// Key hints (M2-D): the context is read ten times a second; the hold / fade runs every tick.
-	HintRefreshCountdown -= RealDelta;
-	FRbKeyHintsModel Hints = HintModel;
-	if (HintRefreshCountdown <= 0.0f)
+	// Key hints (M2-D): the hold / fade runs every tick on the current model, the model itself is rebuilt on the context ticks.
+	if (!bContextTick)
 	{
-		HintRefreshCountdown = 0.1f;
-		const APlayerController* PC = Cast<APlayerController>(GetOwner());
-		Hints = PC && PC->IsLocalController() ? FRbKeyHintsModel::Build(PC) : FRbKeyHintsModel();
-		if (const UWorld* World = GetWorld(); World && World->IsPaused())
-		{
-			Hints = FRbKeyHintsModel(); // a paused world (menu, pause command) shows no hints
-		}
+		TickKeyHintFade(RealDelta, false);
+		return;
 	}
-	AdvanceKeyHints(Hints, RealDelta);
+	const APlayerController* PC = Cast<APlayerController>(GetOwner());
+	const UWorld* World = GetWorld();
+	const bool bPaused = World && World->IsPaused(); // a paused world (menu, pause command) shows no hints
+	AdvanceKeyHints(PC && PC->IsLocalController() && !bPaused ? FRbKeyHintsModel::Build(PC) : FRbKeyHintsModel(), RealDelta);
 }
 
 void URbOverlayComponent::AdvanceKeyHints(const FRbKeyHintsModel& Model_, float DeltaSeconds)
 {
-	const float Dt = FMath::Max(0.0f, DeltaSeconds);
 	FString Key = Model_.ToDebugString();
-	if (Key != HintKey)
+	const bool bChanged = Key != HintKey;
+	if (bChanged)
 	{
 		HintKey = MoveTemp(Key);
 		HintModel = Model_;
@@ -845,7 +851,13 @@ void URbOverlayComponent::AdvanceKeyHints(const FRbKeyHintsModel& Model_, float 
 			HintsWidget->SetModel(HintModel); // an empty model keeps the last text while it fades out
 		}
 	}
-	else if (!URbUiSubsystem::IsDevHoldKeyHints())
+	TickKeyHintFade(DeltaSeconds, bChanged);
+}
+
+void URbOverlayComponent::TickKeyHintFade(float DeltaSeconds, bool bContextChanged)
+{
+	const float Dt = FMath::Max(0.0f, DeltaSeconds);
+	if (!bContextChanged && !URbUiSubsystem::IsDevHoldKeyHints())
 	{
 		HintHold = FMath::Max(0.0f, HintHold - Dt);
 	}

@@ -150,10 +150,36 @@ namespace RbSettingsPrivate
 		return Size.X > 0.0 && Size.Y > 0.0 ? Size.X / Size.Y : 16.0 / 9.0;
 	}
 
+	FText ResolutionText(const FIntPoint& Resolution)
+	{
+		return FText::Format(LOCTEXT("ResValue", "{0} × {1}"), RbUi::Number(Resolution.X), RbUi::Number(Resolution.Y));
+	}
+
 	TArray<FIntPoint> FallbackResolutions()
 	{
 		return {FIntPoint(1280, 720), FIntPoint(1280, 800), FIntPoint(1600, 900), FIntPoint(1920, 1080), FIntPoint(1920, 1200), FIntPoint(2560, 1440),
 			FIntPoint(3440, 1440), FIntPoint(3840, 2160)};
+	}
+
+	// The RHI's fullscreen modes. The query walks every adapter output's display-mode list (DXGI GetDisplayModeList: milliseconds
+	// per call), and the resolution row asks for the list several times per frame (value text, both arrows, the description's
+	// default), so the answer is kept for a few seconds instead of being re-enumerated in every Slate attribute. Game thread only
+	// (Slate attributes, the settings rows, tests).
+	const TArray<FIntPoint>& SupportedResolutions()
+	{
+		static TArray<FIntPoint> Cached;
+		static double CachedAt = -1.0e9;
+		const double Now = FPlatformTime::Seconds();
+		if (Now - CachedAt > 3.0)
+		{
+			CachedAt = Now;
+			Cached.Reset();
+			if (FApp::CanEverRender())
+			{
+				UKismetSystemLibrary::GetSupportedFullscreenResolutions(Cached);
+			}
+		}
+		return Cached;
 	}
 
 	TArray<FRow> BuildRows()
@@ -262,10 +288,15 @@ namespace RbSettingsPrivate
 				TArray<FText> Labels;
 				for (const FIntPoint& R : FRbSettingsRegistry::ResolutionList(S))
 				{
-					Labels.Add(FText::Format(LOCTEXT("ResValue", "{0} × {1}"), RbUi::Number(R.X),
-						RbUi::Number(R.Y)));
+					Labels.Add(ResolutionText(R));
 				}
 				return Labels;
+			};
+			Res.DynamicEnumCount = [](const URbGameUserSettings& S) { return FRbSettingsRegistry::ResolutionList(S).Num(); };
+			Res.DynamicEnumLabel = [](const URbGameUserSettings& S, int32 Index)
+			{
+				const TArray<FIntPoint> List = FRbSettingsRegistry::ResolutionList(S);
+				return List.IsValidIndex(Index) ? ResolutionText(List[Index]) : RbUi::Number(Index);
 			};
 			Res.Get = [](const URbGameUserSettings& S)
 			{
@@ -562,7 +593,15 @@ int32 FRbSettingsRegistry::NumEnumValues(const FRbSettingDef& Row, const URbGame
 	{
 		return 2;
 	}
-	return Row.Type == ERbSettingType::Enum ? EnumLabels(Row, Settings).Num() : 0;
+	if (Row.Type != ERbSettingType::Enum)
+	{
+		return 0;
+	}
+	if (Row.DynamicEnumCount)
+	{
+		return Row.DynamicEnumCount(Settings); // no label is formatted to count them (the arrows ask every frame)
+	}
+	return Row.DynamicEnumLabels ? Row.DynamicEnumLabels(Settings).Num() : Row.EnumLabels.Num(); // no label copy for fixed rows
 }
 
 TArray<FText> FRbSettingsRegistry::EnumLabels(const FRbSettingDef& Row, const URbGameUserSettings& Settings)
@@ -657,8 +696,16 @@ FText FRbSettingsRegistry::FormatValue(const FRbSettingDef& Row, const URbGameUs
 {
 	if (Row.Type == ERbSettingType::Enum || Row.Type == ERbSettingType::Bool)
 	{
-		const TArray<FText> Labels = EnumLabels(Row, Settings);
 		const int32 Index = FMath::RoundToInt(Value);
+		if (!Row.DynamicEnumLabels)
+		{
+			return Row.EnumLabels.IsValidIndex(Index) ? Row.EnumLabels[Index] : RbUi::Number(Index); // the value text of every frame: no copy
+		}
+		if (Row.DynamicEnumLabel)
+		{
+			return Row.DynamicEnumLabel(Settings, Index); // one label, not the whole list
+		}
+		const TArray<FText> Labels = Row.DynamicEnumLabels(Settings);
 		return Labels.IsValidIndex(Index) ? Labels[Index] : RbUi::Number(Index);
 	}
 	if (Row.Format)
@@ -776,11 +823,7 @@ FText FRbSettingsRegistry::PresetLabel(const URbGameUserSettings& Settings)
 
 TArray<FIntPoint> FRbSettingsRegistry::ResolutionList(const URbGameUserSettings& Settings)
 {
-	TArray<FIntPoint> List;
-	if (FApp::CanEverRender())
-	{
-		UKismetSystemLibrary::GetSupportedFullscreenResolutions(List);
-	}
+	TArray<FIntPoint> List = RbSettingsPrivate::SupportedResolutions();
 	if (List.Num() == 0)
 	{
 		List = RbSettingsPrivate::FallbackResolutions();

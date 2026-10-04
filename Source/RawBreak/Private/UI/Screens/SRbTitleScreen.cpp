@@ -52,6 +52,9 @@ void SRbTitleScreen::Construct(const FArguments& InArgs)
 {
 	InitScreen(ERbUiScreen::Title, InArgs._Host.ToSharedRef());
 	IntroTime = Host->bSkipIntro ? RbUiIntroEnd() : 0.0f;
+	// Esc goes back one level; on the root it asks to quit, and the footer says so.
+	const FText EscBack = LOCTEXT("Back", "Back");
+	const FText EscQuit = LOCTEXT("QuitHint", "Quit");
 
 	ChildSlot
 	[
@@ -132,7 +135,8 @@ void SRbTitleScreen::Construct(const FArguments& InArgs)
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
 				[
-					SNew(SRbHintButton).Key(LOCTEXT("KeyEsc", "Esc")).Verb(LOCTEXT("Back", "Back"))
+					SNew(SRbHintButton).Key(LOCTEXT("KeyEsc", "Esc"))
+					.Verb_Lambda([this, EscBack, EscQuit]() { return Level == ELevel::Root ? EscQuit : EscBack; })
 					.OnClicked_Lambda([this]() { HandleBack(); })
 				]
 				+ SHorizontalBox::Slot()

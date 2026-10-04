@@ -7,8 +7,9 @@
 //   Play     The Low Bridge Tavern (dive bar), Test room, Back  - a venue whose level does not exist yet is disabled with the
 //            reason ("Not built yet")
 //   Venue    Practice, Hot-seat, Back -> the host travels to RbTypes::MapFor(venue) with ?Mode= (ARbTitleGameMode::MakeVenueUrl)
-// Clean first seconds (ui-ux 6.3, UX-P1): the scene runs alone for 2.5 s, then logotype and list fade in over 0.4 s; any key or
-// click shows them at once. Esc: back one level; on the root it asks to quit. Owner: M2-D.
+// Clean first seconds (ui-ux 6.3, UX-P1; on the launch's first title only - a return from a venue shows the list at once, the
+// host's bSkipIntro): the scene runs alone for 2.5 s, then logotype and list fade in over 0.4 s; any key or click shows them at
+// once. Esc: back one level; on the root it asks to quit. Owner: M2-D.
 
 #include "CoreMinimal.h"
 

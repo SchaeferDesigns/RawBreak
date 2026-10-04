@@ -6,8 +6,10 @@
 //
 // Focus model (ui-ux 3.3, UX-T09): each screen owns an ordered list of focusable items (menu items, settings rows, dialog
 // buttons) and exactly one focused index. Up / Down move it, Enter / Space activate, Left / Right change a row, Esc = Back
-// (HandleBack), mouse hover moves the focus, a click activates. The keys are handled by the screen root (they bubble up from the
-// focused item), so Slate's own geometric navigation never runs; Tab is swallowed (it is Glance in play, UX-T26). The host
+// (HandleBack), moving the mouse onto an item focuses it (a still cursor that a scroll or a new screen puts over an item does
+// not: RbUi::IsPointerMotion), a click activates. The keys are handled by the screen root (they bubble up from the
+// focused item), so Slate's own geometric navigation never runs; Tab is swallowed (it is Glance in play, UX-T26); an auto-repeated
+// key only moves the focus or changes a row (IsRepeatableKey). The host
 // mirrors the focused item into Slate's user focus when the screen lives in a window. Owner: M2-D.
 
 #include "CoreMinimal.h"
@@ -63,14 +65,19 @@ public:
 	virtual bool HandleKey(const FKey& Key, const FModifierKeysState& Modifiers);
 	// Key released (hold-to-preview in the settings).
 	virtual bool HandleKeyUp(const FKey& Key) { return false; }
+	// Keys whose OS auto-repeat reaches HandleKey (focus moves, row changes). Every other repeat is swallowed by OnKeyDown: a held
+	// Enter / Space / Esc acts once.
+	static bool IsRepeatableKey(const FKey& Key);
 
 	// Focus list.
 	int32 GetFocusIndex() const { return FocusIndex; }
 	int32 GetNumFocusItems() const { return FocusItems.Num(); }
 	TSharedPtr<SWidget> GetFocusedWidget() const;
 	TSharedPtr<SWidget> GetFocusItemWidget(int32 Index) const { return FocusItems.IsValidIndex(Index) ? FocusItems[Index].Widget : nullptr; }
-	// Moves the focus to an item (skips nothing: disabled items can hold focus to show why they are disabled).
+	// Moves the focus to an item (skips nothing: disabled items can hold focus to show why they are disabled). bFromMouse: the
+	// item is under the cursor already, so the screen does not scroll it (scrolling would move another item under the cursor).
 	void SetFocusIndex(int32 Index, bool bFromMouse = false);
+	bool IsFocusFromMouse() const { return bFocusFromMouse; }
 	// Activates the focused item (Enter / click).
 	virtual void ActivateFocused() {}
 	// Left / Right on the focused item (settings rows); true when something changed.
@@ -105,6 +112,7 @@ protected:
 	TSharedPtr<FRbUiHost> Host;
 	TArray<FRbFocusItem> FocusItems;
 	int32 FocusIndex = 0;
+	bool bFocusFromMouse = false; // the last focus change came from the pointer (hover / click)
 	float Appear = 1.0f;
 	bool bAnimating = false;
 };

@@ -3,7 +3,8 @@
 //   RawBreak.Functional.MenuFlow       L_Title -> Dive bar Hot-seat (the test room while L_DiveBar is not built: a warning)
 //                                      -> pause (Esc path: ARbPlayerController::HandlePause) -> settings -> Camera page ->
 //                                      FOV + 5 deg -> back (saved) -> resume -> pause -> Quit to title (confirm) -> the title
-//                                      again; then every other venue x mode through the title (Practice / Hot-seat in both
+//                                      again (its list at once: the clean first seconds belong to the launch, ui-ux 6.3); then
+//                                      every other venue x mode through the title (Practice / Hot-seat in both
 //                                      venues) and back through the pause menu. Checks the screen stack, one focused item after
 //                                      every push / pop, the input modes (menus: UI only with a cursor; play: game only,
 //                                      hidden captured mouse), the world pause, the player's match in the pause block, the
@@ -213,6 +214,11 @@ private:
 		Test->TestEqual(TEXT("title: one screen"), Subsystem->GetStackIds().Num(), 1);
 		CheckMenuInput(*Test, TEXT("title"));
 		const TSharedPtr<SRbTitleScreen> Title = StaticCastSharedPtr<SRbTitleScreen>(Subsystem->GetTopWidget());
+		if (LegIndex > 0)
+		{
+			// The clean first seconds belong to the launch (ui-ux 6.3): back from a venue, the list is there at once.
+			Test->TestTrue(TEXT("title after Quit to title: the list shows at once (no second intro)"), Title->IsIntroDone());
+		}
 		if (!Title->IsIntroDone())
 		{
 			Key(TEXT("Escape")); // any key shows the list at once and chooses nothing

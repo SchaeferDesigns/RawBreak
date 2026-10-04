@@ -162,6 +162,11 @@ void URbUiSubsystem::OnWorldCleanup(UWorld* World, bool /*bSessionEnded*/, bool 
 	if (World && World == StackWorld.Get())
 	{
 		ClearStack(false); // the map is going away (travel, end of PIE): its menus go with it
+		URbAudioSubsystem* Audio = bPausedByMenu ? URbAudioSubsystem::Get(World) : nullptr;
+		if (Audio)
+		{
+			Audio->SetPausedMix(false); // the pause mix follows the menu's pause, also when the map ends under it
+		}
 		bPausedByMenu = false;
 	}
 }
@@ -196,7 +201,9 @@ TSharedRef<FRbUiHost> URbUiSubsystem::GetHost()
 	}
 	const URbGameUserSettings* Settings = URbGameUserSettings::Get();
 	Host->bReducedMotion = Settings && Settings->bReducedMotion;
-	Host->bSkipIntro = bSkipIntro || !GetDevScreen().IsEmpty();
+	// The clean first seconds belong to the launch (ui-ux 6.3 "on every launch"): the title the player returns to from a venue
+	// (Quit to title) shows its list at once. The local player - and this subsystem - live as long as the game instance.
+	Host->bSkipIntro = bSkipIntro || bTitleShown || !GetDevScreen().IsEmpty();
 	return Host.ToSharedRef();
 }
 
@@ -302,6 +309,7 @@ bool URbUiSubsystem::OpenScreen(ERbUiScreen Screen)
 	case ERbUiScreen::Title:
 		ClearStack(false);
 		PushScreen(SNew(SRbTitleScreen).Host(H));
+		bTitleShown = true; // later titles of this run skip the clean first seconds (GetHost)
 		return true;
 	case ERbUiScreen::Pause:
 	{

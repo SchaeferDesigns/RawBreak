@@ -97,8 +97,10 @@ public:
 	static const FString& GetDevScreen();
 	static bool IsDevHoldKeyHints();
 
-	// Tests: the title screen skips its clean first seconds.
+	// Tests: the title screen skips its clean first seconds. (Without it only the first title of a run has them: ui-ux 6.3 runs
+	// them on every LAUNCH, so a return from a venue shows the list at once.)
 	void SetSkipIntro(bool bSkip) { bSkipIntro = bSkip; }
+	bool HasShownTitle() const { return bTitleShown; }
 
 	// Tests / dev tools (UX-T09): the top screen handles a key given by its name ("Enter", "Escape", "Down", "E" ...) exactly like
 	// a key press reaching the focused screen. False when no screen is open or the screen ignores the key.
@@ -140,6 +142,7 @@ private:
 	TWeakObjectPtr<UWorld> StackWorld;
 	bool bPausedByMenu = false;
 	bool bSkipIntro = false;
+	bool bTitleShown = false; // a title was shown in this run: the next ones skip the clean first seconds (ui-ux 6.3: per launch)
 	FTSTicker::FDelegateHandle TickHandle;
 	FDelegateHandle WorldCleanupHandle;
 	FDelegateHandle BeginDrawHandle;

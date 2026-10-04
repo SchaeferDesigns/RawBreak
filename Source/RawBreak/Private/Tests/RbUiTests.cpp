@@ -12,11 +12,20 @@
 //   Unit.UI.NavigationKeys  UX-T09 keyboard only: title (Play -> venue -> mode -> StartVenue; Back at every level; Quit only with
 //                           a confirm), pause (Resume, Settings, quits only through a confirm), settings (pages Q/E, rows, values,
 //                           Back saves), dialog (Esc = cancel, timeout = cancel); one focused item after every step
-//   Unit.UI.NavigationMouse UX-T09 mouse only: hover moves the focus, clicks activate, row arrows / slider / tabs / footer hints
+//   Unit.UI.NavigationMouse UX-T09 mouse only: hover moves the focus, clicks activate, row arrows (clamped) / the stepper's value
+//                           (= Enter: wraps, never a dead click) / slider / tabs / footer hints
+//   Unit.UI.KeyRepeat       UX-T09: a held Enter / Esc acts once (no chain title -> venue -> travel, no resume from the Esc that
+//                           opened the pause menu); a held arrow keeps moving the focus / changing the row
+//   Unit.UI.DisplayRevert   ui-ux 13.2: a display change that is not kept reverts to the video mode from before - the resolution
+//                           itself, also a window size that is listed only while it is the current one; the timeout reverts too
 //   Unit.UI.KeyHints        FRbKeyHintsModel per context (stroke phases, ball in hand, decisions, interaction, setting off, menu,
 //                           replay) and the overlay component's 3 s hold + fade
 //   Unit.UI.TwoTables       UX-T25: two tables with two matches: the overlay, the pause block and the key-hint context bind to the
 //                           player's table only; moving the player-table tag rebinds at the next refresh
+//   Unit.UI.PointerFocus    UX-T09 keyboard + mouse together: a still cursor that a scroll / a new screen puts over an item never
+//                           takes the focus (only real motion does); a pointer-focused row does not scroll; a slider drag ends when
+//                           the capture is lost or the button is up; the Space preview ends when a dialog covers the screen; the
+//                           resolution row's count / label fast path equals its full label list
 // Owner: M2-D.
 
 #include "Game/RbMatchDirector.h"
@@ -42,6 +51,7 @@
 #include "Engine/UserInterfaceSettings.h"
 #include "Engine/World.h"
 #include "Fonts/FontMeasure.h"
+#include "HAL/IConsoleManager.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Layout/ArrangedChildren.h"
 #include "Misc/ScopeExit.h"
@@ -120,11 +130,24 @@ namespace RbUiTest
 		}
 	};
 
-	FPointerEvent Mouse(const FVector2D& Position, const FKey& Button = EKeys::LeftMouseButton)
+	// A pointer event that arrives with real cursor motion (Delta since the last event; the hand moved the mouse there).
+	FPointerEvent Mouse(const FVector2D& Position, const FKey& Button = EKeys::LeftMouseButton, const FVector2D& Delta = FVector2D(3.0, 1.0))
 	{
 		TSet<FKey> Pressed;
 		Pressed.Add(Button);
-		return FPointerEvent(0, Position, Position, Pressed, Button, 0.0f, FModifierKeysState());
+		return FPointerEvent(0, Position, Position - Delta, Pressed, Button, 0.0f, FModifierKeysState());
+	}
+
+	// Slate's synthetic move under a still cursor (a list scrolled, a screen opened under it): zero delta, no button held.
+	FPointerEvent StillCursor(const FVector2D& Position)
+	{
+		return FPointerEvent(0, Position, Position, TSet<FKey>(), EKeys::Invalid, 0.0f, FModifierKeysState());
+	}
+
+	// The mouse moving with no button held.
+	FPointerEvent Hover(const FVector2D& Position)
+	{
+		return FPointerEvent(0, Position, Position - FVector2D(3.0, 1.0), TSet<FKey>(), EKeys::Invalid, 0.0f, FModifierKeysState());
 	}
 
 	void Click(const TSharedPtr<SWidget>& Widget, const FVector2D& Size, const FVector2D& At)
@@ -219,6 +242,27 @@ namespace RbUiTest
 			return nullptr;
 		}
 		return Director;
+	}
+
+	// UGameUserSettings::ApplyResolutionSettings / ApplyNonResolutionSettings validate first, and ValidateSettings reloads (and may
+	// even delete) the user-settings ini when the object's version is not current. A transient test object that APPLIES a display
+	// row must carry the current version. The member pointer taken through a using-declaration is the legal way to reach the
+	// protected UpdateVersion (FVersionAccess is never instantiated).
+	struct FVersionAccess : public URbGameUserSettings
+	{
+		using UGameUserSettings::UpdateVersion;
+	};
+
+	void MakeVersionCurrent(URbGameUserSettings& Settings)
+	{
+		void (UGameUserSettings::*Update)() = &FVersionAccess::UpdateVersion;
+		(Settings.*Update)();
+	}
+
+	// A key press as Slate delivers it (bRepeat: the OS auto-repeat of a held key).
+	bool Press(SRbScreen& Screen, const FKey& K, bool bRepeat)
+	{
+		return Screen.OnKeyDown(FGeometry(), FKeyEvent(K, FModifierKeysState(), static_cast<uint32>(0), bRepeat, 0u, 0u)).IsEventHandled();
 	}
 
 	// The logical layout sizes of the three test resolutions (the engine's DPI rule divides by height / 1080).
@@ -660,6 +704,12 @@ bool FRbUiNavigationMouse::RunTest(const FString& Parameters)
 	Click(Look, RowSize, FVector2D(ControlStart + 0.5f * Inner, 28.0));
 	TestTrue(TEXT("click the value: next"), H.Settings->CameraPreset == ERbCameraPreset::Headcam);
 	TestEqual(TEXT("the clicked row has the focus"), Menu->GetFocusIndex(), 0);
+	Click(Look, RowSize, FVector2D(ControlStart + Inner - 10.0f, 28.0));
+	TestTrue(TEXT("click > on the last value: stays (the arrows clamp)"), H.Settings->CameraPreset == ERbCameraPreset::Headcam);
+	Click(Look, RowSize, FVector2D(ControlStart + 0.5f * Inner, 28.0));
+	TestTrue(TEXT("click the last value: wraps to the first, like Enter (never a dead click)"), H.Settings->CameraPreset == ERbCameraPreset::Eyes);
+	Click(Look, RowSize, FVector2D(ControlStart + 0.5f * Inner, 28.0));
+	TestTrue(TEXT("click the value again: Headcam"), H.Settings->CameraPreset == ERbCameraPreset::Headcam);
 	// cam.fov (float): click at 60 % of the track -> 40 + 0.6 * 35 = 61 deg; drag to the end -> 75.
 	TSharedPtr<SRbOptionRow> Fov = Menu->GetRowWidget(1);
 	const FGeometry RowGeometry = FGeometry::MakeRoot(RowSize, FSlateLayoutTransform());
@@ -684,6 +734,139 @@ bool FRbUiNavigationMouse::RunTest(const FString& Parameters)
 	Menu->GetTabWidget(ERbSettingsPage::Audio)->OnMouseButtonDown(FGeometry::MakeRoot(FVector2D(120.0, 40.0), FSlateLayoutTransform()),
 		RbUiTest::Mouse(FVector2D(10.0, 10.0)));
 	TestTrue(TEXT("click a tab"), Menu->GetPage() == ERbSettingsPage::Audio);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbUiKeyRepeat, "RawBreak.Unit.UI.KeyRepeat", RB_UNIT_TEST_FLAGS)
+bool FRbUiKeyRepeat::RunTest(const FString& Parameters)
+{
+	using RbUiTest::Press;
+	RbUiTest::FHost H;
+	TestTrue(TEXT("arrows repeat"), SRbScreen::IsRepeatableKey(EKeys::Down) && SRbScreen::IsRepeatableKey(EKeys::Right) &&
+		SRbScreen::IsRepeatableKey(EKeys::Gamepad_DPad_Up));
+	TestFalse(TEXT("Enter / Space / Esc do not repeat"), SRbScreen::IsRepeatableKey(EKeys::Enter) || SRbScreen::IsRepeatableKey(EKeys::SpaceBar) ||
+		SRbScreen::IsRepeatableKey(EKeys::Escape));
+
+	// Title: a held Enter opens Play once and then stays there (no venue, no mode, no travel).
+	TSharedRef<SRbTitleScreen> Title = SNew(SRbTitleScreen).Host(H.Host);
+	TestTrue(TEXT("Enter handled"), Press(*Title, EKeys::Enter, false));
+	TestTrue(TEXT("Enter: Play"), Title->GetLevel() == SRbTitleScreen::ELevel::Play);
+	const int32 Venue = Title->GetFocusIndex();
+	for (int32 Repeat = 0; Repeat < 20; ++Repeat)
+	{
+		TestTrue(TEXT("a repeated Enter is consumed"), Press(*Title, EKeys::Enter, true));
+	}
+	TestTrue(TEXT("holding Enter does not chain into a venue or a travel"), Title->GetLevel() == SRbTitleScreen::ELevel::Play &&
+		Title->GetFocusIndex() == Venue && !Title->IsLoading() && !H.Called(TEXT("StartVenue:ERbVenue::DiveBar:ERbMatchMode::Practice")));
+	// A held Down walks the list.
+	Title->SetFocusIndex(0);
+	Press(*Title, EKeys::Down, false);
+	Press(*Title, EKeys::Down, true);
+	TestEqual(TEXT("a held Down keeps moving the focus"), Title->GetFocusIndex(), 2);
+	// Esc repeats do not step back through the levels either.
+	Press(*Title, EKeys::Escape, false);
+	TestTrue(TEXT("Esc: back to the root"), Title->GetLevel() == SRbTitleScreen::ELevel::Root);
+	H.Clear();
+	for (int32 Repeat = 0; Repeat < 10; ++Repeat)
+	{
+		Press(*Title, EKeys::Escape, true);
+	}
+	TestTrue(TEXT("a held Esc does not open the quit dialog"), !H.Called(TEXT("Push")) && Title->GetLevel() == SRbTitleScreen::ELevel::Root);
+
+	// Pause: the Esc that opened the menu reaches it as repeats while it is held - they must not resume.
+	TSharedRef<SRbPauseMenu> Pause = SNew(SRbPauseMenu).Host(H.Host);
+	H.Clear();
+	for (int32 Repeat = 0; Repeat < 10; ++Repeat)
+	{
+		Press(*Pause, EKeys::Escape, true);
+	}
+	TestFalse(TEXT("a held Esc does not resume"), H.Called(TEXT("Resume")));
+	Press(*Pause, EKeys::Escape, false);
+	TestTrue(TEXT("a new Esc press resumes"), H.Called(TEXT("Resume")));
+
+	// Settings: a held Right keeps changing the focused row.
+	TSharedRef<SRbSettingsMenu> Settings = SNew(SRbSettingsMenu).Host(H.Host).InitialPage(ERbSettingsPage::Camera);
+	Settings->SetFocusIndex(1);
+	TestTrue(TEXT("the FOV row"), Settings->GetFocusedRow() && Settings->GetFocusedRow()->Id == TEXT("cam.fov"));
+	const float Fov = H.Settings->VerticalFovDeg;
+	Press(*Settings, EKeys::Right, false);
+	Press(*Settings, EKeys::Right, true);
+	Press(*Settings, EKeys::Right, true);
+	TestNearlyEqual(TEXT("a held Right: +1 deg per repeat"), H.Settings->VerticalFovDeg, Fov + 3.0f, 1e-4f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbUiDisplayRevert, "RawBreak.Unit.UI.DisplayRevert", RB_UNIT_TEST_FLAGS)
+bool FRbUiDisplayRevert::RunTest(const FString& Parameters)
+{
+	RbUiTest::FHost H;
+	URbGameUserSettings* S = H.Settings.Get();
+	RbUiTest::MakeVersionCurrent(*S); // the display rows apply (ApplyResolutionSettings validates the object first)
+	// The applies write the engine's resolution request variables (the editor does not act on them); put them back afterwards.
+	TArray<TPair<IConsoleVariable*, FString>> SavedCVars;
+	for (const TCHAR* Name : {TEXT("r.SetRes"), TEXT("r.FullScreenMode")})
+	{
+		if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
+		{
+			SavedCVars.Add({CVar, CVar->GetString()});
+		}
+	}
+	ON_SCOPE_EXIT
+	{
+		for (const TPair<IConsoleVariable*, FString>& Entry : SavedCVars)
+		{
+			Entry.Key->SetWithCurrentPriority(*Entry.Value);
+		}
+	};
+
+	// A window size that is no display mode: the resolution list holds it only while it is the current resolution.
+	const FIntPoint Custom(1703, 958);
+	S->SetFullscreenMode(EWindowMode::Windowed);
+	S->SetScreenResolution(Custom);
+	TestTrue(TEXT("the current custom size is listed"), FRbSettingsRegistry::ResolutionList(*S).Contains(Custom));
+	TSharedRef<SRbSettingsMenu> Menu = SNew(SRbSettingsMenu).Host(H.Host).InitialPage(ERbSettingsPage::Display);
+	Menu->SetFocusIndex(1);
+	if (!TestTrue(TEXT("the resolution row (available in windowed mode)"), Menu->GetFocusedRow() && Menu->GetFocusedRow()->Id == TEXT("dsp.resolution") &&
+		FRbSettingsRegistry::IsAvailable(*Menu->GetFocusedRow(), *S)))
+	{
+		return false;
+	}
+	RbUiTest::Key(*Menu, EKeys::Right);
+	const FIntPoint Next = S->GetScreenResolution();
+	AddInfo(FString::Printf(TEXT("Right: %d x %d -> %d x %d"), Custom.X, Custom.Y, Next.X, Next.Y));
+	TestTrue(TEXT("Right: the next larger listed resolution"), Next != Custom && (Next.X > Custom.X || (Next.X == Custom.X && Next.Y > Custom.Y)));
+	TestFalse(TEXT("the custom size left the list (the list indices moved)"), FRbSettingsRegistry::ResolutionList(*S).Contains(Custom));
+	TSharedPtr<SRbConfirmDialog> Keep = H.TopDialog();
+	if (TestTrue(TEXT("keep-or-revert dialog"), Keep.IsValid()))
+	{
+		TestEqual(TEXT("Keep is focused"), Keep->GetFocusIndex(), 0);
+		RbUiTest::Key(*Keep, EKeys::Escape);
+		TestTrue(FString::Printf(TEXT("Esc reverts to the custom size itself (got %d x %d)"), S->GetScreenResolution().X, S->GetScreenResolution().Y),
+			S->GetScreenResolution() == Custom && S->GetFullscreenMode() == EWindowMode::Windowed);
+	}
+
+	// Window mode: Windowed -> Windowed fullscreen, no answer for 15 s -> back to windowed at the custom size.
+	Menu->SetFocusIndex(0);
+	RbUiTest::Key(*Menu, EKeys::Left);
+	TestTrue(TEXT("Left: windowed fullscreen"), S->GetFullscreenMode() == EWindowMode::WindowedFullscreen);
+	TSharedPtr<SRbConfirmDialog> Timeout = H.TopDialog();
+	if (TestTrue(TEXT("keep-or-revert dialog (window mode)"), Timeout.IsValid()))
+	{
+		for (int32 Frame = 0; Frame < 16 * 10 && !Timeout->IsAnswered(); ++Frame)
+		{
+			Timeout->Tick(FGeometry(), 0.0, 0.1f);
+		}
+		TestTrue(TEXT("15 s without an answer: reverted to windowed at the custom size"), Timeout->IsAnswered() &&
+			S->GetFullscreenMode() == EWindowMode::Windowed && S->GetScreenResolution() == Custom);
+	}
+	// Keep confirms the new mode.
+	RbUiTest::Key(*Menu, EKeys::Left);
+	TSharedPtr<SRbConfirmDialog> Confirm = H.TopDialog();
+	if (TestTrue(TEXT("keep-or-revert dialog (keep)"), Confirm.IsValid()))
+	{
+		RbUiTest::Key(*Confirm, EKeys::Enter);
+		TestTrue(TEXT("Keep: the new mode stays"), S->GetFullscreenMode() == EWindowMode::WindowedFullscreen && S->GetLastConfirmedFullscreenMode() == EWindowMode::WindowedFullscreen);
+	}
 	return true;
 }
 
@@ -841,6 +1024,92 @@ bool FRbUiTwoTables::RunTest(const FString& Parameters)
 	Tables->UnregisterSession(0);
 	TestTrue(TEXT("no session at the player's table: nothing"), URbUiSubsystem::FindPlayerDirector(World) == nullptr);
 	Overlay->SetDirector(nullptr);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbUiPointerFocus, "RawBreak.Unit.UI.PointerFocus", RB_UNIT_TEST_FLAGS)
+bool FRbUiPointerFocus::RunTest(const FString& Parameters)
+{
+	using RbUiTest::Key;
+	RbUiTest::FScalabilityGuard Guard;
+	RbUiTest::FHost H;
+	const FVector2D RowSize(1100.0, RbUi::RowHeight);
+	const FGeometry RowGeometry = FGeometry::MakeRoot(RowSize, FSlateLayoutTransform());
+	const FVector2D OverLabel(300.0, 28.0);
+
+	// --- a still cursor never takes the focus ------------------------------------------------------------------------------
+	// The settings open from the pause menu by keyboard while the cursor rests mid-screen, over a row of the list.
+	TSharedRef<SRbSettingsMenu> Menu = SNew(SRbSettingsMenu).Host(H.Host);
+	Menu->GetRowWidget(6)->OnMouseEnter(RowGeometry, RbUiTest::StillCursor(OverLabel));
+	TestEqual(TEXT("a new screen under a parked cursor: the first row keeps the focus"), Menu->GetFocusIndex(), 0);
+	// Keyboard Down scrolls the list; the row that slides under the still cursor must not take the keyboard's focus.
+	Key(*Menu, EKeys::Down);
+	TestTrue(TEXT("Down: keyboard focus (scrolls its row into view)"), Menu->GetFocusIndex() == 1 && !Menu->IsFocusFromMouse());
+	Menu->GetRowWidget(7)->OnMouseEnter(RowGeometry, RbUiTest::StillCursor(OverLabel));
+	TestEqual(TEXT("a row scrolled under the still cursor does not steal the focus"), Menu->GetFocusIndex(), 1);
+	// Moving the mouse onto a row focuses it - as pointer focus, which does not scroll (else the next row slides under the cursor,
+	// takes the focus, scrolls ... to the end of the list).
+	Menu->GetRowWidget(7)->OnMouseEnter(RowGeometry, RbUiTest::Mouse(OverLabel));
+	TestTrue(TEXT("real motion focuses the row (pointer focus: no scroll)"), Menu->GetFocusIndex() == 7 && Menu->IsFocusFromMouse());
+	Key(*Menu, EKeys::Down);
+	TestTrue(TEXT("the next key is keyboard focus again"), Menu->GetFocusIndex() == 8 && !Menu->IsFocusFromMouse());
+	// Title and pause items follow the same rule.
+	const FGeometry ItemGeometry = FGeometry::MakeRoot(FVector2D(560.0, 64.0), FSlateLayoutTransform());
+	TSharedRef<SRbTitleScreen> Title = SNew(SRbTitleScreen).Host(H.Host);
+	Title->GetFocusItemWidget(2)->OnMouseEnter(ItemGeometry, RbUiTest::StillCursor(FVector2D(40.0, 30.0)));
+	TestEqual(TEXT("title: a still cursor over Quit leaves Play focused"), Title->GetFocusIndex(), 0);
+	TSharedRef<SRbPauseMenu> Pause = SNew(SRbPauseMenu).Host(H.Host);
+	Pause->GetFocusItemWidget(3)->OnMouseEnter(ItemGeometry, RbUiTest::StillCursor(FVector2D(40.0, 30.0)));
+	TestEqual(TEXT("pause: a still cursor over Quit to desktop leaves Resume focused"), Pause->GetFocusIndex(), 0);
+	Pause->GetFocusItemWidget(3)->OnMouseEnter(ItemGeometry, RbUiTest::Mouse(FVector2D(40.0, 30.0)));
+	TestEqual(TEXT("pause: moving onto it focuses it"), Pause->GetFocusIndex(), 3);
+
+	// --- slider drags end when the button is gone -----------------------------------------------------------------------------
+	TSharedRef<SRbSettingsMenu> Camera = SNew(SRbSettingsMenu).Host(H.Host).InitialPage(ERbSettingsPage::Camera);
+	TSharedPtr<SRbOptionRow> Fov = Camera->GetRowWidget(1);
+	if (!TestTrue(TEXT("the FOV row"), Fov.IsValid() && Fov->GetRow()->Id == TEXT("cam.fov")))
+	{
+		return false;
+	}
+	const float ControlStart = RowSize.X - SRbOptionRow::ControlWidth + RbUi::FocusBarWidth;
+	const FVector2D At20(ControlStart + 0.2f * SRbOptionRow::TrackWidth, 28.0);
+	const FVector2D At90(ControlStart + 0.9f * SRbOptionRow::TrackWidth, 28.0);
+	Fov->OnMouseButtonDown(RowGeometry, RbUiTest::Mouse(At20));
+	const float Grabbed = H.Settings->VerticalFovDeg;
+	TestTrue(TEXT("press on the track: dragging at 20 % (47 deg)"), Fov->IsDragging() && FMath::IsNearlyEqual(Grabbed, 47.0f, 1e-4f));
+	Fov->OnMouseCaptureLost(FCaptureLostEvent(0, 0));
+	TestFalse(TEXT("capture lost (Alt-Tab, a dialog) ends the drag"), Fov->IsDragging());
+	Fov->OnMouseMove(RowGeometry, RbUiTest::Hover(At90));
+	TestNearlyEqual(TEXT("after the lost capture the bare cursor does not move the slider"), H.Settings->VerticalFovDeg, Grabbed, 1e-4f);
+	Fov->OnMouseButtonDown(RowGeometry, RbUiTest::Mouse(At20));
+	Fov->OnMouseMove(RowGeometry, RbUiTest::Hover(At90));
+	TestTrue(TEXT("a move without the button ends a drag whose release went elsewhere"), !Fov->IsDragging() &&
+		FMath::IsNearlyEqual(H.Settings->VerticalFovDeg, Grabbed, 1e-4f));
+	const FVector2D PastEnd(ControlStart + SRbOptionRow::TrackWidth + 20.0f, 28.0);
+	Fov->OnMouseButtonDown(RowGeometry, RbUiTest::Mouse(At20));
+	Fov->OnMouseMove(RowGeometry, RbUiTest::Mouse(PastEnd));
+	TestNearlyEqual(TEXT("a held drag still follows the cursor (past the end = 75 deg)"), H.Settings->VerticalFovDeg, 75.0f, 1e-4f);
+	Fov->OnMouseButtonUp(RowGeometry, RbUiTest::Mouse(PastEnd));
+	TestFalse(TEXT("the release ends it"), Fov->IsDragging());
+
+	// --- the Space preview ends when a dialog covers the screen -----------------------------------------------------------------
+	TestTrue(TEXT("hold Space: preview"), Key(*Camera, EKeys::SpaceBar) && Camera->IsPreviewing());
+	Camera->OnDeactivated(); // the stack covers it (a confirm dialog); the Space release goes to the dialog
+	TestFalse(TEXT("covered: the preview ends (the panel never stays invisible)"), Camera->IsPreviewing());
+
+	// --- the resolution row's per-frame fast path equals the full list ----------------------------------------------------------
+	const FRbSettingDef* Res = FRbSettingsRegistry::Find(TEXT("dsp.resolution"));
+	if (TestNotNull(TEXT("resolution row"), Res))
+	{
+		const TArray<FText> Labels = FRbSettingsRegistry::EnumLabels(*Res, *H.Settings);
+		TestTrue(TEXT("at least one resolution"), Labels.Num() > 0);
+		TestEqual(TEXT("count without formatting = the label list"), FRbSettingsRegistry::NumEnumValues(*Res, *H.Settings), Labels.Num());
+		for (int32 Index = 0; Index < Labels.Num(); ++Index)
+		{
+			TestEqual(FString::Printf(TEXT("label %d without the list"), Index), FRbSettingsRegistry::FormatValue(*Res, *H.Settings, Index).ToString(),
+				Labels[Index].ToString());
+		}
+	}
 	return true;
 }
 

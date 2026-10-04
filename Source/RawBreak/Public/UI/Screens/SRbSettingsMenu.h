@@ -6,10 +6,12 @@
 // sensitivity, fine-aim factor, acceleration, invert, key hints), Audio (volumes). Rows come from FRbSettingsRegistry; every
 // change is live (stored, then applied); the settings are saved when the screen closes.
 // Keyboard: Up / Down rows, Left / Right change, Enter = next value / toggle, Q / E pages, R reset the page (confirm), hold Space
-// = preview (the panel fades out to show the live view), Esc back. Mouse: tabs, arrows, sliders (click / drag), footer hints.
+// = preview (the panel fades out to show the live view), Esc back. Mouse: tabs, arrows (one step), the value of a stepper (= Enter:
+// the next value, wrapping), sliders (click / drag), footer hints.
 // Owner: M2-D.
 
 #include "CoreMinimal.h"
+#include "GenericPlatform/GenericWindow.h"
 
 #include "Settings/RbSettingsRegistry.h"
 #include "UI/Core/SRbScreen.h"
@@ -40,13 +42,17 @@ public:
 
 	// Stores and applies a new value for a row (the display rows ask to keep it within 15 s). Public for the tests.
 	void ChangeRow(const FRbSettingDef& Row, double NewValue);
+	// The display rows' revert: restores and applies the video mode from before the change (window mode and resolution).
+	static void RevertVideoMode(URbGameUserSettings& Settings, EWindowMode::Type WindowMode, const FIntPoint& Resolution);
 
 	virtual bool HandleBack() override;
 	virtual bool HandleKey(const FKey& Key, const FModifierKeysState& Modifiers) override;
 	virtual bool HandleKeyUp(const FKey& Key) override;
 	virtual void ActivateFocused() override;
 	virtual bool AdjustFocused(int32 Direction) override;
+	virtual void OnDeactivated() override;
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+	virtual void OnFocusChanging(const FWeakWidgetPath& PreviousFocusPath, const FWidgetPath& NewWidgetPath, const FFocusEvent& InFocusEvent) override;
 
 protected:
 	virtual void OnFocusChanged() override;
