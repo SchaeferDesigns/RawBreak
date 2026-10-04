@@ -65,6 +65,12 @@ bool URbStrokeComponent::HasTrueTimestamps() const
 	return RawMouse.IsValid() && RawMouse->HasTrueTimestamps();
 }
 
+void URbStrokeComponent::SyncWorldPause()
+{
+	const UWorld* World = GetWorld();
+	NotifyWorldPaused(World && World->IsPaused());
+}
+
 double URbStrokeComponent::StrokeMetersPerCount() const
 {
 	// Stroke sensitivity scales the hand metres per count relative to the calibrated DPI (ui-ux 13.6); 1 = the M1 mapping, exactly.
@@ -283,11 +289,12 @@ void URbStrokeComponent::AddAimInput(const FVector2D& LookCounts, bool bFine, do
 	{
 		return;
 	}
-	if (bStrokeHeld || bForwardPhase)
+	if (bStrokeHeld || bForwardPhase || bStrokeNeedsRelease)
 	{
-		// The aim is frozen during a stroke. Look input that the mouse stroke does not explain (not the Stroke button's
-		// own mouse motion) after ForwardStart is a head movement (HF-10).
-		if (bCommittedStroke && !bStrokeHeld)
+		// The aim is frozen during a stroke, and while a Stroke button that must first be released (held through a pause, review) is
+		// still down: its mouse motion is a stroke the player thinks he makes, never aim. Look input that the mouse stroke does not
+		// explain (not the Stroke button's own mouse motion) after ForwardStart is a head movement (HF-10).
+		if (bCommittedStroke && !bStrokeHeld && !bStrokeNeedsRelease)
 		{
 			HeadMoveAccum += (FMath::Abs(LookCounts.X) + FMath::Abs(LookCounts.Y)) * RbAimResponse::RadiansPerCount(bFine, MouseDpi, Controls);
 		}
@@ -345,6 +352,17 @@ void URbStrokeComponent::AddTipOffsetInput(const FVector2D& Delta)
 
 void URbStrokeComponent::SetStrokeHeld(bool bHeld)
 {
+	// The pause first (review): Enhanced Input's Completed of the paused frame may come before this component's tick noticed the
+	// pause. Nothing starts or ends while paused - the drop already ended the stroke, and the resume reads the button.
+	SyncWorldPause();
+	if (bWorldPaused)
+	{
+		if (bHeld)
+		{
+			bStrokeNeedsRelease = true; // pressed during the pause: never a stroke out of it
+		}
+		return;
+	}
 	const double T = ClockNow();
 	if (bHeld)
 	{
@@ -391,12 +409,13 @@ void URbStrokeComponent::SetStrokeHeld(bool bHeld)
 
 void URbStrokeComponent::SetCommitHeld(bool bHeld)
 {
+	SyncWorldPause(); // a Commit released by the pause must not process the dropped stroke's samples (see SetStrokeHeld)
 	if (bHeld == bCommitHeld)
 	{
 		return;
 	}
 	const double T = ClockNow();
-	if (Phase == ERbStrokePhase::Down)
+	if (Phase == ERbStrokePhase::Down && !bWorldPaused)
 	{
 		ProcessStrokeSamples(T); // samples before the change keep the old state
 	}
@@ -448,10 +467,33 @@ void URbStrokeComponent::NotifyWorldPaused(bool bPaused)
 		return;
 	}
 	bWorldPaused = bPaused;
+	const double Now = ClockNow();
 	if (!bPaused)
 	{
+		// Resume: the address's human clock goes on where it stopped (review, 3rd pass). The clock of the component is real time, but
+		// the player's body was frozen with the world (the rig's get-down, breathing and sway do not tick while paused): without the
+		// shift a pause during the get-down started Down before the eye arrived, the cue's drift and tremor jumped to SampleHand of
+		// the pause's end, the Settle ran out behind the menu, and the time in the menu counted as time down on the shot (HF-07: the
+		// envelope grows after 10 s down - a minute in the pause menu meant +50 % aiming error on the next stroke).
+		const double PausedSeconds = FMath::Max(0.0, Now - PausedAt);
+		if (Phase == ERbStrokePhase::GettingDown || Phase == ERbStrokePhase::Down)
+		{
+			DownSince += PausedSeconds;
+			LastTickTime += PausedSeconds;
+			if (SettleSince >= 0.0)
+			{
+				SettleSince += PausedSeconds;
+			}
+		}
+		// A button held through the pause must be released first; one let go during the pause (its release may have been Enhanced
+		// Input's synthetic Completed, or never reached the game behind the menu) must not swallow the next press.
+		if (bStrokeNeedsRelease && IsStrokeButtonDown && !IsStrokeButtonDown())
+		{
+			bStrokeNeedsRelease = false;
+		}
 		return;
 	}
+	PausedAt = Now;
 	// Pausing drops a held stroke (18.2): a committed one aborts (its shown ramp is spent), the scripted samples still to come are
 	// discarded (their times pass during the pause), and a Stroke button still held on resume must be released first.
 	const bool bWasHeld = bStrokeHeld;
@@ -541,10 +583,8 @@ void URbStrokeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void URbStrokeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	const UWorld* World = GetWorld();
-	const bool bPaused = World && World->IsPaused();
-	NotifyWorldPaused(bPaused);
-	if (bPaused)
+	SyncWorldPause();
+	if (bWorldPaused)
 	{
 		// The raw reports of the pause (menu mouse moves) never reach a stroke.
 		if (RawMouse.IsValid() && RawMouse->IsActive())

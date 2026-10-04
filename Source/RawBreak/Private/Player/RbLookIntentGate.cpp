@@ -24,9 +24,17 @@ void FRbLookIntentGate::SetStrokeHeld(bool bHeld, double NowSeconds)
 	{
 		QuietSince = FMath::Max(QuietSince, NowSeconds); // the quiet period starts at the release
 	}
-	if (bHeld && bArmed && !bOpen)
+	if (bHeld && bArmed)
 	{
-		Recent.Reset(); // a new press: the stroke owns the mouse again
+		// The stroke owns the mouse again. A new press closes an open gate too (review: mouse motion while the Stroke button is held is
+		// never look, also after the gate opened - a second "air stroke" while watching must not swing the view); its release starts a
+		// new quiet period and only a new deliberate move opens the gate again. Enhanced Input repeats Triggered while held: only the
+		// press itself closes.
+		if (!bStrokeHeld)
+		{
+			bOpen = false;
+		}
+		Recent.Reset();
 	}
 	bStrokeHeld = bHeld;
 }

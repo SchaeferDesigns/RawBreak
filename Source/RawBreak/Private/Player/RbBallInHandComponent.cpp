@@ -37,6 +37,8 @@ namespace
 	constexpr double kClearanceLookAhead = 0.12;    // [s] of the hand's motion
 	constexpr double kClearanceRiseSeconds = 0.06;
 	constexpr double kClearanceFallSeconds = 0.25;
+	constexpr double kAlignRate = 1.6;              // the lowering lines the ball up in the first 1 / 1.6 of its time ...
+	constexpr double kSmoothStepPeakSlope = 1.5;    // ... along a smoothstep, whose peak speed is 1.5 x the mean speed
 	const TCHAR* const kPreviewMaterial = TEXT("/Game/Generated/Player/M_RbContactPreview");
 	const TCHAR* const kPlaneMesh = TEXT("/Engine/BasicShapes/Plane.Plane");
 
@@ -86,17 +88,31 @@ URbBallInHandComponent::URbBallInHandComponent()
 
 void URbBallInHandComponent::BeginCarry(ARbTable* InTable, int32 InBallId, double InBallRadius, TFunction<bool(const rb::Vec2&)> InIsLegal)
 {
-	if (bHidTableBall && (Table.Get() != InTable || BallId != InBallId))
+	const bool bOtherBall = Table.Get() != InTable || BallId != InBallId;
+	if (bHidTableBall && bOtherBall)
 	{
 		RestoreTableBall(); // another ball / table: the previous one goes back where it was
 	}
+	if (bOtherBall && BallMesh)
+	{
+		// Another ball (M2-E: a ball picked up from the floor, another table's set): UpdateVisuals takes its mesh and material anew.
+		BallMesh->SetStaticMesh(nullptr);
+		BallMesh->EmptyOverrideMaterials();
+	}
+	// The same ball again while the hand still holds it (the director refused a set-down after all, a second BeginCarry): the hand
+	// carries on from where it is instead of coming in from the shoulder again (no jump of the shown ball).
+	const bool bStillInHand = !bOtherBall && bHandValid && State != ERbBallInHandState::Inactive;
 	Table = InTable;
 	BallId = InBallId;
 	BallRadius = InBallRadius > 0.0 ? InBallRadius : kReferenceRadius;
 	IsLegal = MoveTemp(InIsLegal);
 	FineOffset = rb::Vec2();
 	bHasTarget = false;
-	bHandValid = false;
+	bHandValid = bStillInHand;
+	if (!bStillInHand)
+	{
+		RefuseTime = -1.0; // a new carry: no hesitation running (one still running in the hand fades out on its own)
+	}
 	HandVelocity = rb::Vec2();
 	StepRemainder = 0.0;
 	ClearanceLiftCm = 0.0;
@@ -115,6 +131,10 @@ void URbBallInHandComponent::BeginCarry(ARbTable* InTable, int32 InBallId, doubl
 
 void URbBallInHandComponent::SetTargetCore(const rb::Vec2& Plan)
 {
+	if (State == ERbBallInHandState::Lowering || State == ERbBallInHandState::Placed)
+	{
+		return; // the ball goes down on / lies at exactly the confirmed target (placed == previewed)
+	}
 	LookTarget = Plan;
 	bHasTarget = true;
 	RecomputeTarget();
@@ -163,13 +183,33 @@ bool URbBallInHandComponent::RequestSetDown()
 	if (IsLegal && !IsLegal(Target))
 	{
 		RefusedAt = Target;
-		SetState(ERbBallInHandState::Refused); // restarts the hesitation even at the same spot
+		SetState(ERbBallInHandState::Refused);
+		// The hesitation (lift and shake) runs on its own clock: a refusal after the last one has finished starts a new one, a repeated
+		// Confirm during it lets it run on (review: restarting it mid-lift dropped the ball by up to 8 mm in one frame).
+		if (RefuseTime < 0.0 || RefuseTime >= kRefuseSeconds)
+		{
+			RefuseTime = 0.0;
+		}
 		OnRefused.Broadcast(Target);
 		UE_LOG(LogRawBreak, Log, TEXT("RbBallInHand: set-down at (%.4f, %.4f) refused (illegal spot)"), Target.x, Target.y);
 		return false;
 	}
-	LowerFrom = bHandValid ? HandPlan : Target;
-	LowerFromBottomCm = bHandValid ? ShownBottomCm : HoverHeightCm;
+	// The lowering starts where the ball is shown (incl. tremor and a hesitation still fading out), so its first frame never jumps; a
+	// hand that has not come into view yet comes in from the shoulder, as a carry does.
+	if (!bHandValid)
+	{
+		InitHand();
+		ShownPlan = HandPlan;
+		ShownBottomCm = HoverHeightCm + OutsideLiftCm(HandPlan);
+	}
+	LowerFrom = ShownPlan;
+	LowerFromBottomCm = ShownBottomCm;
+	// Review: Confirm while the lagging hand is still far from the target (pressed right after the ball was picked up, or after a quick
+	// look across the table) lined the ball up within 0.16 s whatever the distance - 0.7 m at ~10 m/s, a jump of 11 cm per frame. The
+	// line-up keeps the hand's speed limit: the set-down takes longer when the hand has further to go (LowerSeconds at the least).
+	const double Distance = FMath::Sqrt(FMath::Square(Target.x - LowerFrom.x) + FMath::Square(Target.y - LowerFrom.y));
+	const double MaxSpeed = FMath::Max(0.05, static_cast<double>(MaxHandSpeed));
+	LowerDuration = FMath::Max(static_cast<double>(LowerSeconds), kAlignRate * kSmoothStepPeakSlope * Distance / MaxSpeed);
 	SetState(ERbBallInHandState::Lowering);
 	return true;
 }
@@ -178,6 +218,7 @@ void URbBallInHandComponent::Cancel()
 {
 	RestoreTableBall();
 	SetState(ERbBallInHandState::Inactive);
+	RefuseTime = -1.0;
 	HideVisuals();
 }
 
@@ -222,6 +263,27 @@ rb::Vec2 URbBallInHandComponent::ClampToBed(const rb::Vec2& Plan) const
 	return rb::Vec2(FMath::Clamp(Plan.x, -HalfL, HalfL), FMath::Clamp(Plan.y, -HalfW, HalfW));
 }
 
+double URbBallInHandComponent::OutsideLiftCm(const rb::Vec2& Plan) const
+{
+	const rb::Vec2 Clamped = ClampToBed(Plan);
+	const double OutsideCm = 100.0 * FMath::Sqrt(FMath::Square(Plan.x - Clamped.x) + FMath::Square(Plan.y - Clamped.y));
+	return FMath::Min(kOutsideLiftMaxCm, kOutsideLiftPerCm * OutsideCm);
+}
+
+void URbBallInHandComponent::InitHand()
+{
+	// The hand comes into view from where the player stands (never pops up at the target), or at the target without a player.
+	HandPlan = Target;
+	const ARbTable* T = Table.Get();
+	if (GetOwner() && T)
+	{
+		const rb::Vec3 Near = T->WorldToCore(ShoulderWorld());
+		HandPlan = rb::Vec2(Near.x, Near.y);
+	}
+	HandVelocity = rb::Vec2();
+	bHandValid = true;
+}
+
 void URbBallInHandComponent::RecomputeTarget()
 {
 	Target = ClampToBed(rb::Vec2(LookTarget.x + FineOffset.x, LookTarget.y + FineOffset.y));
@@ -238,6 +300,10 @@ void URbBallInHandComponent::TickCarry(double DeltaSeconds)
 	const double Dt = FMath::Max(0.0, DeltaSeconds);
 	Time += Dt;
 	StateTime += Dt;
+	if (RefuseTime >= 0.0)
+	{
+		RefuseTime += Dt;
+	}
 	switch (State)
 	{
 	case ERbBallInHandState::Inactive:
@@ -253,16 +319,7 @@ void URbBallInHandComponent::TickCarry(double DeltaSeconds)
 		}
 		if (!bHandValid)
 		{
-			// The hand comes into view from where the player stands (never pops up at the target), or at the target without a player.
-			HandPlan = Target;
-			const ARbTable* T = Table.Get();
-			if (GetOwner() && T)
-			{
-				const rb::Vec3 Near = T->WorldToCore(ShoulderWorld());
-				HandPlan = rb::Vec2(Near.x, Near.y);
-			}
-			HandVelocity = rb::Vec2();
-			bHandValid = true;
+			InitHand();
 		}
 		// Human lag: a critically damped follow, sub-stepped at a fixed rate and speed-limited (the per-frame step is bounded).
 		const double Omega = UE_DOUBLE_TWO_PI * FMath::Max(0.1, static_cast<double>(FollowHz));
@@ -289,34 +346,40 @@ void URbBallInHandComponent::TickCarry(double DeltaSeconds)
 		double Px = HandPlan.x + Tremor * (0.6 * FMath::Sin(UE_DOUBLE_TWO_PI * 6.7 * Time) + 0.4 * FMath::Sin(UE_DOUBLE_TWO_PI * 0.43 * Time + 1.3));
 		double Py = HandPlan.y + Tremor * (0.6 * FMath::Sin(UE_DOUBLE_TWO_PI * 7.3 * Time + 2.1) + 0.4 * FMath::Sin(UE_DOUBLE_TWO_PI * 0.37 * Time));
 		double Lift = 0.05 * TremorMm * (1.0 + FMath::Sin(UE_DOUBLE_TWO_PI * 5.9 * Time)); // [cm], >= 0
-		if (State == ERbBallInHandState::Refused && StateTime < kRefuseSeconds)
+		if (RefuseTime >= 0.0 && RefuseTime < kRefuseSeconds)
 		{
-			const double A = StateTime / kRefuseSeconds;
+			// The hesitation finishes even when the target moves on (Refused -> Carrying) during it: lift and shake fade out to 0
+			// instead of vanishing in one frame (review: the hand never jumps).
+			const double A = RefuseTime / kRefuseSeconds;
 			Lift += kRefuseLiftCm * FMath::Sin(UE_DOUBLE_PI * A);
-			Px += 0.01 * kRefuseShakeCm * FMath::Sin(UE_DOUBLE_TWO_PI * 6.0 * StateTime) * (1.0 - A);
+			Px += 0.01 * kRefuseShakeCm * FMath::Sin(UE_DOUBLE_TWO_PI * 6.0 * RefuseTime) * (1.0 - A);
 		}
 		ShownPlan = rb::Vec2(Px, Py);
-		// Over the rail (the hand still outside the bed) the ball rises so it never passes through the cushion.
-		const rb::Vec2 Clamped = ClampToBed(HandPlan);
-		const double Outside = 100.0 * FMath::Sqrt(FMath::Square(HandPlan.x - Clamped.x) + FMath::Square(HandPlan.y - Clamped.y));
 		// Over another ball the hand lifts the carried one clear of it (a person never drags a ball through the others): the
 		// clearance needed here and a moment ahead on the hand's path, eased up quickly and down slowly (never a jump).
 		const rb::Vec2 Ahead(HandPlan.x + HandVelocity.x * kClearanceLookAhead, HandPlan.y + HandVelocity.y * kClearanceLookAhead);
-		const double Needed = FMath::Max(0.0, FMath::Max(ClearanceBottomCm(HandPlan), ClearanceBottomCm(Ahead)) - HoverHeightCm);
+		const double HereCm = ClearanceBottomCm(HandPlan, kClearanceMarginCm);
+		const double Needed = FMath::Max(0.0, FMath::Max(HereCm, ClearanceBottomCm(Ahead, kClearanceMarginCm)) - HoverHeightCm);
 		const double Tau = Needed > ClearanceLiftCm ? kClearanceRiseSeconds : kClearanceFallSeconds;
 		ClearanceLiftCm = Needed + (ClearanceLiftCm - Needed) * FMath::Exp(-Dt / Tau);
-		ClearanceLiftCm = FMath::Max(ClearanceLiftCm, FMath::Max(0.0, ClearanceBottomCm(HandPlan) - HoverHeightCm)); // never inside a ball
-		ShownBottomCm = HoverHeightCm + Lift + FMath::Max(ClearanceLiftCm, FMath::Min(kOutsideLiftMaxCm, kOutsideLiftPerCm * Outside));
+		ClearanceLiftCm = FMath::Max(ClearanceLiftCm, FMath::Max(0.0, HereCm - HoverHeightCm)); // never inside a ball
+		// Over the rail (the hand still outside the bed) the ball rises so it never passes through the cushion.
+		ShownBottomCm = HoverHeightCm + Lift + FMath::Max(ClearanceLiftCm, OutsideLiftCm(HandPlan));
 		break;
 	}
 
 	case ERbBallInHandState::Lowering:
 	{
-		// The hand lines the ball up with the target in the first part and sets it down on EXACTLY the target.
-		const double A = LowerSeconds > 0.0f ? FMath::Clamp(StateTime / LowerSeconds, 0.0, 1.0) : 1.0;
-		const double Align = SmoothStep(FMath::Min(1.0, 1.6 * A));
+		// The hand lines the ball up with the target in the first part (at most at the hand's speed: LowerDuration, RequestSetDown) and
+		// sets it down on EXACTLY the target.
+		const double A = LowerDuration > 0.0 ? FMath::Clamp(StateTime / LowerDuration, 0.0, 1.0) : 1.0;
+		const double Align = SmoothStep(FMath::Min(1.0, kAlignRate * A));
 		ShownPlan = rb::Vec2(FMath::Lerp(LowerFrom.x, Target.x, Align), FMath::Lerp(LowerFrom.y, Target.y, Align));
-		ShownBottomCm = LowerFromBottomCm * (1.0 - SmoothStep(A));
+		// The hand lags behind the look point, so lining the ball up may pass over a ball next to the target: it goes over it,
+		// never through it (review). The margin fades out as the ball lines up: at a legal target, which touches no ball, the
+		// clearance is 0 and the ball lands. Coming in from outside the bed it stays over the rail as a carry does (0 on the bed).
+		ShownBottomCm = FMath::Max3(LowerFromBottomCm * (1.0 - SmoothStep(A)), ClearanceBottomCm(ShownPlan, kClearanceMarginCm * (1.0 - Align)),
+			OutsideLiftCm(ShownPlan));
 		HandPlan = ShownPlan;
 		HandVelocity = rb::Vec2();
 		if (A >= 1.0)
@@ -369,10 +432,10 @@ void URbBallInHandComponent::RestoreTableBall()
 	}
 }
 
-double URbBallInHandComponent::ClearanceBottomCm(const rb::Vec2& Plan) const
+double URbBallInHandComponent::ClearanceBottomCm(const rb::Vec2& Plan, double MarginCm) const
 {
-	// The lowest bottom height [cm above the cloth] of the carried ball at Plan that clears every other ball shown on the table:
-	// spheres R and Rj with plan distance d need a centre height difference sqrt((R + Rj)^2 - d^2).
+	// The lowest bottom height [cm above the cloth] of the carried ball at Plan that clears every other ball shown on the table by
+	// MarginCm: spheres R and Rj with plan distance d need a centre height difference sqrt((R + Rj + margin)^2 - d^2).
 	const ARbTable* T = Table.Get();
 	const ARbBallSet* Balls = T ? FindBallSet() : nullptr;
 	if (!Balls)
@@ -390,7 +453,7 @@ double URbBallInHandComponent::ClearanceBottomCm(const rb::Vec2& Plan) const
 		const rb::Vec3 C = T->WorldToCore(Other->GetComponentLocation());
 		const double Rj = 0.01 * Balls->GetBallRadiusCm(Id);
 		const double D2 = FMath::Square(C.x - Plan.x) + FMath::Square(C.y - Plan.y);
-		const double Reach = BallRadius + Rj + 0.01 * kClearanceMarginCm;
+		const double Reach = BallRadius + Rj + 0.01 * FMath::Max(0.0, MarginCm);
 		if (D2 < Reach * Reach)
 		{
 			// Carried centre height = BallRadius + bottom; the other centre at C.z.

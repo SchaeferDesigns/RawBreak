@@ -2,8 +2,10 @@
 // loop through the pawn's own input routing, frame by frame in the running game (real ticks, the stroke component's real clock):
 //   ball in hand (the break): the carrying hand holds the cue ball over a legal kitchen spot, Confirm lowers it onto exactly the
 //   previewed target -> the human get-down (0.8-1.5 s) -> aim with the F3 trace (12.5 cm at 800 DPI = 90 deg +- 0.5, back = bitwise
-//   the start) -> a committed stroke with the Stroke button held and the world paused: the stroke is dropped, no contact after the
-//   resume, a button held through the pause does not stroke -> the shot: the Stroke button held 0.3 s past the contact with the
+//   the start) -> a committed stroke with the Stroke button (left mouse, pressed through the player input, so Enhanced Input sends
+//   its real events: the synthetic Completed on the paused frame, Started again on resume) held and the world paused: the stroke is
+//   dropped, no contact while paused or after the resume, a button held through the pause does not stroke until it is released ->
+//   the shot: the Stroke button held 0.3 s past the contact with the
 //   mouse's follow-through, released with residual motion, 1 s of watching: the player stays down and no look input reaches the head
 //   (P1); a deliberate move opens the look again (F2) -> stand up while watching (a human StandUp) -> after a scratch, ball in hand
 //   anywhere: the hand refuses a spot on another ball (nothing placed) and sets the ball down on a free spot exactly.
@@ -168,6 +170,10 @@ private:
 	bool Fail(const FString& Why)
 	{
 		Test->AddError(FString::Printf(TEXT("step %d: %s"), Step, *Why));
+		if (bStrokeKeyDown)
+		{
+			PressStrokeKey(false);
+		}
 		Stroke->SetCommitHeld(false);
 		Pawn->HandleStroke(false);
 		if (PC && World && World->IsPaused())
@@ -319,13 +325,24 @@ private:
 		return false;
 	}
 
+	// The Stroke button (left mouse) through the player's own input: Enhanced Input then treats it like a real button (Triggered while
+	// held, its synthetic Completed on the first paused frame, Started again on resume while still held).
+	void PressStrokeKey(bool bDown)
+	{
+		if (!Pawn->InjectStrokeKey(bDown))
+		{
+			Test->AddError(TEXT("the Stroke key could not be sent through the player input"));
+		}
+		bStrokeKeyDown = bDown;
+	}
+
 	bool PauseStart(double T)
 	{
 		if (StepFrames == 1)
 		{
 			// A committed stroke with the Stroke button held (its forward part is ~1 s away).
 			Stroke->SetCommitHeld(true);
-			Pawn->HandleStroke(true);
+			PressStrokeKey(true);
 			Stroke->InjectStrokeSamples(Stroke->MakeScriptedStroke(5.0, Stroke->GetClockNow() + 0.05));
 			return false;
 		}
@@ -334,6 +351,7 @@ private:
 			return false;
 		}
 		Test->TestTrue(TEXT("the stroke runs before the pause"), Stroke->IsStrokeActive());
+		Test->TestTrue(TEXT("the Stroke button reached the pawn through Enhanced Input"), Stroke->IsStrokeHeld());
 		PC->SetPause(true);
 		Next();
 		return false;
@@ -347,6 +365,10 @@ private:
 		}
 		Test->TestTrue(TEXT("the world is paused"), World->IsPaused());
 		Test->TestTrue(TEXT("pausing dropped the held stroke"), !Stroke->IsStrokeActive() && Stroke->IsPausedByWorld());
+		// Enhanced Input released the action on the paused frame (Completed) - that release does not count: the button is still down.
+		Test->TestFalse(TEXT("the Stroke action was released by the pause"), Stroke->IsStrokeHeld());
+		Test->TestTrue(TEXT("the button held through the pause must be released first"), Stroke->IsStrokeReleaseRequired());
+		Test->TestEqual(TEXT("no contact while paused"), Contacts, 0);
 		PC->SetPause(false);
 		Next();
 		return false;
@@ -354,16 +376,28 @@ private:
 
 	bool PauseResumed(double T)
 	{
-		if (T < 1.5)
+		if (Sub == 0)
 		{
+			if (T < 1.5)
+			{
+				return false;
+			}
+			// The button stayed down through the resume: Enhanced Input started the action again, the component ignored it.
+			Test->TestEqual(TEXT("no contact out of the pause"), Contacts, 0);
+			Test->TestEqual(TEXT("still down on the shot"), static_cast<int32>(Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::Down));
+			Test->TestFalse(TEXT("a button held through the pause does not stroke"), Stroke->IsStrokeActive());
+			Test->TestTrue(TEXT("... until it is released"), Stroke->IsStrokeReleaseRequired());
+			PressStrokeKey(false);
+			Sub = 1;
+			SubStart = T;
 			return false;
 		}
-		Test->TestEqual(TEXT("no contact out of the pause"), Contacts, 0);
-		Test->TestEqual(TEXT("still down on the shot"), static_cast<int32>(Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::Down));
-		Pawn->HandleStroke(true); // Enhanced Input repeats Triggered while the button stays held
-		Test->TestFalse(TEXT("a button held through the pause does not stroke"), Stroke->IsStrokeActive());
-		Pawn->HandleStroke(false);
+		if (T - SubStart < 0.2 || Stroke->IsStrokeReleaseRequired())
+		{
+			return T - SubStart > 3.0 ? Fail(TEXT("the released Stroke button never reached the pawn")) : false;
+		}
 		Stroke->SetCommitHeld(false);
+		Sub = 0;
 		Next();
 		return false;
 	}
@@ -618,6 +652,7 @@ private:
 	double Sent = 0.0;
 	double MaxGaze = 0.0;
 	bool bStayedDown = true;
+	bool bStrokeKeyDown = false;
 	rb::Vec2 LegalSpot;
 	rb::Vec2 Target;
 	rb::Vec2 OnBall;

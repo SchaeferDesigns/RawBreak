@@ -15,7 +15,8 @@
 //                   the hand nudges the ball (URbBallInHandComponent::AddFineAdjustCm, the aim's fine factor)
 //                   getting down / down: the stroke component's aim (azimuth, 7.2 deg/cm; Shift x FineAimFactor) and, while no
 //                   stroke source is active, the eyes' pitch along the line (rig gaze, half the look speed); a held Stroke makes
-//                   the mouse the stroke
+//                   the mouse the stroke (also pressed during the get-down, before the stroke starts at Down, and a button held
+//                   through a pause that must be released first: no aim, no eye pitch)
 //                   contact / watching while down: head look (rig gaze yaw + pitch) THROUGH THE LOOK INTENT GATE (P1): nothing
 //                   while the Stroke button is held, a quiet period after the contact / release, then only a deliberate move
 //                   beyond the dead zone opens it with a fade-in (FRbLookIntentGate); the rig's head follower smooths it
@@ -39,6 +40,7 @@
 
 #include "RbPlayerCharacter.generated.h"
 
+class ARbBallSet;
 class UCineCameraComponent;
 class UInputComponent;
 class URbBallInHandComponent;
@@ -95,6 +97,10 @@ public:
 	void HandleSettle(bool bHeld);
 	void HandleStroke(bool bHeld);
 	void HandleFineAim(bool bHeld) { bFineAim = bHeld; }
+	// Tests / dev tools: presses or releases the Stroke action's key through the player controller's input, so Enhanced Input sends
+	// its real events (Triggered while held, the synthetic Completed on a paused frame, Started again on resume). False without a
+	// local player controller or input setup.
+	bool InjectStrokeKey(bool bDown);
 
 	// Mouse counts that turn the view / aim by Degrees in the current routing (dev commands, tests): X = yaw (aim azimuth while
 	// down), Y = pitch.
@@ -140,7 +146,6 @@ protected:
 	void OnStrokeContactForFeel(const FRbStrokeCommit& Commit);
 	void BindShotEvents();
 	void OnShotEventForFeel(const TSharedRef<const FRbShot>& Shot, int32 EventIndex);
-	URbShotPlaybackComponent* FindPlayerPlayback() const;
 
 	bool bFineAim = false;
 	bool bStrokeButtonHeld = false;
@@ -148,4 +153,5 @@ protected:
 	FDelegateHandle ContactHandle;
 	FDelegateHandle ShotEventHandle;
 	TWeakObjectPtr<URbShotPlaybackComponent> BoundPlayback;
+	TWeakObjectPtr<ARbBallSet> BoundBalls; // the player's ball set of the watched shot (bound at the contact)
 };

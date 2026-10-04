@@ -8,7 +8,9 @@
 //   F4  P3: the F3 trace with Shift = 90 x 0.075 deg (13.3x slower); the acceleration curve is monotone, continuous, gain 1 at the
 //       reference speed, and a steady move gives the same aim at any frame rate.
 //   P3  the Look action carries raw counts (neutral mouse axes in DefaultInput.ini, re-asserted by ARbPlayerController).
-//   Pause drops a held stroke (M2-D contract): no contact after the resume, the held button must be released first.
+//   Pause drops a held stroke (M2-D contract): no contact after the resume, the held button must be released first; Enhanced
+//   Input's synthetic Completed on the paused frame (before the component's tick) processes nothing, and a button let go during
+//   the pause does not swallow the next press (review).
 // The traces run through the real pawn routing (ARbPlayerCharacter::HandleLook / HandleStroke -> look intent gate / stroke component
 // -> camera rig) in a game world ticked by hand, on a test clock. The traces are written to Saved/RbFeel/*.csv for the plots of
 // Tools/feel/plot_feel.py (Docs/images/dev/m2f/). Owner: M2-F.
@@ -28,6 +30,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/InputSettings.h"
 #include "GameFramework/PlayerInput.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/WorldSettings.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -317,8 +321,17 @@ bool FRbFeelGatePure::RunTest(const FString& Parameters)
 	TestTrue(TEXT("open"), Gate.IsOpen());
 	TestEqual(TEXT("fade-in half way"), Gate.Filter(FVector2D(1.0, 0.0), T + 0.1).X, 0.5, 1e-9);
 	TestEqual(TEXT("fully open"), Gate.Filter(FVector2D(1.0, 0.0), T + 0.25).X, 1.0);
+	TestEqual(TEXT("stays open"), Gate.Filter(FVector2D(1.0, 0.0), T + 0.28).X, 1.0);
+	// Review: a new Stroke press closes the open gate - mouse motion while the button is held is never look (a second "air stroke"
+	// while watching); its release starts a new quiet period, then only a new deliberate move opens it again.
 	Gate.SetStrokeHeld(true, T + 0.3);
-	TestEqual(TEXT("stays open (a new stroke needs a new address)"), Gate.Filter(FVector2D(1.0, 0.0), T + 0.3).X, 1.0);
+	TestTrue(TEXT("a new press closes the open gate"), !Gate.IsOpen() && Gate.Filter(FVector2D(1.0, 0.0), T + 0.3).IsZero());
+	Gate.SetStrokeHeld(true, T + 0.35); // Enhanced Input repeats Triggered while held
+	TestTrue(TEXT("held: the stroke, however far the mouse goes"), Gate.Filter(FVector2D(6.0, 0.0), T + 0.4).IsZero() && !Gate.IsOpen());
+	Gate.SetStrokeHeld(false, T + 0.5);
+	TestTrue(TEXT("quiet after this release too"), Gate.Filter(FVector2D(3.0, 0.0), T + 0.6).IsZero() && !Gate.IsOpen());
+	TestTrue(TEXT("a new deliberate move opens it again (dropped)"), Gate.Filter(FVector2D(2.0, 0.0), T + 0.8).IsZero() && Gate.IsOpen());
+	TestEqual(TEXT("open again after the fade-in"), Gate.Filter(FVector2D(1.0, 0.0), T + 1.05).X, 1.0);
 	Gate.Disarm();
 	TestTrue(TEXT("disarmed"), !Gate.IsArmed() && Gate.IsOpen());
 
@@ -741,6 +754,242 @@ bool FRbFeelPause::RunTest(const FString& Parameters)
 	TestTrue(TEXT("a fresh press strokes again"), W.Stroke->IsStrokeActive());
 	W.Pawn->HandleStroke(false);
 	AddInfo(FString::Printf(TEXT("aborts reported: %d"), Aborts));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbFeelPauseClock, "RawBreak.Unit.Feel.PauseFreezesTheAddressClock", RB_UNIT_TEST_FLAGS)
+bool FRbFeelPauseClock::RunTest(const FString& Parameters)
+{
+	// Review (3rd pass): the player's body is frozen with the world (the rig does not tick while paused), so the address's human clock
+	// skips the pause: a pause during the get-down still starts Down when the eye arrives; down on the shot the cue's drift and tremor
+	// go on from where they stopped (no jump of the cue at the resume); the Settle does not run out behind the menu; the time in the
+	// menu never counts as time down (IntendedStroke::TimeDown, the HF-07 envelope that grows after 10 s down).
+	using namespace RbFeelTests;
+	FFeelWorld W;
+	if (!W.Create(*this))
+	{
+		return false;
+	}
+	FRbStrokeContext Context;
+	Context.Key.MatchSeed = 11;
+	Context.Key.ShooterId = 1;
+	W.Stroke->SetStrokeContext(Context);
+	W.Stroke->BeginAddress(rb::Vec3(-0.6, 0.0, kR), kR);
+	W.Stroke->SetAim(0.0, 0.0, 0.0, 0.0);
+	W.Stroke->RequestGetDownToggle();
+	const double DownSince0 = W.Stroke->GetDownSince();
+	W.Run(0.3);
+	// 1. Paused for 20 s during the get-down: Down still comes when the eye arrives (0.3 s of the get-down had run).
+	W.Stroke->NotifyWorldPaused(true);
+	W.Clock += 20.0;
+	W.Stroke->NotifyWorldPaused(false);
+	TestEqual(TEXT("get-down: Down moves on by the paused 20 s"), W.Stroke->GetDownSince(), DownSince0 + 20.0, 1e-9);
+	W.Stroke->TickStroke(W.Clock);
+	TestEqual(TEXT("get-down: still getting down after the resume"), static_cast<int32>(W.Stroke->GetPhase()),
+		static_cast<int32>(ERbStrokePhase::GettingDown));
+	W.Run(1.6);
+	if (!TestEqual(TEXT("down"), static_cast<int32>(W.Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::Down)))
+	{
+		return false;
+	}
+	// 2. Down, the Settle held, then paused for 60 s: the cue pose at the resume is the pose of the pause (the drift processes go on).
+	const double SettleAt = W.Clock;
+	W.Stroke->SetSettleHeld(true);
+	W.Run(0.5);
+	rb::Vec3 TipBefore;
+	rb::Vec3 DirBefore;
+	W.Stroke->GetCuePoseCore(TipBefore, DirBefore);
+	W.Stroke->NotifyWorldPaused(true);
+	W.Clock += 60.0;
+	W.Stroke->NotifyWorldPaused(false);
+	W.Stroke->TickStroke(W.Clock);
+	rb::Vec3 TipAfter;
+	rb::Vec3 DirAfter;
+	W.Stroke->GetCuePoseCore(TipAfter, DirAfter);
+	const double JumpMm = 1000.0 * rb::Length(TipAfter - TipBefore);
+	AddInfo(FString::Printf(TEXT("cue tip moved %.6f mm across the 60 s pause"), JumpMm));
+	TestTrue(FString::Printf(TEXT("no jump of the cue at the resume (%.6f mm)"), JumpMm), JumpMm < 1e-4);
+	// 3. The shot after the pauses: 80 s of menu never count as time down; the Settle started where it was pressed.
+	FRbStrokeCommit Commit;
+	int32 Contacts = 0;
+	W.Stroke->OnStrokeContact.AddLambda([&](const FRbStrokeCommit& C) { Commit = C; ++Contacts; });
+	W.Stroke->SetCommitHeld(true);
+	W.Pawn->HandleStroke(true);
+	W.Stroke->InjectStrokeSamples(W.Stroke->MakeScriptedStroke(2.0, W.Clock + 0.05));
+	for (int32 I = 0; I < 300 && Contacts == 0; ++I)
+	{
+		W.Frame(1.0 / kFps);
+	}
+	if (!TestEqual(TEXT("one contact"), Contacts, 1))
+	{
+		return false;
+	}
+	const double DownSeconds = Commit.ContactTime - DownSince0 - 80.0;
+	AddInfo(FString::Printf(TEXT("contact: TimeDown %.4f s (%.4f s on the clock incl. the pauses), SettleStart %.4f s"), Commit.Intended.TimeDown,
+		Commit.ContactTime - DownSince0, Commit.Intended.SettleStart));
+	TestEqual(TEXT("TimeDown skips the 80 s of pause"), Commit.Intended.TimeDown, DownSeconds, 1e-6);
+	TestTrue(TEXT("TimeDown is a few seconds"), Commit.Intended.TimeDown > 0.5 && Commit.Intended.TimeDown < 5.0);
+	TestEqual(TEXT("SettleStart where it was pressed (the down time before it)"), Commit.Intended.SettleStart, SettleAt - DownSince0 - 20.0, 1e-6);
+	W.Pawn->HandleStroke(false);
+	W.Stroke->SetCommitHeld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbFeelPauseInputOrder, "RawBreak.Unit.Feel.PauseReleaseBeforeTick", RB_UNIT_TEST_FLAGS)
+bool FRbFeelPauseInputOrder::RunTest(const FString& Parameters)
+{
+	// Review: Enhanced Input fires Completed for the held Stroke / Commit actions on the FIRST paused frame (their trigger state is
+	// forced to None while paused) - possibly before the stroke component's own tick noticed the pause. That synthetic release must
+	// not process the stroke's due samples (a contact while paused, the shot playing on resume) and must not count as the release
+	// after the pause; on resume the physical button decides (held through: release first; let go during the pause: the next press
+	// strokes). The world is really paused here (a pauser player state), the events come in the engine's order.
+	using namespace RbFeelTests;
+	FFeelWorld W;
+	if (!W.Create(*this) || !W.GetDown(*this))
+	{
+		return false;
+	}
+	AWorldSettings* Settings = W.World->GetWorldSettings();
+	APlayerState* Pauser = W.World->SpawnActor<APlayerState>();
+	if (!TestNotNull(TEXT("world settings"), Settings) || !TestNotNull(TEXT("pauser"), Pauser))
+	{
+		return false;
+	}
+	bool bKeyDown = true; // the physical Stroke button, as the pawn's player input would report it
+	W.Stroke->IsStrokeButtonDown = [&bKeyDown]() { return bKeyDown; };
+	int32 Contacts = 0;
+	W.Stroke->OnStrokeContact.AddLambda([&Contacts](const FRbStrokeCommit&) { ++Contacts; });
+
+	// A committed 3 m/s stroke, run until its forward swing is a few centimetres from the ball.
+	W.Stroke->SetCommitHeld(true);
+	W.Pawn->HandleStroke(true);
+	W.Stroke->InjectStrokeSamples(W.Stroke->MakeScriptedStroke(3.0, W.Clock + 0.05));
+	double LastX = W.Stroke->GetCueDisplacement();
+	bool bNear = false;
+	for (int32 I = 0; I < 300 && Contacts == 0 && !bNear; ++I)
+	{
+		W.Frame(1.0 / kFps);
+		const double X = W.Stroke->GetCueDisplacement();
+		bNear = X > LastX && X > -0.08;
+		LastX = X;
+	}
+	if (!TestTrue(TEXT("the forward swing is close to the ball, no contact yet"), bNear && Contacts == 0))
+	{
+		return false;
+	}
+	// Esc: the world pauses; the frame's input comes first - the Completed of Stroke and Commit, with the crossing samples due.
+	Settings->SetPauserPlayerState(Pauser);
+	TestTrue(TEXT("the world is paused"), W.World->IsPaused());
+	W.Clock += 0.3;
+	W.Pawn->HandleStroke(false);
+	W.Stroke->SetCommitHeld(false);
+	TestEqual(TEXT("no contact while paused (the synthetic release processed nothing)"), Contacts, 0);
+	TestTrue(TEXT("the pause was noticed by the input"), W.Stroke->IsPausedByWorld());
+	TestFalse(TEXT("the stroke was dropped"), W.Stroke->IsStrokeActive());
+	TestTrue(TEXT("the button held at the pause must be released after it"), W.Stroke->IsStrokeReleaseRequired());
+	W.Pawn->HandleStroke(true); // a press during the pause (the action does not trigger while paused; a direct call must not stroke)
+	TestFalse(TEXT("no stroke starts while paused"), W.Stroke->IsStrokeActive());
+
+	// Resume with the button still down: Enhanced Input sends Started again - ignored until the release.
+	Settings->SetPauserPlayerState(nullptr);
+	W.Pawn->HandleStroke(true);
+	TestFalse(TEXT("resumed"), W.Stroke->IsPausedByWorld());
+	TestFalse(TEXT("a button held through the pause does not stroke"), W.Stroke->IsStrokeActive());
+	W.Run(1.5);
+	TestEqual(TEXT("no contact after the resume"), Contacts, 0);
+	TestEqual(TEXT("still down on the shot"), static_cast<int32>(W.Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::Down));
+	bKeyDown = false;
+	W.Pawn->HandleStroke(false);
+	TestFalse(TEXT("released"), W.Stroke->IsStrokeReleaseRequired());
+
+	// Let go DURING the pause: its release was the synthetic one (or never reached the game behind the menu) - the first press after
+	// the resume strokes.
+	bKeyDown = true;
+	W.Pawn->HandleStroke(true);
+	TestTrue(TEXT("a new stroke"), W.Stroke->IsStrokeActive());
+	Settings->SetPauserPlayerState(Pauser);
+	W.Pawn->HandleStroke(false); // the synthetic Completed (the button is still down)
+	TestTrue(TEXT("held at the pause: a release is required"), W.Stroke->IsStrokeReleaseRequired());
+	bKeyDown = false;            // the player lets go in the menu: no event reaches the game
+	Settings->SetPauserPlayerState(nullptr);
+	W.Stroke->NotifyWorldPaused(false); // the component's tick notices the resume and reads the button
+	TestFalse(TEXT("let go during the pause: no release required"), W.Stroke->IsStrokeReleaseRequired());
+	bKeyDown = true;
+	W.Pawn->HandleStroke(true);
+	TestTrue(TEXT("let go during the pause: the first press after the resume strokes"), W.Stroke->IsStrokeActive());
+	W.Pawn->HandleStroke(false);
+	TestEqual(TEXT("never a contact"), Contacts, 0);
+	W.Stroke->IsStrokeButtonDown = nullptr;
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbFeelStrokeOwnsMouse, "RawBreak.Unit.Feel.StrokeButtonOwnsTheMouse", RB_UNIT_TEST_FLAGS)
+bool FRbFeelStrokeOwnsMouse::RunTest(const FString& Parameters)
+{
+	// Review: whenever the Stroke button is held the mouse is the stroke - also when it was pressed during the get-down (the stroke
+	// starts when Down begins) and when it was held through a pause (it must be released first): that mouse motion neither aims nor
+	// pitches the eyes. Released, the same motion aims again.
+	using namespace RbFeelTests;
+	FFeelWorld W;
+	if (!W.Create(*this))
+	{
+		return false;
+	}
+	FRbStrokeContext Context;
+	Context.Key.MatchSeed = 11;
+	Context.Key.ShooterId = 1;
+	W.Stroke->SetStrokeContext(Context);
+	W.Stroke->BeginAddress(rb::Vec3(-0.6, 0.0, kR), kR);
+	W.Stroke->SetAim(0.0, 0.0, 0.0, 0.0);
+	W.Stroke->RequestGetDownToggle();
+	W.Run(0.2);
+	if (!TestEqual(TEXT("getting down"), static_cast<int32>(W.Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::GettingDown)))
+	{
+		return false;
+	}
+	const double Az0 = W.Stroke->GetAim().Azimuth;
+	// A stroke-like mouse motion (forward / back with a little drift) with the button pressed early, while still going down. Returns
+	// the largest eye pitch target on the way (forward and back cancel at the end).
+	const auto StrokeMotion = [&W](int32 Frames) {
+		double MaxPitch = 0.0;
+		for (int32 I = 0; I < Frames; ++I)
+		{
+			W.Frame(1.0 / kFps, FVector2D(15.0, (I % 10) < 5 ? 120.0 : -120.0));
+			MaxPitch = FMath::Max(MaxPitch, FMath::Abs(W.Rig->GetGazePitch()));
+		}
+		return MaxPitch;
+	};
+	W.Pawn->HandleStroke(true);
+	const double PitchDuring = StrokeMotion(30);
+	const double AzDuring = W.Stroke->GetAim().Azimuth;
+	TestEqual(TEXT("pressed during the get-down: no eye pitch from the stroke's motion"), PitchDuring, 0.0);
+	TestTrue(TEXT("pressed during the get-down: the aim stays (bitwise)"), FMemory::Memcmp(&AzDuring, &Az0, sizeof(double)) == 0);
+	W.Run(1.5);
+	TestEqual(TEXT("down"), static_cast<int32>(W.Stroke->GetPhase()), static_cast<int32>(ERbStrokePhase::Down));
+	TestTrue(TEXT("the button held through the get-down strokes from Down on"), W.Stroke->IsStrokeActive());
+
+	// A pause with the button held drops the stroke; after the resume the button must be released first, and until then its motion is
+	// still no aim and no eye pitch.
+	W.Stroke->NotifyWorldPaused(true);
+	W.Clock += 1.0;
+	W.Stroke->NotifyWorldPaused(false);
+	TestTrue(TEXT("held through the pause: a release is required"), W.Stroke->IsStrokeReleaseRequired());
+	const double PitchHeld = StrokeMotion(30);
+	const double AzHeld = W.Stroke->GetAim().Azimuth;
+	TestEqual(TEXT("held through the pause: no eye pitch"), PitchHeld, 0.0);
+	TestTrue(TEXT("held through the pause: the aim stays (bitwise)"), FMemory::Memcmp(&AzHeld, &Az0, sizeof(double)) == 0);
+
+	// Released: the mouse aims (X) and runs the eyes along the line (Y) again.
+	W.Pawn->HandleStroke(false);
+	TestFalse(TEXT("released"), W.Stroke->IsStrokeReleaseRequired());
+	for (int32 I = 0; I < 10; ++I)
+	{
+		W.Frame(1.0 / kFps, FVector2D(15.0, 30.0));
+	}
+	const double TurnedDeg = FMath::RadiansToDegrees(FMath::UnwindRadians(Az0 - W.Stroke->GetAim().Azimuth));
+	AddInfo(FString::Printf(TEXT("after the release: aim %.3f deg, eye pitch %.3f deg"), TurnedDeg, W.Rig->GetGazePitch()));
+	TestEqual(TEXT("released: 150 counts at 800 DPI aim 0.476 cm x 7.2 deg/cm"), TurnedDeg, RbAimResponse::CountsToCm(150.0, 800.0) * 7.2, 1e-6);
+	TestTrue(TEXT("released: the eyes pitch again"), W.Rig->GetGazePitch() > 1.0);
 	return true;
 }
 

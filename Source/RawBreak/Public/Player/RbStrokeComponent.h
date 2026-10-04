@@ -24,7 +24,15 @@
 //     nothing is placed). Without that component (tests, tools) Confirm places at once as in M1.
 //   * Pause (18.2 M2-D contract): while the world is paused the component keeps ticking only to notice it: a held stroke is
 //     dropped (a committed one aborts), pending scripted samples and the raw reports of the pause are discarded, and a Stroke
-//     button still held on resume must be released first - no contact can come out of a pause.
+//     button still held on resume must be released first - no contact can come out of a pause. The input handlers check the
+//     pause FIRST (review): Enhanced Input fires Completed for the held Stroke / Commit actions on the first paused frame (their
+//     trigger state is forced to None while paused), possibly before this component's tick noticed the pause - that release must
+//     neither process the stroke's samples (a contact while paused) nor count as the release after the pause. A press or release
+//     while paused changes nothing; on resume the pawn's IsStrokeButtonDown (the physical key state) decides whether the button
+//     must still be released (held through the pause) or not (let go during the pause, so the next press strokes). The address's
+//     human clock skips the pause (review, 3rd pass): DownSince and the Settle start move on by the paused time, so a pause during
+//     the get-down still starts Down when the (frozen) eye arrives, the cue's drift / tremor continue without a jump, and the time
+//     in the menu never counts as time down on the shot (HF-07 envelope, IntendedStroke::TimeDown).
 //
 // Phases:
 //   Locked        not this player's turn, simulation / playback / replay / decision running
@@ -168,7 +176,8 @@ public:
 	// Input -> component (bound by the character).
 	void RequestGetDownToggle();
 	// Look input while down [raw mouse counts, + X = right]: the aim (X) through RbAimResponse. DeltaSeconds = the frame time of
-	// the delta (only the optional acceleration uses it; <= 0 = linear).
+	// the delta (only the optional acceleration uses it; <= 0 = linear). Frozen while the Stroke button is held or must first be
+	// released (IsStrokeReleaseRequired, review): that mouse motion is a stroke, never aim.
 	void AddAimInput(const FVector2D& LookCounts, bool bFine, double DeltaSeconds = 0.0);
 	void AddElevationInput(float Steps);
 	void AddTipOffsetInput(const FVector2D& Delta);
@@ -176,9 +185,17 @@ public:
 	void SetCommitHeld(bool bHeld);
 	void SetSettleHeld(bool bHeld);          // HF-06 Settle (exhale and hold): IntendedStroke::SettleStart
 	void ConfirmPressed();
-	// The world was paused (or resumed): a held / scripted stroke is dropped, see the header. TickComponent calls it on its own.
+	// The world was paused (or resumed): a held / scripted stroke is dropped, see the header. TickComponent and the input handlers
+	// call it on their own (SyncWorldPause).
 	void NotifyWorldPaused(bool bPaused);
 	bool IsPausedByWorld() const { return bWorldPaused; }
+	// Whether a key of the Stroke action is physically down (the pawn reads its player input); asked on resume. Unset = unknown:
+	// a button that was held at the pause must then send a release after the resume first.
+	TFunction<bool()> IsStrokeButtonDown;
+	// A Stroke press was routed elsewhere (ball-in-hand Confirm, held through a pause): ignored until the button is released.
+	bool IsStrokeReleaseRequired() const { return bStrokeNeedsRelease; }
+	// The Stroke button counts as held (a press the component accepted, not yet released or dropped).
+	bool IsStrokeHeld() const { return bStrokeHeld; }
 
 	// Ball in hand (P2): the legality of a placement (plan position, core table frame) - the pawn sets the director's
 	// CanPlaceCueBall. Unset = every spot is legal (the director still validates PlaceCueBall).
@@ -296,6 +313,7 @@ protected:
 private:
 	double ClockNow() const;
 	double StrokeMetersPerCount() const;     // hand metres per raw count (MouseDpi, StrokeSensitivity)
+	void SyncWorldPause();                   // NotifyWorldPaused(the world's pause state) - before any input is processed
 	void RebaseAim();                        // Aim.Azimuth becomes the new base of the counted aim input
 	void PushRigContext();                   // posture seed + pressure to the camera rig
 	class URbBallInHandComponent* FindBallInHand() const;
@@ -332,6 +350,7 @@ private:
 	double AimFineCounts = 0.0;
 	double AimAccelRadians = 0.0;         // the non-linear part (acceleration on)
 	bool bWorldPaused = false;
+	double PausedAt = 0.0;                // ClockNow() when the pause was noticed (the address clock skips the pause on resume)
 	FDelegateHandle SettingsHandle;
 	FDelegateHandle SetDownHandle;
 	rb::Vec3 CueBallPosition;

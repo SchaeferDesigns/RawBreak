@@ -9,7 +9,8 @@
 //   * then it opens only when the mouse travels more than DeadZoneCm (path length) within WindowSeconds (a deliberate new move)
 //     and fades in over FadeInSeconds (no jump); smaller motion is dropped, not accumulated, and the motion that proves the
 //     intent is dropped too (it only opens the gate);
-//   * once open it stays open until Disarm (a new address, standing up);
+//   * once open it stays open until Disarm (a new address, standing up) or a new Stroke press, which closes it again (the button
+//     owns the mouse; its release starts a new quiet period, then a new deliberate move is needed);
 //   * right click still stands up at any time (not the gate's business).
 // Works in cm of mouse travel (RbAimResponse::CountsToCm) and input timestamps (the stroke component's clock), never in per-frame
 // deltas, so the decision does not depend on the frame rate. Pure (no UObjects). Owner: M2-F. Tests: RawBreak.Unit.Feel.F1 / F2.

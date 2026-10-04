@@ -2,7 +2,10 @@
 // the placed position == the previewed target within 0.1 mm; the ball never below HoverHeight while carried; an illegal target ->
 // Refused, no set-down; the hand never jumps (per-frame step bound); the target is clamped to the reachable bed; over another ball
 // the carried one is lifted clear of it, eased; the table's ball is hidden while carried and shown again when the carry is
-// cancelled. On a translated + yawed 9-ft table. Owner: M2-F.
+// cancelled; a Confirm while the lagging hand is still behind a ball next to the target lines the ball up over that ball (never
+// through it) and still sets it down on exactly the confirmed target, which a look change during the lowering does not move
+// (review); a Confirm while the hand is still far away lines the ball up at the hand's speed limit, never faster (review). On a
+// translated + yawed 9-ft table. Owner: M2-F.
 
 #include "Balls/RbBallTestSupport.h"
 #include "Core/RbCoords.h"
@@ -195,6 +198,161 @@ bool FRbBallInHandF5::RunTest(const FString& Parameters)
 	Hand->Cancel();
 	TestEqual(TEXT("cancelled"), static_cast<int32>(Hand->GetState()), static_cast<int32>(ERbBallInHandState::Inactive));
 	TestTrue(TEXT("the table's cue ball is back"), Scene.Balls->IsBallVisible(0));
+
+	// Review: Confirm while the lagging hand is still on the far side of a ball next to the target - lining up, the carried ball goes
+	// over that ball (never through it) and still lands on exactly the target; the target is frozen during the lowering.
+	{
+		const rb::Vec2 Other(-1.00, -0.30);
+		Scene.Balls->SetBallCore(1, rb::Vec3(Other.x, Other.y, kR), rb::Quat());
+		Scene.Balls->SetBallVisible(1, true);
+		const FVector OtherWorld = Table->CoreToWorld(rb::Vec3(Other.x, Other.y, kR));
+		Scene.Balls->SetBallVisible(0, true);
+		Hand->BeginCarry(Table, 0, kR, Legal);
+		Hand->SetTargetCore(rb::Vec2(Other.x - 0.12, Other.y));
+		for (int32 I = 0; I < 120; ++I)
+		{
+			Hand->TickCarry(Dt);
+		}
+		const rb::Vec2 Beyond(Other.x + 2.0 * kR + 0.004, Other.y); // clear of the ball, in the kitchen: legal
+		Hand->SetTargetCore(Beyond);
+		const rb::Vec2 Confirmed = Hand->GetTargetCore();
+		TestTrue(TEXT("the target beyond the ball is legal"), Hand->IsTargetLegal());
+		const int32 Before = SetDowns;
+		TestTrue(TEXT("confirm at once (the hand still lags 18 cm behind)"), Hand->RequestSetDown());
+		double MinGapMm = 1e9;
+		int32 LowerFrames = 0;
+		while (Hand->GetState() == ERbBallInHandState::Lowering && LowerFrames < 120)
+		{
+			if (LowerFrames == 3)
+			{
+				Hand->SetTargetCore(rb::Vec2(Other.x + 0.2, Other.y + 0.1)); // the look moves on: ignored while lowering
+			}
+			Hand->TickCarry(Dt);
+			MinGapMm = FMath::Min(MinGapMm, 10.0 * (FVector::Dist(Hand->GetBallWorld(), OtherWorld) - 100.0 * 2.0 * kR));
+			++LowerFrames;
+		}
+		AddInfo(FString::Printf(TEXT("lowering over a ball: closest gap %.3f mm, %d frames"), MinGapMm, LowerFrames));
+		TestTrue(FString::Printf(TEXT("lining up never goes through the ball in between (gap %.3f mm)"), MinGapMm), MinGapMm > -1e-3);
+		TestEqual(TEXT("set down once"), SetDowns, Before + 1);
+		TestTrue(TEXT("still exactly the confirmed target (bitwise)"), FMemory::Memcmp(&SetDownAt, &Confirmed, sizeof(rb::Vec2)) == 0);
+		TestEqual(TEXT("the ball touches the cloth"), Hand->GetBallBottomCm(), 0.0);
+		Hand->TickCarry(0.5);
+	}
+
+	// Review: the refusal's hesitation (lift and shake) never ends or restarts with a jump - a repeated Confirm during it lets it run
+	// on, moving the look on during it lets it fade out (it used to vanish in one frame: the ball dropped by up to 8 mm), and a set-down
+	// confirmed while it still shakes starts where the ball is shown.
+	{
+		for (int32 Id = 1; Id < Scene.Balls->GetBallCount(); ++Id)
+		{
+			Scene.Balls->SetBallVisible(Id, false); // nothing to lift the carried ball over: only the hesitation moves it vertically
+		}
+		Scene.Balls->SetBallVisible(0, true);
+		Hand->BeginCarry(Table, 0, kR, Legal);
+		Hand->SetTargetCore(rb::Vec2(HeadString + 0.10, 0.25));
+		for (int32 I = 0; I < 120; ++I)
+		{
+			Hand->TickCarry(Dt);
+		}
+		const int32 RefusalsBefore = Refusals;
+		TestFalse(TEXT("refused beyond the head string"), Hand->RequestSetDown());
+		double WorstVerticalMm = 0.0;
+		double PeakLiftCm = 0.0;
+		double Prev = Hand->GetBallBottomCm();
+		for (int32 I = 0; I < 60; ++I)
+		{
+			if (I == 6)
+			{
+				TestFalse(TEXT("a repeated Confirm during the hesitation is refused too"), Hand->RequestSetDown());
+			}
+			if (I == 12)
+			{
+				Hand->SetTargetCore(rb::Vec2(HeadString - 0.25, 0.25)); // the look moves on with the lift near its peak
+				TestEqual(TEXT("moving on carries on"), static_cast<int32>(Hand->GetState()), static_cast<int32>(ERbBallInHandState::Carrying));
+			}
+			Hand->TickCarry(Dt);
+			WorstVerticalMm = FMath::Max(WorstVerticalMm, 10.0 * FMath::Abs(Hand->GetBallBottomCm() - Prev));
+			PeakLiftCm = FMath::Max(PeakLiftCm, Hand->GetBallBottomCm() - Hand->HoverHeightCm);
+			Prev = Hand->GetBallBottomCm();
+		}
+		AddInfo(FString::Printf(TEXT("hesitation: lift %.2f cm, worst vertical step %.3f mm per frame"), PeakLiftCm, WorstVerticalMm));
+		TestEqual(TEXT("both refusals reported (the knock)"), Refusals, RefusalsBefore + 2);
+		TestTrue(TEXT("the hesitation lifts the ball"), PeakLiftCm > 0.5);
+		TestTrue(FString::Printf(TEXT("the hesitation fades out, never jumps (%.3f mm per frame < 1.5 mm)"), WorstVerticalMm), WorstVerticalMm < 1.5);
+		TestTrue(TEXT("back at the hover height"), Hand->GetBallBottomCm() - Hand->HoverHeightCm < 0.1);
+
+		// Refused just beyond the head string, the look 8 mm back into the kitchen and Confirm at once while the shake runs: the lowering
+		// starts at the shown ball (it used to start at the hand without the shake and tremor: a jump of up to ~2.5 mm).
+		Hand->SetTargetCore(rb::Vec2(HeadString + 0.004, -0.25));
+		for (int32 I = 0; I < 120; ++I)
+		{
+			Hand->TickCarry(Dt);
+		}
+		TestFalse(TEXT("refused just beyond the head string"), Hand->RequestSetDown());
+		Hand->TickCarry(Dt);
+		Hand->TickCarry(Dt); // 33 ms into the hesitation: the shake is near its extreme
+		Hand->SetTargetCore(rb::Vec2(HeadString - 0.004, -0.25));
+		const rb::Vec2 Confirmed = Hand->GetTargetCore();
+		const rb::Vec2 ShownBefore = Hand->GetHandPlanCore();
+		TestTrue(TEXT("confirm at the legal spot lowers"), Hand->RequestSetDown());
+		Hand->TickCarry(Dt);
+		const double FirstStepMm = 1000.0 * Dist(Hand->GetHandPlanCore(), ShownBefore);
+		AddInfo(FString::Printf(TEXT("lowering during the shake: first step %.3f mm"), FirstStepMm));
+		TestTrue(FString::Printf(TEXT("the lowering starts where the ball is shown (first step %.3f mm < 1 mm)"), FirstStepMm), FirstStepMm < 1.0);
+		const int32 Before = SetDowns;
+		for (int32 I = 0; I < 60 && Hand->GetState() == ERbBallInHandState::Lowering; ++I)
+		{
+			Hand->TickCarry(Dt);
+		}
+		TestEqual(TEXT("set down"), SetDowns, Before + 1);
+		TestTrue(TEXT("on exactly the confirmed target"), FMemory::Memcmp(&SetDownAt, &Confirmed, sizeof(rb::Vec2)) == 0);
+		Hand->TickCarry(0.5);
+	}
+
+	// Review (3rd pass): Confirm while the lagging hand is still far from the target (a quick look across the kitchen and Confirm at
+	// once, or a click right after the pick-up): lining the ball up keeps the hand's speed limit - it used to cover any distance in
+	// 0.16 s (0.7 m at ~10 m/s: 11 cm per frame) - the set-down just takes longer, only goes down, and lands on exactly the target.
+	{
+		Scene.Balls->SetBallVisible(0, true);
+		Hand->BeginCarry(Table, 0, kR, Legal);
+		Hand->SetTargetCore(rb::Vec2(-1.05, -0.35));
+		for (int32 I = 0; I < 120; ++I)
+		{
+			Hand->TickCarry(Dt);
+		}
+		Hand->SetTargetCore(rb::Vec2(HeadString - 0.12, 0.30));
+		const rb::Vec2 Confirmed = Hand->GetTargetCore();
+		const double Far = Dist(Hand->GetHandPlanCore(), Confirmed);
+		TestTrue(TEXT("the far target is legal"), Hand->IsTargetLegal());
+		const int32 Before = SetDowns;
+		TestTrue(FString::Printf(TEXT("confirm at once with the hand %.2f m away"), Far), Far > 0.5 && Hand->RequestSetDown());
+		rb::Vec2 Prev = Hand->GetHandPlanCore();
+		double PrevBottom = Hand->GetBallBottomCm();
+		double WorstStepMm = 0.0;
+		bool bOnlyDown = true;
+		int32 FarFrames = 0;
+		while (Hand->GetState() == ERbBallInHandState::Lowering && FarFrames < 600)
+		{
+			Hand->TickCarry(Dt);
+			WorstStepMm = FMath::Max(WorstStepMm, 1000.0 * Dist(Hand->GetHandPlanCore(), Prev));
+			bOnlyDown &= Hand->GetBallBottomCm() <= PrevBottom + 1e-9;
+			Prev = Hand->GetHandPlanCore();
+			PrevBottom = Hand->GetBallBottomCm();
+			++FarFrames;
+		}
+		const double Seconds = FarFrames * Dt;
+		const double ExpectedSeconds = 1.6 * 1.5 * Far / Hand->MaxHandSpeed; // the line-up's smoothstep peaks at the speed limit
+		AddInfo(FString::Printf(TEXT("far confirm: %.3f m in %.3f s, worst step %.2f mm per frame (bound %.2f mm)"), Far, Seconds, WorstStepMm,
+			1000.0 * MaxStep));
+		TestTrue(FString::Printf(TEXT("lining up keeps the hand's speed limit (%.2f mm per frame <= %.2f mm)"), WorstStepMm, 1000.0 * MaxStep),
+			WorstStepMm <= 1000.0 * MaxStep);
+		TestTrue(FString::Printf(TEXT("the set-down takes as long as the hand needs (%.3f s, expected %.3f s)"), Seconds, ExpectedSeconds),
+			FMath::Abs(Seconds - ExpectedSeconds) <= Dt + 1e-9 && Seconds > Hand->LowerSeconds);
+		TestTrue(TEXT("the ball only goes down while lowering"), bOnlyDown);
+		TestEqual(TEXT("set down once"), SetDowns, Before + 1);
+		TestTrue(TEXT("on exactly the confirmed target (bitwise)"), FMemory::Memcmp(&SetDownAt, &Confirmed, sizeof(rb::Vec2)) == 0);
+		Hand->TickCarry(0.5);
+	}
 	Hand->OnSetDown.Clear();
 	Hand->OnRefused.Clear();
 	Hand->RemoveFromRoot();

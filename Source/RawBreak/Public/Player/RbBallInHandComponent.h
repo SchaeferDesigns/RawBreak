@@ -8,12 +8,15 @@
 //              aim's fine factor); the hand moves with human lag (critically damped, sub-stepped, speed-limited: never a jump) and
 //              a little tremor, and the ball never dips below HoverHeight while it is carried; over another ball (or the rail)
 //              the hand lifts it clear, eased (a person never drags the ball through the others).
-//   Lowering   Confirm (LMB / Enter / F) at a legal target: the hand sets the ball down (LowerSeconds, ~0.25 s) on EXACTLY the
-//              previewed target; OnSetDown fires when the ball touches the cloth (the stroke component then places it through the
-//              director, URbMatchDirector::PlaceCueBall).
+//   Lowering   Confirm (LMB / Enter / F) at a legal target: the hand sets the ball down (LowerSeconds, ~0.25 s; longer when the
+//              lagging hand is still far away: lining up never exceeds MaxHandSpeed) on EXACTLY the previewed target (lining up from
+//              where the lagging hand was, over - never through - a ball in between, over the rail when outside the bed); OnSetDown
+//              fires when the ball touches the cloth (the stroke component then places it through the director,
+//              URbMatchDirector::PlaceCueBall). The target is frozen from Confirm until the hand let go (SetTargetCore ignored).
 //   Refused    at an illegal spot (IsLegal: overlaps a ball, off the bed, outside the kitchen when behind the head string) the hand
 //              hesitates (a small lift and shake) and does not lower; OnRefused (a soft knock, M2-C) and the director's mandatory
-//              line; the red outline exists only as an assist option (later). Moving the target carries on.
+//              line; the red outline exists only as an assist option (later). Moving the target carries on (the hesitation runs on
+//              its own clock and fades out, a repeated Confirm during it does not restart it: never a jump).
 //   Placed     the ball is on the cloth (the table's cue ball shows it); the hand lets go and withdraws, then Inactive.
 // The table's cue ball is hidden while the hand carries it (it was picked up) and shown again if the carry is cancelled; after the
 // placement the director shows it where it was set down. The same hand later carries a ball picked up from the floor (M2-E,
@@ -111,7 +114,7 @@ public:
 	float HoverHeightCm = 4.0f;
 
 	// --- M2-F additions -----------------------------------------------------------------------------------------------------
-	// Seconds from Confirm until the ball touches the cloth.
+	// Seconds from Confirm until the ball touches the cloth (at the least: a hand still far from the target takes longer).
 	UPROPERTY(EditAnywhere, Category = "RawBreak|BallInHand")
 	float LowerSeconds = 0.25f;
 	// Human hand lag: critically damped follow of the target at this frequency [Hz], speed-limited [m/s].
@@ -168,7 +171,12 @@ protected:
 	void RestoreTableBall();
 	ARbBallSet* FindBallSet() const;
 	FVector ShoulderWorld() const;
-	double ClearanceBottomCm(const rb::Vec2& Plan) const;
+	// The lowest ball bottom [cm above the cloth] at Plan that clears every other shown ball by MarginCm.
+	double ClearanceBottomCm(const rb::Vec2& Plan, double MarginCm) const;
+	// Extra height of the ball bottom [cm] at Plan outside the bed (over the rail), 0 on the bed.
+	double OutsideLiftCm(const rb::Vec2& Plan) const;
+	// The hand's follow state starts at the carrying shoulder (at the target without a player).
+	void InitHand();
 
 	ERbBallInHandState State = ERbBallInHandState::Inactive;
 	rb::Vec2 Target;
@@ -190,9 +198,11 @@ private:
 	double StepRemainder = 0.0;
 	double Time = 0.0;
 	double StateTime = 0.0;
-	rb::Vec2 LowerFrom;           // hand plan position when the lowering began
+	rb::Vec2 LowerFrom;           // shown ball plan position when the lowering began
 	double LowerFromBottomCm = 0.0;
+	double LowerDuration = 0.25;  // [s] of the running lowering: LowerSeconds, longer when the hand still has far to go (speed limit)
 	rb::Vec2 RefusedAt;
+	double RefuseTime = -1.0;     // seconds since the running hesitation began (< 0 = none); it finishes even if the target moves on
 	bool bHidTableBall = false;
 
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> HandMesh;

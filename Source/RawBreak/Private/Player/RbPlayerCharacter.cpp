@@ -25,8 +25,10 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerInput.h"
 #include "HAL/IConsoleManager.h"
 #include "InputActionValue.h"
+#include "InputMappingContext.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
@@ -97,8 +99,30 @@ void ARbPlayerCharacter::BeginPlay()
 		const URbMatchDirector* Director = GameMode ? GameMode->GetDirector() : nullptr;
 		return !Director || Director->CanPlaceCueBall(Plan);
 	};
+	// Pause (review): on resume the stroke component asks whether the Stroke button is physically down - a button held through the
+	// pause must be released first, one let go during it must not swallow the next press. Unknown (no player controller / input
+	// setup, tests) counts as held.
+	Stroke->IsStrokeButtonDown = [WeakThis = TWeakObjectPtr<ARbPlayerCharacter>(this)]() {
+		const ARbPlayerCharacter* Self = WeakThis.Get();
+		const ARbPlayerController* PC = Self ? Cast<ARbPlayerController>(Self->GetController()) : nullptr;
+		const URbInputSetup* Setup = PC ? PC->GetInputSetup() : nullptr;
+		if (!Setup || !Setup->Context || !Setup->Stroke || !PC->PlayerInput)
+		{
+			return true;
+		}
+		for (const FEnhancedActionKeyMapping& Mapping : Setup->Context->GetMappings())
+		{
+			if (Mapping.Action == Setup->Stroke && PC->IsInputKeyDown(Mapping.Key))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
 	Super::BeginPlay();
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+	// The carrying hand places its arm from the eye: after the rig moved the camera this frame (both post-physics).
+	BallInHand->AddTickPrerequisiteComponent(CameraRig);
 	Stroke->GetDownSeconds = CameraRig->GetParams().GetDownSeconds; // without a running posture change (the rig's human get-down decides)
 	ContactHandle = Stroke->OnStrokeContact.AddUObject(this, &ARbPlayerCharacter::OnStrokeContactForFeel);
 }
@@ -113,7 +137,9 @@ void ARbPlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	ShotEventHandle.Reset();
 	BoundPlayback.Reset();
+	BoundBalls.Reset();
 	CameraRig->ReactionResolver = nullptr;
+	Stroke->IsStrokeButtonDown = nullptr;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -176,8 +202,9 @@ void ARbPlayerCharacter::HandleLook(const FVector2D& Counts, double DeltaSeconds
 {
 	if (DeltaSeconds < 0.0)
 	{
+		// The hand speed of the optional aim acceleration is real time (not dilated game time).
 		const UWorld* World = GetWorld();
-		DeltaSeconds = World ? World->GetDeltaSeconds() : 0.0;
+		DeltaSeconds = World ? static_cast<double>(World->DeltaRealTimeSeconds) : 0.0;
 	}
 	const FRbControlSettings& Controls = Stroke->Controls;
 	const double Dpi = Stroke->MouseDpi;
@@ -190,7 +217,10 @@ void ARbPlayerCharacter::HandleLook(const FVector2D& Counts, double DeltaSeconds
 		// Aiming (P3): X turns the cue about the cue ball (cm of mouse travel -> degrees); Y runs the eyes along the line (never while
 		// the mouse is the stroke).
 		Stroke->AddAimInput(Counts, bFineAim, DeltaSeconds);
-		if (!Stroke->IsStrokeActive())
+		// The mouse is the stroke while a stroke source runs AND while the Stroke button is held without one yet (pressed during the
+		// get-down: the stroke starts when Down begins) or must first be released (held through a pause): no eye pitch then (review).
+		const bool bMouseIsStroke = Stroke->IsStrokeActive() || Stroke->IsStrokeHeld() || Stroke->IsStrokeReleaseRequired();
+		if (!bMouseIsStroke)
 		{
 			const double Pitch = AimGazePitchScale * RbAimResponse::LookDegrees(Counts.Y, Dpi, Controls) * InvertY *
 				(bFineAim ? static_cast<double>(Controls.FineAimFactor) : 1.0);
@@ -248,6 +278,25 @@ FVector2D ARbPlayerCharacter::LookCountsForDegrees(const FVector2D& Degrees) con
 	return LookPerCount > 0.0 ? Degrees / LookPerCount : FVector2D::ZeroVector;
 }
 
+bool ARbPlayerCharacter::InjectStrokeKey(bool bDown)
+{
+	ARbPlayerController* PC = Cast<ARbPlayerController>(GetController());
+	const URbInputSetup* Setup = PC ? PC->GetInputSetup() : nullptr;
+	if (!Setup || !Setup->Context || !Setup->Stroke || !PC->IsLocalController())
+	{
+		return false;
+	}
+	for (const FEnhancedActionKeyMapping& Mapping : Setup->Context->GetMappings())
+	{
+		if (Mapping.Action == Setup->Stroke)
+		{
+			PC->InputKey(FInputKeyEventArgs::CreateSimulated(Mapping.Key, bDown ? IE_Pressed : IE_Released, bDown ? 1.0f : 0.0f));
+			return true;
+		}
+	}
+	return false;
+}
+
 void ARbPlayerCharacter::HandleStroke(bool bHeld)
 {
 	bStrokeButtonHeld = bHeld;
@@ -263,17 +312,15 @@ void ARbPlayerCharacter::OnStrokeContactForFeel(const FRbStrokeCommit& Commit)
 	BindShotEvents();
 }
 
-URbShotPlaybackComponent* ARbPlayerCharacter::FindPlayerPlayback() const
-{
-	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
-	ARbTable* Table = Tables ? Tables->GetPlayerTable() : nullptr;
-	const ARbBallSet* Balls = Tables && Table ? Tables->FindBallSet(Table) : nullptr;
-	return Balls ? Balls->GetPlayback() : nullptr;
-}
-
 void ARbPlayerCharacter::BindShotEvents()
 {
-	URbShotPlaybackComponent* Playback = FindPlayerPlayback();
+	// The player's ball set and playback, looked up once per contact: the reaction target is asked every frame while watching, and
+	// the table lookup iterates the level's actors and builds an array (review: no per-frame lookups / allocations).
+	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
+	ARbTable* Table = Tables ? Tables->GetPlayerTable() : nullptr;
+	ARbBallSet* Balls = Tables && Table ? Tables->FindBallSet(Table) : nullptr;
+	BoundBalls = Balls;
+	URbShotPlaybackComponent* Playback = Balls ? Balls->GetPlayback() : nullptr;
 	if (!Playback || Playback == BoundPlayback.Get())
 	{
 		return;
@@ -308,11 +355,10 @@ void ARbPlayerCharacter::OnShotEventForFeel(const TSharedRef<const FRbShot>& Sho
 
 bool ARbPlayerCharacter::FindReactionTarget(FVector& OutWorld) const
 {
-	const URbShotPlaybackComponent* Playback = FindPlayerPlayback();
-	const URbTableSubsystem* Tables = URbTableSubsystem::Get(this);
-	ARbTable* Table = Tables ? Tables->GetPlayerTable() : nullptr;
-	const ARbBallSet* Balls = Tables && Table ? Tables->FindBallSet(Table) : nullptr;
-	if (!Playback || !Balls || !Playback->IsPlaying() || !Playback->GetShot().IsValid())
+	// The ball set / playback of the shot this player watches (bound at the contact, BindShotEvents).
+	const ARbBallSet* Balls = BoundBalls.Get();
+	const URbShotPlaybackComponent* Playback = BoundPlayback.Get();
+	if (!Playback || !Balls || Balls->GetPlayback() != Playback || !Playback->IsPlaying() || !Playback->GetShot().IsValid())
 	{
 		return false;
 	}
