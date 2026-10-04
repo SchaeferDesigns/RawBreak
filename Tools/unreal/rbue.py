@@ -15,6 +15,7 @@ Every Unreal step of the project runs through this script so that no human ever 
   ledger    check / merge the licence ledger             rbue.py ledger [--merge] [--check]
   core      build + run the BilliardsCore tests (CMake)  rbue.py core [--slow] [--config Debug] [-- MOT_ -Integ_]
   owners    18.2 file-ownership check of a package       rbue.py owners --package M2-F --branch m2f   |   rbue.py owners --who <path>
+  unity     names two .cpp of a module both define       rbue.py unity [--module RawBreak] [--rev <commit>] [--strict]   (unity-build collisions)
   selftest  checks of this script's pure helpers         rbue.py selftest
 
 Logs go to Saved/RbLogs/<command>-<timestamp>.log (UE's -abslog). Exit code 0 = success.
@@ -283,13 +284,26 @@ def test_run_problems(lines: list[str], sound: bool = False) -> tuple[int, int, 
 	return passed, failed, problems
 
 
+def _tree_status() -> set[str]:
+	"""`git status --porcelain` lines of the working tree (empty when git is unavailable)."""
+	try:
+		return set(_git("status", "--porcelain", "--untracked-files=all").splitlines())
+	except (OSError, subprocess.CalledProcessError):
+		return set()
+
+
 def cmd_test(a: argparse.Namespace) -> int:
 	log = _log_path("test")
 	report = REPO / "Saved/RbLogs/AutomationReport"
 	cmd = [str(EDITOR_CMD), str(UPROJECT), f'-ExecCmds="Automation RunTests {a.filter}; Quit"', '-TestExit="Automation Test Queue Empty"',
 		f'-ReportExportPath="{report}"', f'-abslog="{log}"'] + _common(a)
 	cmd += ["-RenderOffscreen"] if a.render else ["-NullRHI"]
+	status_before = _tree_status()
 	code, lines = _run(cmd, a.timeout, ECHO)
+	# Tests that write into the repository (fourth review: M2-C's audio tests rewrite the committed Docs/audio/m2/*.wav on every
+	# --sound run) leave an integration tree dirty; an accidental `git commit -a` would then commit an arbitrary run's output.
+	for entry in sorted(_tree_status() - status_before)[:20]:
+		print(f"[rbue] WARNING: the test run changed the working tree: {entry.strip()} (git restore it unless intended)")
 	passed, failed, problems = test_run_problems(lines, a.sound)
 	# Warnings a test raised itself (AddWarning; captured log warnings end in "[log]") do not fail it but are requests, e.g.
 	# Contracts.Packaging "generated but not in MapsToCook yet" (18.12).
@@ -847,6 +861,310 @@ def cmd_owners(a: argparse.Namespace) -> int:
 	return 1 if violations else 0
 
 
+# --- unity-build hazards (Docs/ue-architecture.md 18.12; the M2 integration) ----------------------------------------------------
+#
+# UBT compiles a project module with at least 32 files (incl. its UHT .gen.cpp) in unity blobs (Unity.cs): the .gen.cpp files
+# first (4 KB each), then the .cpp files sorted by path (case-insensitive), packed into blobs of 384 KB. Two files that define the
+# same name in the same namespace - an anonymous-namespace helper, a `static` function, a namespace-scope variable, a type - build
+# fine on their package's branch, where they sit in different blobs, and break the build as soon as a merge shifts the blob
+# boundaries and puts them into one translation unit (review 4's dry run of all seven packages: M2-F's RbHumanMotion.cpp and
+# RbBallInHandComponent.cpp both define `kInternalStep` and `SmoothStep(double)` -> C2374 / C2084 in Module.RawBreak.2.cpp).
+# `rbue.py unity` lists every such pair with its owners and says whether the two files share a blob in the clean-tree layout NOW
+# (the build fails) or only later (latent: the next merge may do it). The fix is always a request to the files' owners: helpers
+# of a .cpp go into a namespace named after the file (18.12). Adaptive unity takes git-modified files out of their blobs, so a
+# package's own incremental build hides a collision of the files it is editing; this check sees the committed layout.
+
+UNITY_BLOB_BYTES = 384 * 1024     # TargetRules.NumIncludedBytesPerUnityCPP (UE 5.8 default; no project module overrides it)
+UNITY_GENERATED_BYTES = 4 * 1024  # Unity.PlaceholderFileSize: every .gen.cpp counts with this size
+UNITY_MIN_FILES = 32              # TargetRules.MinGameModuleSourceFilesForUnityBuild: smaller project modules build without unity
+
+
+def strip_cpp(text: str) -> str:
+	"""C++ source with comments, string / character literals and preprocessor lines blanked (the line structure is kept)."""
+	text = text.replace("\r\n", "\n")
+	out: list[str] = []
+	i, n = 0, len(text)
+	line_start = True
+	while i < n:
+		ch = text[i]
+		if line_start and ch in " \t":
+			out.append(ch)
+			i += 1
+			continue
+		if line_start and ch == "#":  # a preprocessor line with its continuation lines
+			while i < n and text[i] != "\n":
+				i += 2 if text.startswith("\\\n", i) else 1
+			continue
+		line_start = ch == "\n"
+		if text.startswith("//", i):
+			end = text.find("\n", i)
+			i = n if end < 0 else end
+		elif text.startswith("/*", i):
+			end = text.find("*/", i + 2)
+			end = n if end < 0 else end + 2
+			out.append("\n" * text.count("\n", i, end))
+			i = end
+		elif ch == '"' and i > 0 and text[i - 1] == "R" and (i < 2 or not (text[i - 2].isalnum() or text[i - 2] == "_")):
+			delim = re.match(r'"([^()\\\s]{0,16})\(', text[i:i + 20])
+			close = text.find(")" + (delim.group(1) if delim else "") + '"', i + 1)
+			end = n if close < 0 else close + len(delim.group(1) if delim else "") + 2
+			out.append('"' + "\n" * text.count("\n", i, end) + '"')
+			i = end
+		elif ch == '"' or (ch == "'" and not (i > 0 and text[i - 1].isalnum())):  # 1'000 is a digit separator, not a literal
+			j = i + 1
+			while j < n and text[j] != ch and text[j] != "\n":
+				j += 2 if text[j] == "\\" else 1
+			out.append(ch + ch)
+			i = j + 1
+		else:
+			out.append(ch)
+			i += 1
+	return "".join(out)
+
+
+def _matching_paren(text: str, start: int) -> int:
+	depth = 0
+	for index in range(start, len(text)):
+		depth += {"(": 1, ")": -1}.get(text[index], 0)
+		if depth == 0:
+			return index
+	return len(text) - 1
+
+
+def _top_level(text: str, chars: str) -> int:
+	"""Index of the first of chars outside (), [] and <> in a declaration (-1 when none); '==' and '->' are no '=' / '>'."""
+	paren = angle = 0
+	for index, ch in enumerate(text):
+		if paren == 0 and angle == 0 and ch in chars:
+			if not (ch == "=" and (text[index + 1:index + 2] == "=" or text[index - 1:index] in ("=", "!", "<", ">"))):
+				return index
+		if ch in "([":
+			paren += 1
+		elif ch in ")]":
+			paren -= 1
+		elif ch == "<" and paren == 0:
+			angle += 1
+		elif ch == ">" and paren == 0 and not (index > 0 and text[index - 1] == "-"):
+			angle = max(0, angle - 1)
+	return -1
+
+
+def _param_types(params: str) -> str:
+	"""The parameter types of a parameter list (names and default arguments dropped), for telling overloads from duplicates."""
+	types = []
+	for param in filter(None, (p.strip() for p in re.split(r",(?![^<]*>)", params))):
+		param = param.split("=", 1)[0].strip()
+		tokens = re.findall(r"[\w:]+|[^\w\s]", param)
+		if len(tokens) > 1 and re.fullmatch(r"[A-Za-z_]\w*", tokens[-1]) and tokens[-2] not in ("::",):
+			tokens = tokens[:-1]
+		types.append(" ".join(tokens))
+	return ", ".join(t for t in types if t != "void")
+
+
+def cpp_definitions(text: str) -> set[tuple[str, str, str, str]]:
+	"""The namespace-scope definitions of a .cpp that collide when another file of its unity blob defines the same: (kind, namespace,
+	name, parameter types) with kind type / variable / function; namespace = the named namespaces around it (anonymous ones are
+	transparent: their names are visible in the enclosing namespace). Member definitions (A::B), declarations without a body and
+	macro invocations are not definitions here."""
+	src = strip_cpp(text)
+	found: set[tuple[str, str, str, str]] = set()
+	stack: list[str | None] = []  # a namespace name ("" anonymous, None extern "C") or "{" for any other block
+	header = ""
+
+	def namespace_key() -> str:
+		return "::".join(name for name in stack if name)
+
+	def classify(head: str, opener: str) -> None:
+		head = " ".join(head.split())
+		head = re.sub(r"^(?:template\s*<(?:[^<>]|<[^<>]*>)*>\s*)+", "", head)  # template heads
+		while True:  # leading macro invocations / markers (IMPLEMENT_..._TEST(...), UE_DISABLE_OPTIMIZATION, FORCEINLINE)
+			macro = re.match(r"([A-Z][A-Z0-9_]*)\b\s*", head)
+			if not macro:
+				break
+			end = macro.end()
+			if head[end:end + 1] == "(":
+				close = _matching_paren(head, end)
+				first = re.match(r"\(\s*(\w+)", head[end:close + 1])
+				# Macros that define a class / a variable named by their first argument (two test files with the same test or
+				# latent-command class, two DEFINE_LOG_CATEGORY_STATIC(LogX) collide like any other definition).
+				if first and re.fullmatch(r"IMPLEMENT_\w*AUTOMATION_TEST|DEFINE_LATENT_AUTOMATION_COMMAND\w*|DEFINE_LOG_CATEGORY(?:_STATIC)?", macro.group(1)):
+					found.add(("type" if "AUTOMATION" in macro.group(1) else "variable", namespace_key(), first.group(1), ""))
+				end = close + 1
+			head = head[end:].lstrip()
+		if not head or re.match(r"(?:using|typedef|friend|static_assert|extern)\b", head):
+			return
+		kind = re.match(r"(?:(?:struct|class|union|enum(?:\s+class|\s+struct)?)\s+)(?:alignas\([^)]*\)\s*)?(?:[A-Z0-9_]+_API\s+)?(\w+)\s*(?:final\s*)?(?::.*)?$", head)
+		if kind:
+			if opener == "{":
+				found.add(("type", namespace_key(), kind.group(1), ""))
+			return
+		equals, paren = _top_level(head, "="), _top_level(head, "(")
+		if equals >= 0 and (paren < 0 or equals < paren):
+			name = re.findall(r"[A-Za-z_]\w*", re.sub(r"\[[^\]]*\]\s*$", "", head[:equals]).strip())
+			if name and "::" not in head[:equals]:
+				found.add(("variable", namespace_key(), name[-1], ""))
+			return
+		if paren < 0:
+			name = re.findall(r"[A-Za-z_]\w*", re.sub(r"\[[^\]]*\]\s*$", "", head))
+			if len(name) > 1 and "::" not in head:  # `type name;` / `type name{...}` (one word alone is a stray macro)
+				found.add(("variable", namespace_key(), name[-1], ""))
+			return
+		before = re.search(r"([~\w:]+)\s*$", head[:paren])
+		if not before or "::" in before.group(1) or before.group(1).startswith("operator") or before.group(1).isupper():
+			return
+		params = head[paren + 1:_matching_paren(head, paren)]
+		if opener == "{":
+			found.add(("function", namespace_key(), before.group(1), _param_types(params)))
+		elif '""' in params or re.search(r"(?:^|,)\s*-?\d", params):  # `static TAutoConsoleVariable<int32> CVarX(TEXT("..."), 1)`
+			found.add(("variable", namespace_key(), before.group(1), ""))
+
+	for ch in src:
+		in_namespace = all(entry != "{" for entry in stack)
+		if ch == "{":
+			if in_namespace:
+				space = re.fullmatch(r"\s*(?:inline\s+)?namespace\s*([\w:]*)\s*", header)
+				if space:
+					stack.append(space.group(1))  # "a::b" for a nested `namespace a::b {` (one closing brace)
+					header = ""
+					continue
+				if re.fullmatch(r'\s*extern\s*""\s*', header):
+					stack.append(None)
+					header = ""
+					continue
+				classify(header, "{")
+			stack.append("{")
+			header = ""
+		elif ch == "}":
+			if stack:
+				stack.pop()
+			header = ""
+		elif ch == ";":
+			if in_namespace:
+				classify(header, ";")
+			header = ""
+		elif in_namespace:
+			header += ch
+	return found
+
+
+def unity_hazards(files: dict[str, str]) -> list[tuple[str, str, str]]:
+	"""(what, file A, file B) for every pair of files that defines a colliding name (same namespace and name; functions only with
+	the same parameter types - overloads are fine). files: path -> source text."""
+	by_name: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
+	for path, text in files.items():
+		for kind, namespace, name, signature in cpp_definitions(text):
+			by_name.setdefault((namespace, name), []).append((path, kind, signature))
+	hazards = []
+	for (namespace, name), entries in sorted(by_name.items()):
+		label = f"{namespace}::{name}" if namespace else name
+		for index, (path_a, kind_a, sig_a) in enumerate(entries):
+			for path_b, kind_b, sig_b in entries[index + 1:]:
+				if path_a == path_b:
+					continue
+				if kind_a == kind_b == "function" and sig_a != sig_b:
+					continue  # overloads
+				what = f"{label}({sig_a})" if kind_a == kind_b == "function" else f"{label} ({kind_a} / {kind_b})" if kind_a != kind_b else f"{label} ({kind_a})"
+				hazards.append((what, *sorted((path_a, path_b))))
+	return sorted(set(hazards))
+
+
+def pack_unity(files: list[tuple[str, int]], generated: int) -> list[list[str]]:
+	"""UBT's blobs (Unity.cs GenerateUnitySource / UnityFileBuilder) of a module's sources (path, bytes), already sorted by path;
+	the generated .gen.cpp files ("" here) come first. A module below 2 x 384 KB goes into one blob; files over 384 KB get their own."""
+	total = sum(size for _, size in files) + generated * UNITY_GENERATED_BYTES
+	single = total < 2 * UNITY_BLOB_BYTES
+	ordered = [("", UNITY_GENERATED_BYTES)] * generated + sorted(files, key=lambda item: (not single and item[1] > UNITY_BLOB_BYTES))
+	blobs: list[list[str]] = []
+	current: list[str] = []
+	length = 0
+	for path, size in ordered:
+		if not single and size > UNITY_BLOB_BYTES and current:
+			blobs.append(current)
+			current, length = [], 0
+		current.append(path)
+		length += size
+		if not single and length > UNITY_BLOB_BYTES:
+			blobs.append(current)
+			current, length = [], 0
+	if current:
+		blobs.append(current)
+	return blobs
+
+
+def unity_layout(module: str, files: dict[str, tuple[int, str]]) -> tuple[str, list[list[str]]]:
+	"""(state, blobs of repo-relative .cpp paths) of the project module Source/<module> in the clean-tree layout; files: repo path ->
+	(size on disk, text) of its .cpp / .h / .Build.cs files. state: 'unity', 'below N files' (no unity build yet: every hazard is
+	latent) or 'off' (bUseUnity = false in its Build.cs)."""
+	prefix = f"Source/{module}/"
+	rules = "".join(text for path, (_, text) in files.items() if path.endswith(".Build.cs"))
+	# Unity.cs sorts the absolute paths (OrdinalIgnoreCase): within one module the relative Windows path decides.
+	sources = sorted((path for path in files if path.endswith(".cpp")), key=lambda path: path[len(prefix):].replace("/", "\\").upper())
+	reflected = sum(1 for path, (_, text) in files.items() if path.endswith(".h") and '.generated.h"' in text)
+	generated = reflected + (1 if reflected else 0) + 1  # one per reflected header, <Module>.init.gen.cpp, PerModuleInline.gen.cpp
+	if re.search(r"\bbUseUnity\s*=\s*false\b", rules):
+		return "off", [[path] for path in sources]
+	if len(sources) + generated < UNITY_MIN_FILES:
+		return f"below {UNITY_MIN_FILES} files", [[path] for path in sources]
+	return "unity", [[path for path in blob if path] for blob in pack_unity([(path, files[path][0]) for path in sources], generated)]
+
+
+def _unity_files(rev: str) -> dict[str, dict[str, tuple[int, str]]]:
+	"""module -> {repo path: (size on disk, text)} of every module's .cpp / .h / .Build.cs, from the working tree or (rev) from a
+	commit without checking it out (the size a checkout would have: core.autocrlf turns every LF into CRLF)."""
+	modules: dict[str, dict[str, tuple[int, str]]] = {}
+	wanted = (".cpp", ".h", ".Build.cs")
+	if not rev:
+		for build_cs in sorted((REPO / "Source").glob("*/*.Build.cs")):
+			modules[build_cs.parent.name] = {path.relative_to(REPO).as_posix(): (path.stat().st_size, path.read_text(encoding="utf-8", errors="replace"))
+				for path in build_cs.parent.rglob("*") if path.is_file() and path.name.endswith(wanted)}
+		return modules
+	crlf = subprocess.run(["git", "config", "--get", "core.autocrlf"], cwd=str(REPO), capture_output=True, text=True).stdout.strip().lower() == "true"
+	names = [name for name in _git("ls-tree", "-r", "--name-only", rev, "--", "Source").splitlines() if name.endswith(wanted)]
+	batch = subprocess.run(["git", "cat-file", "--batch"], input="".join(f"{rev}:{name}\n" for name in names).encode("utf-8"), cwd=str(REPO),
+		capture_output=True, check=True).stdout
+	offset = 0
+	for name in names:
+		header_end = batch.index(b"\n", offset)
+		size = int(batch[offset:header_end].split()[2])
+		data = batch[header_end + 1:header_end + 1 + size]
+		offset = header_end + 1 + size + 1
+		disk = size + (data.count(b"\n") - data.count(b"\r\n") if crlf else 0)
+		modules.setdefault(name.split("/")[1], {})[name] = (disk, data.decode("utf-8", errors="replace"))
+	return {module: files for module, files in modules.items() if any(path.endswith(".Build.cs") for path in files)}
+
+
+def cmd_unity(a: argparse.Namespace) -> int:
+	now = latent = 0
+	try:
+		modules = _unity_files(a.rev)
+	except subprocess.CalledProcessError as error:
+		print(f"[rbue] unity: cannot read {a.rev!r} ({(error.stderr or b'').strip()[:200]!r})")
+		return 2
+	for module, module_files in sorted(modules.items()):
+		if a.module and module not in a.module:
+			continue
+		state, blobs = unity_layout(module, module_files)
+		if state == "off":
+			print(f"[rbue] unity {module}: bUseUnity = false (every file its own translation unit)")
+			continue
+		blob_of = {path: index for index, blob in enumerate(blobs, start=1) for path in blob}
+		files = {path: module_files[path][1] for path in blob_of}
+		hazards = unity_hazards(files)
+		print(f"[rbue] unity {module}{f' @ {a.rev}' if a.rev else ''}: {len(files)} .cpp, " + (f"{len(blobs)} blob(s) of {UNITY_BLOB_BYTES // 1024} KB" if state == "unity"
+			else f"{state} (no unity build yet)") + f", {len(hazards)} hazard(s)")
+		for what, path_a, path_b in hazards:
+			together = state == "unity" and blob_of[path_a] == blob_of[path_b]
+			now += together
+			latent += not together
+			where = f"blob {blob_of[path_a]}" if together else (f"blobs {blob_of[path_a]} / {blob_of[path_b]}" if state == "unity" else "no unity yet")
+			print(f"[rbue]   {'COLLIDES NOW' if together else 'latent      '} {what}: {path_a} ({owner_of(path_a)[0] or '?'}) + {path_b} "
+				f"({owner_of(path_b)[0] or '?'}) [{where}]")
+	verdict = "OK" if not now and not (a.strict and latent) else "FAILED"
+	print(f"[rbue] unity {verdict}: {now} collision(s) in one blob now (the build fails), {latent} latent (a later merge may put them "
+		"into one blob); requests to the owners: helpers of a .cpp into a namespace named after the file")
+	return 0 if verdict == "OK" else 1
+
+
 # --- core tests (CMake) ---------------------------------------------------------------------------------------------------------
 
 def core_filters(filters: list[str], slow: bool) -> list[str]:
@@ -974,6 +1292,30 @@ def cmd_selftest(a: argparse.Namespace) -> int:
 	check("--sound --audible", "-MuteAudio" in _common(argparse.Namespace(sound=True, audible=True, extra=[])), False)
 	check("--sound with an explicit -muteaudio", _common(argparse.Namespace(sound=True, audible=False, extra=["-muteaudio"])).count("-MuteAudio"), 0)
 	check("no --sound keeps -NoSound", "-NoSound" in _common(argparse.Namespace(sound=False, extra=[])), True)
+
+	# Unity-build hazards (review 4: M2-F's kInternalStep / SmoothStep broke the merged build in one blob).
+	helper = "namespace\n{\n\tconstexpr double kInternalStep = 1.0 / 480.0;\n\tdouble SmoothStep(double U)\n\t{\n\t\treturn U * U;\n\t}\n}\n"
+	check("unity: same anonymous helpers", [what for what, *_ in unity_hazards({"a.cpp": helper, "b.cpp": helper.replace("double U", "double A")})],
+		["SmoothStep(double)", "kInternalStep (variable)"])
+	check("unity: helpers in namespaces named after the files", unity_hazards({"a.cpp": "namespace RbA\n{\n" + helper + "}\n",
+		"b.cpp": "namespace RbB\n{\n" + helper + "}\n"}), [])
+	check("unity: overloads are no collision", unity_hazards({"a.cpp": "namespace { bool Same(const FVector& A, const FQuat& B) { return true; } }",
+		"b.cpp": "namespace { bool Same(const rb::human::HandPose& A, const rb::human::HandPose& B) { return true; } }"}), [])
+	check("unity: anonymous vs global scope", len(unity_hazards({"a.cpp": "namespace { struct FCache { int X; }; }", "b.cpp": "struct FCache { int Y; };"})), 1)
+	check("unity: comments, strings, members, declarations",
+		unity_hazards({"a.cpp": '// namespace { int kX = 1; }\nconst TCHAR* Doc = TEXT("namespace { int kY; }");\nstruct FFwd;\nstatic void Proto(int A);\n'
+			"void AFoo::Bar() { int kZ = 1; }\nFAFoo::FAFoo() : Base(1), Member{2} { }\n",
+			"b.cpp": "/* namespace { int kX = 1; } */\nstruct FFwd;\nstatic void Proto(int A);\nvoid AFoo::Baz() { int kZ = 2; }\nconst TCHAR* Other = nullptr;\n"}), [])
+	check("unity: console variables, log categories and test classes",
+		[what for what, *_ in unity_hazards({f"{n}.cpp": 'static TAutoConsoleVariable<int32> CVarX(TEXT("rb.X"), 0, TEXT(""));\n'
+			"DEFINE_LOG_CATEGORY_STATIC(LogRbX, Log, All);\nIMPLEMENT_SIMPLE_AUTOMATION_TEST(FRbXTest, \"RawBreak.X\", F)\n"
+			"bool FRbXTest::RunTest(const FString& P) { return true; }\n" for n in "ab"})],
+		["CVarX (variable)", "FRbXTest (type)", "LogRbX (variable)"])
+	check("unity blobs: one blob below 2 x 384 KB", pack_unity([("a.cpp", 300000), ("b.cpp", 400000)], 2), [["", "", "a.cpp", "b.cpp"]])
+	check("unity blobs: generated first, split after 384 KB", pack_unity([("a.cpp", 300000), ("b.cpp", 200000), ("c.cpp", 300000)], 2),
+		[["", "", "a.cpp", "b.cpp"], ["c.cpp"]])
+	check("unity blobs: an oversized file alone, at the end", pack_unity([("a.cpp", 500000), ("b.cpp", 200000), ("c.cpp", 300000)], 0),
+		[["b.cpp", "c.cpp"], ["a.cpp"]])
 
 	# Ledger validation: a clean CC0 row, then one broken field per case.
 	good = {"asset_id": "rosewood_veneer1", "used_by": "M2-L", "source": "polyhaven", "source_ref": "https://polyhaven.com/a/rosewood_veneer1",
@@ -1164,6 +1506,12 @@ def main() -> int:
 	w.add_argument("--base", default="main", help="compared against the merge base with this branch")
 	w.add_argument("--who", nargs="*", default=[], help="print the owner of these repo-relative paths instead")
 	w.set_defaults(func=cmd_owners)
+
+	u = sub.add_parser("unity", help="names that two .cpp of a module both define: a build break once they share a unity blob")
+	u.add_argument("--module", nargs="*", default=[], help="only these modules (default: every module under Source/)")
+	u.add_argument("--strict", action="store_true", help="fail on latent hazards too (files in different blobs today)")
+	u.add_argument("--rev", default="", help="check a commit (e.g. a package branch or a merge result) instead of the working tree")
+	u.set_defaults(func=cmd_unity)
 
 	s = sub.add_parser("selftest", help="checks of rbue.py's own pure helpers (no Unreal)")
 	s.set_defaults(func=cmd_selftest)
