@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Document | `Docs/ue-architecture.md` |
-| Status | v1.1 (2026-09-27), UE-0 delivered and adversarially reviewed (section 16): module layout, compiling skeleton of every class (TODO(UE-x) markers), config, headless pipeline proven on the dev PC (build, Python level + bake, PIE tests, headless screenshot). Frozen for the parallel work packages UE-1..UE-8. v1.2 (2026-09-28): M1 integrated (section 17). **v1.3 (2026-09-29): M2 plan (section 18): 7 packages M2-F / M2-L / M2-A / M2-B / M2-C / M2-D / M2-E with disjoint owned files, the new contracts and compiling stubs (TODO(M2-x) markers), config and pipeline additions.** v1.4 (2026-09-29): M2-0 (architect package, 18.12): multi-view / UI / hide-tag / EV100 captures, frame-time recorder, `rbue.py perf / package / ledger / core / owners / selftest`, contract and level-smoke tests, integration runbook. |
-| Scope | The Unreal Engine 5.8.3 side of RAW BREAK up to milestone **M1 "first playable"** (sections 0-17) and the **M2 plan** (section 18: feel fixes from the M1 playtest, table / cloth look-dev, dive-bar slice v1, audio v1, menus / settings, balls off the table, multi-table groundwork). The engine-agnostic core `BilliardsCore` (Docs/architecture.md) is complete and stays untouched. |
+| Status | v1.1 (2026-09-27), UE-0 delivered and adversarially reviewed (section 16): module layout, compiling skeleton of every class (TODO(UE-x) markers), config, headless pipeline proven on the dev PC (build, Python level + bake, PIE tests, headless screenshot). Frozen for the parallel work packages UE-1..UE-8. v1.2 (2026-09-28): M1 integrated (section 17). **v1.3 (2026-09-29): M2 plan (section 18): 7 packages M2-F / M2-L / M2-A / M2-B / M2-C / M2-D / M2-E with disjoint owned files, the new contracts and compiling stubs (TODO(M2-x) markers), config and pipeline additions.** v1.4 (2026-09-29): M2-0 (architect package, 18.12): multi-view / UI / hide-tag / EV100 captures, frame-time recorder, `rbue.py perf / package / ledger / core / owners / selftest`, contract and level-smoke tests, integration runbook. **v1.5 (2026-10-04): M3 plan (section 19): 5 packages M3-H / M3-O / M3-G / M3-V / M3-L with disjoint owned files, no architect package (the plan step puts the contracts in place as compiling stubs, TODO(M3-x) markers; the integration round owns the shared files).** |
+| Scope | The Unreal Engine 5.8.3 side of RAW BREAK up to milestone **M1 "first playable"** (sections 0-17) and the **M2 plan** (section 18: feel fixes from the M1 playtest, table / cloth look-dev, dive-bar slice v1, audio v1, menus / settings, balls off the table, multi-table groundwork) and the **M3 plan** (section 19: first-person arms and hands on a body rig, the AI opponent at the table, 8-ball / 10-ball with diegetic calls, dive-bar polish + performance, table realism round 2). The engine-agnostic core `BilliardsCore` (Docs/architecture.md) is complete and stays untouched. |
 | Sources of truth | `Docs/specs/ue5-realism-plan.md` (**UE** below: camera 4.x, body/input/cue 5.x, adapter 5.6, playback 5.7, rendering 6.x, settings 9.4, tests 13), `Docs/specs/human-factors.md` (**HF**, layers UG/UA/US), `Docs/specs/rules.md` (**RUL**, what the match UI must show), `Docs/decisions.md`, `Docs/architecture.md` sections 7 and 13 (the core API and the integration contract). |
 | Code | `Source/RawBreak/**` (game module), `Source/RawBreakEditor/**` (editor tools), `Source/RawBreakShaders/**` + `Shaders/**` (shader directory), `Tools/unreal/**` (headless pipeline), `Config/*.ini`, `RawBreak.uproject` |
 
@@ -1207,3 +1207,487 @@ upgrade has no backup of the motion rows (M2-D); M2-C's open list (T1 / T2 voice
 tested through real Enhanced Input events); `capture_divebar.py`'s URL option `?Game=NineBall` is the ENGINE's game-mode option
 ("Failed to load game mode 'NineBall' specified by URL options", harmless: the World Settings mode runs; M2-A); the dive bar's GPU
 cost (M2-A9 above).
+
+---
+
+## 19. M3 — arms and hands, the AI opponent at the table, 8-ball / 10-ball, venue polish + performance, table realism round 2 (plan, 2026-10-04)
+
+### 19.0 Scope and priorities
+
+M3 builds on the merged M2 (`ef07695`: 285 UE tests, 938 core tests) everything that does **not** depend on the product owner's M2
+playtest, which runs in parallel; his feedback becomes a later package (M3-P) on top of this milestone. **Priority order:**
+
+| Prio | Item | Package |
+|---|---|---|
+| 1 | **First-person arms and hands** on the Epic template mannequin (Manny / Quinn, UE EULA) with procedural C++ IK: the bridge hand on the cloth (open, closed / loop, rail, elevated over a ball, chosen from the stroke situation), the grip hand on the butt, chalking from a cube on the rail (the HF-22 "reload"), the real hand carrying the ball in hand, the hand imperfections of human-factors (bridge tremor under pressure, creeping fingers on hard strokes, white knuckles, wiping the hands on the jeans, rolling the cue on the cloth), coupled to `RbHumanMotion` (the head leads, the body follows); the cue sits in the bridge exactly where the physics says; no penetration of cloth, rails or balls; correct in Eyes and Headcam; plain dark long-sleeve shirt. The same rig in third person is the opponent's body | M3-H |
+| 1 | **The AI opponent in the game**: `rb::ai` on worker threads (PlannerScratch protocol, wall-clock `FinishNow` escape), Player vs AI (one of the six profiles, chosen in the venue menu), every AI decision (lag, breaker, break, push-out, options, ball in hand, `RequestSpot`), a visible opponent at the table (walks to the shot, studies the table from `Progress()`, gets down, strokes the synthetic hand's stroke, chalks, waits at his spot while the player shoots) | M3-O |
+| 1 | **Game modes**: 8-ball (WPA, open table / groups shown discreetly, diegetic pocket call acknowledged by the opponent), 10-ball (call shot), race-to-N match setup in the venue menu, rack / respot flows, per-mode key hints, on the M2 overlay and menus | M3-G |
+| 2 | **Venue polish + performance**: the dive bar from ~25 ms to **<= 16.7 ms GPU (p95)** at 2560x1440 High on the RTX 3070 Ti without visible quality loss; VDB-T2 exposure bands for V02..V05; the ~20 grey-box elements of 18.13 built at M2-B quality; the open M2 requests in venue files | M3-V |
+| 2 | **Table realism round 2**: cushions / rails / pockets / cloth that no longer read as a game at chin-on-cue (V04), both tables, physics surfaces exactly on `rb::TableGeometry` | M3-L |
+
+**Not in M3**: the owner's M2 playtest fixes (M3-P, later), MetaHuman bodies and faces (the mannequin head of the opponent stays
+featureless), hustler money mode / side bets (the local hustler plays without sandbagging: `MoneyGames::LeaguePrizeOnly` in the
+planner input), AI regulars at other tables, NPCs other than the one opponent, voice lines (acknowledgements are gestures +
+subtitles), Meshy / Higgsfield assets (no AI-generated asset in M3: `ai_generated = n` everywhere), rules `InputMode::Sim` (body
+fouls 3.4 / 3.6 / 3.10 stay off: the IK keeps 5 mm clearance to every ball, HF-60), controller support, the diegetic score slate,
+the DLSS plugin, Steam packaging. **BilliardsCore stays untouched**: no M3 package owns a core file; a needed core change is a
+request (it would get its own core work package).
+
+### 19.1 Rules for M3 (no architect package)
+
+M3 has **five** packages and no separate architect package. The architect's M2 duties are split:
+
+* **This plan step** (19.3, committed with the plan as "M3 plan: stubs ..."): every cross-package contract as a compiling stub
+  (declarations + trivial bodies, `TODO(M3-x)` markers), the shared enums / paths / tags in `Core/`, the new input actions, the
+  module dependencies, the config, the regeneration-list entries of new generators, the M3 ownership table in `rbue.py owners`, the
+  ledger sources for Epic template content. Build clean, every existing test green.
+* **The packages** own their files (19.2) and implement their stubs. Contract **hooks** a package needs from another package's file
+  are already in place (19.3); anything else is a request in the package's report.
+* **The integration round** (19.10) merges, applies the requests (`DefaultGame.ini`, `rb_make_all.py`, `Core/`, cross-package
+  fixes), runs the M3 acceptance and records the results in this section.
+
+Process as in M2 (memory "Dev process"): one agent per package in its own worktree `.claude/worktrees/m3-<x>` on branch
+`ue/m3-<x>`, an adversarial reviewer-fixer, merge by the integrator. Each package edits **only** its files (`rbue.py owners --package
+M3-<x>` must be OK before the merge; the integration-owned files are `M3-INT`). Build 0 errors / 0 warnings from project code; all
+existing UE (285) and core (938) tests stay green; new tests for the package's acceptance. Generated assets only under the package's
+`Content` roots (LFS) and `/Game/Dev/M3<x>/` (git-ignored); dev screenshots under `Docs/images/dev/m3<x>/`, **looked at**; external
+assets only CC0 (Poly Haven / ambientCG through `Tools/art/fetch_cc0.py`) or Epic-licensed engine / template content (the UE 5.8
+template mannequins under `C:/Program Files/Epic Games/UE_5.8/Templates/TemplateResources/High/Characters`), each with a row in the
+package's ledger fragment `Docs/licenses/ledger/M3-<x>.csv` (source `epic`, licence `UE-EULA` for template content; merged by the
+integrator). Fictional brands only. Helpers of every `.cpp` in a namespace named after the file (unity builds, 18.12);
+`rbue.py unity` before the commit. Fresh worktrees: `git lfs install --local`, `git lfs pull`. Shared machine: at most three
+packages compile shaders / capture at the same time; never leave an Unreal or Blender process running; GPU timings are valid only on
+an idle GPU (`rbue.py perf` records the foreign GPU load; numbers under load are marked as such). Usage limits: a WIP commit after
+every major step; an interrupted package reads its branch log first and continues. Visual iteration: at most **4 capture / fix
+rounds per topic**, then the package finishes and lists what is left.
+
+### 19.2 Work packages (disjoint owned files)
+
+`Area/*` = `Source/RawBreak/Public/Area/*` + `Source/RawBreak/Private/Area/*`; tests are files in `Source/RawBreak/Private/Tests/`
+(unit, `RawBreak.Unit.*`) or `Source/RawBreakEditor/Private/Tests/` (PIE, `RawBreak.Functional.*`), named without `.cpp`. Every
+package also owns `Tools/unreal/editor/rb_dev_m3<x>.py`, `Docs/images/dev/m3<x>/**` and `Docs/licenses/ledger/M3-<X>.csv`.
+
+| Package | Title | Owned files / globs | Depends on | Acceptance (details in 19.4-19.8) |
+|---|---|---|---|---|
+| **M3-H** | First-person arms and hands; the body rig (also the opponent's) | `Body/*` (new: `RbBodyTypes`, `URbBodyRigComponent` + the package's solvers / pose library / chalk cube), `Player/*`, `Camera/*`, `Cue/*`, `Input/*`, `Math/RbStrokeMath.*`, `Private/Math/RbCameraMath_Camera.cpp`, `RawBreakEditor/Private/RbAssetBake_Player.cpp`, `RbAssetBake_Cue.cpp`, `Tools/unreal/editor/rb_make_player.py`, `rb_bake_cue.py`, `rb_import_body.py` (new), `Tools/unreal/capture_body.py` (new), `Tools/blender/body/**` (new), `Tools/feel/**`, `Art/Body/**`, `Config/DefaultInput.ini`; tests RbStrokeTests, RbStrokeMathTests, RbRawInputTests, RbCameraRigTests, RbCameraMathTests, RbCueTests, RbFeelTests, RbHumanMotionTests, RbBallInHandTests, new RbBodyTests, (PIE) RbFeelFlowTest, new RbBodyFlowTest; content `/Game/Generated/{Player,Cues,Body}/**`, `/Game/Characters/**` (the template mannequin, copied unchanged) | plan step | 19.4: H1-H12 (bridge seat on the physics cue axis, no penetration, bridge choice, grip, head leads / body follows, imperfections, chalking changes the tip only through visible twists, the real ball-in-hand hand, Eyes + Headcam captures, third-person rig, cost); every M1 / M2 stroke and feel test unchanged |
+| **M3-O** | The AI opponent in the game; match flow vs AI | `Ai/*` (new: `URbAiPlannerService`, `ARbOpponentCharacter`, `URbAiOpponentComponent`, `RbOpponentRoster` + the package's stroke driver / navigation), `Game/*` except `RbTestRoom.*` (`RbGameMode`, `RbMatchDirector`, `RbShooterState`, `RbTableSubsystem`), `Balls/*`, `Simulation/*`, `Replay/*`, `Interaction/*`, `Audio/*`, `Dev/RbCheatManager.*`, `Source/RawBreakAudioDsp/**`, `Tools/audio/**`, `RawBreakEditor/Private/RbAssetBake_Ball.cpp`, `Tools/unreal/editor/rb_bake_ball.py`, `rb_make_physics.py`, `rb_make_audio.py`, `rb_dev_m2e.py`, `Docs/audio/**`, `Docs/specs/audio.md`; tests RbBallTests, RbPlaybackTests, RbMatchTests, RbSimulationTests, RbLooseBallTests, RbMultiTableTests, RbAudio*, new RbAiTests, (PIE) RbMatchFlowTest, RbReplayTest, RbM1FlowTest, RbM1RackTest, RbLooseBallFunctionalTest, RbMultiTableFunctionalTest, RbAudio*, new RbAiMatchTest; content `/Game/Generated/{Physics,Balls,Audio,Ai}/**` | plan step; M3-H's rig API (frozen stub; the visual checks after M3-H is merged: O merges `main`); M3-G's `RbMatchRules::MakeMatchConfig` (stub = M2 behaviour) | 19.5: O1-O11 (service == serial `PlanShot` bitwise, `FinishNow`, no game-thread hitch, full matches vs all six profiles with every decision kind, what you see is what hits for the AI, the body flow, acknowledgements, URL options, M2 flows green, foley) |
+| **M3-G** | Game modes: 8-ball, 10-ball, calls, race-to-N, menus, settings fixes | `Modes/*` (new: `RbMatchRules`, `URbCallShotComponent` + the package's classes), `UI/**`, `Settings/**`, `Tools/unreal/editor/rb_make_title.py`, `rb_dev_m2d.py`, `Docs/specs/ui-ux.md`; tests RbSettingsTests, RbOverlayTests, RbUiTests, new RbModesTests, (PIE) RbMenuFlowTest, new RbModesFlowTest; content `/Game/Generated/Maps/L_Title*`, `/Game/Generated/UI/**` | plan step; M3-O's director additions (frozen stubs: `RequestSpot`, `OnDeclarationChanged`, `GetShooterKind`); M3-H's `URbBodyRigComponent::SetPointTarget` (stub) | 19.6: G1-G10 (config per mode bitwise M2 for practice / hot-seat, the diegetic call, full 8-ball and 10-ball racks, the venue match setup -> URL, key hints and overlay per mode, Alt+F4 and reduced-motion fixes, captures) |
+| **M3-V** | Venue polish + performance | `Venue/**`, `Tools/blender/rbbl.py`, `Tools/blender/common/**`, `Tools/blender/divebar/**` (incl. `db_build_all.py`: V adds / removes only its own lines), `Art/DiveBar/**`, `Tools/art/**`, `Art/Fonts/**`, `Tools/unreal/editor/rb_import_divebar.py`, `rb_make_divebar.py`, `rb_make_divebar_fx.py`, `rb_make_divebar_materials.py`, `rb_dev_m2b.py`, `Tools/unreal/capture_divebar.py`, `Tools/unreal/perf_divebar.py` (new), `Shaders/Private/Venue/*.ush`, `Config/DefaultScalability.ini`, the `[/Script/Engine.RendererSettings]` section of `Config/DefaultEngine.ini` (a block, like the audio block), `Docs/specs/venue-dive-bar.md`, `Docs/perf/m3/**`, `Docs/images/divebar/**`; tests RbVenueTests, (PIE) RbDiveBar*; content `/Game/Generated/Maps/L_DiveBar*`, `/Game/Generated/Venues/**` | plan step; M3-L's cloth albedo for the bands (re-checked at integration) | 19.7: V1-V9 (GPU p95 <= 16.7 ms on an idle GPU in the player view and V01..V09, A/B without visible loss, bands, the 12 prop families without grey boxes, the venue requests, captures) |
+| **M3-L** | Table realism round 2 | `Table/**`, the `ERbTablePart` enum block in `Core/RbTypes.h` + `RbTypes::ToString(ERbTablePart)` in `RbTypes.cpp` (append-only exception), `RawBreakEditor/Private/RbAssetBake_Table.cpp`, `Shaders/Private/*.ush` (top level), `Private/Math/RbCameraMath_Render.cpp`, `Game/RbTestRoom.*`, `Dev/RbLookDevCamera.*`, `Tools/unreal/editor/rb_make_materials.py`, `rb_bake_table.py`, `rb_import_table.py`, `rb_make_test_room.py`, `rb_m1_layout.py`, `rb_dev_m2l.py`, `Tools/unreal/capture_m1.py`, `capture_table.py`, `Tools/blender/table/**`, `Art/Tables/**`, `Docs/references/table-lookdev.md`, `Docs/images/m1/**`; tests RbTableTests, RbRenderMathTests, RbRoomTests, RbTableLookTests; content `/Game/Generated/{Tables,Materials}/**`, `/Game/Generated/Maps/L_M1_TestRoom*` | plan step | 19.8: L1-L8 (no rendered surface beyond the physics profile, detail geometry, cloth, reference-compared captures per round, cost, requests) |
+| **M3-INT** | Integration-owned (frozen during M3) | `RawBreak.uproject`, `Source/*.Target.cs`, every `*.Build.cs`, `Config/DefaultEngine.ini` (except the V and O blocks), `Config/DefaultGame.ini`, `Core/**` (except the L block), `RawBreak.h`, `RawBreakModule.cpp`, `Dev/RbHeadlessCaptureSubsystem.*`, `RbTestFlags.h`, `RbCoordsTests`, `RbContractTests`, `RbPieSmokeTest`, `RbM2IntegrationTest`, (new at integration) `RbM3IntegrationTest`, the rest of `RawBreakEditor`, `Tools/unreal/rbue.py`, `editor/rb_common.py`, `rb_make_all.py`, `rb_pipeline_proof.py`, `rb_bake_selftest.py`, `Docs/licenses/asset-ledger.csv`, `.gitignore`, `Docs/perf/m2/**`, `Docs/images/m2/**`, `Docs/images/m3/**`, this document | — | changed by the plan step (19.3) and the integration round (19.10) only |
+
+**Ownership boundaries that are easy to get wrong**
+
+* **M3-H / M3-O (the body).** H owns the rig: skeleton, meshes, materials, pose solver, IK, hands, chalk cube handling, gestures,
+  third-person locomotion animation from the owner's velocity. O owns the opponent *actor* (`ARbOpponentCharacter`: capsule,
+  movement, the navigation around the table, the waiting spot), its brain and its stroke timeline, and drives the rig only through
+  the frozen API of 19.3 (`BeginStance`, `EndStance`, `SetHumanState`, `PlayChalk`, `PlayGesture`, `SetCarriedBall`, `SetLookTarget`,
+  delegates). A missing rig feature is a request to H, never code in O's files that poses bones.
+* **M3-H / M3-O (the cue and the stroke contract).** The rendered cue pose is always `SampleHand` + the cue displacement (what you see
+  is what hits, R-04): for the player from the stroke component (H), for the AI from O's stroke driver. **The body never writes the
+  cue pose or the eye**; it follows them (H4 checks it). The stance fields of the stroke situation (`Bridge`, `BridgeLength`,
+  `BridgeToGrip`, `StanceDifficulty`, `ShortCue`) come from the stroke that is rendered: the stroke component (H, bridge solver and
+  IK) or the AI's planner decision (O); the director executes with the commit's values (plan step, 19.3).
+* **M3-O / M3-G (the director).** O owns `RbMatchDirector` / `RbGameMode` and implements every director behaviour, including what G
+  needs (`RequestSpot`, explicit calls in the flow, rack / respot sequencing). G owns the *rules configuration* of a setup
+  (`RbMatchRules::MakeMatchConfig`, called by the director since the plan step), the call / declare / spot-request input
+  (`URbCallShotComponent`), every screen-space text (overlay, decision / match cards, key hints, menus) and the settings. G reads the
+  director through its public getters and delegates and never edits O's files; O never formats UI text.
+* **M3-O / M3-G (the URL and the menu).** G's venue menu builds the URL of 19.3; O's `ARbGameMode::ParseMatchOptions` parses it; the
+  six opponents come from O's `RbOpponentRoster` (names, descriptions, character seeds) and are only *displayed* by G.
+* **M3-H / M3-G (pointing).** G decides what is selected while `C` is held (ball, pocket) and calls the player body's
+  `SetPointTarget`; H makes the body point the cue tip at it.
+* **M3-V / M3-L (the venue table).** The table in `L_DiveBar` is L's class with L's materials, placed by V's generator with the
+  layout values; V never edits table materials, L never edits the level. Exposure bands (V) are derived from L's measured cloth / rail
+  albedo (L reports it in `Docs/references/table-lookdev.md`). Perf (V) is measured with L's materials of the day; L keeps the table
+  materials within +0.3 ms (L6), the integration round re-measures the gate.
+* **M3-V / M3-H / M3-O (markers).** V places and tags the dive bar's waiting spots (`RbWaitSpot` on W1, W2) and makes the rail chalk
+  cubes H06a / H06b movable with the tag `RbChalkCube`; L does the same in the test room (`rb_make_test_room.py`). O and H only *find*
+  them by tag (with a computed fallback when a level has none).
+* **M3-O / M3-H (audio).** O owns `Audio/**`. The rig fires `OnFootstep`, `OnChalkTwist` and `OnActivityFinished`; O's audio binds
+  them for both bodies (the player's footsteps keep coming from the camera rig's `OnFootstep`). No sound code in H's files.
+* **M3-G / M3-V (settings rows).** G owns the settings code and rows; V owns `DefaultScalability.ini` values (the quality rows behind
+  the presets). A V change that breaks G's settings tests (UX-T02 read-backs) is fixed by V with G's agreement at the merge.
+
+**Waves and merge order.** All five run in parallel from the stubs; on the shared machine H, O and G are code-heavy (NullRHI tests),
+V and L render-heavy (at most three rendering packages at once; V's final perf run needs an idle GPU). **Merge order: M3-L, M3-V,
+M3-H, M3-G, M3-O** (each after its reviewer). O merges `main` into its branch after H's merge to do its visual checks (O6) with the
+real rig; G's and O's cross checks (the opponent's acknowledgement, the VsAi menu flow) run in the integration round.
+
+### 19.3 Contracts and stubs of the plan step
+
+Everything below is committed with the stubs (`TODO(M3-x)` markers), compiles, and leaves every M2 test green.
+
+| Area | What | Implemented by |
+|---|---|---|
+| `Core/RbTypes.h` (M3-INT) | `ERbMatchMode::VsAi` (appended); `ERbAiProfile` (Tourist, BarRegular, LeaguePlayer, LocalHustler, RoadPlayer, TouringPro = `rb::human::AiProfileId`); `ERbBridgeType` (Closed, Open, Rail, Elevated, Mechanical = `rb::human::BridgeType`); `ERbCallPolicy` (Casual = `CallMode::ObviousAssist`, EveryShot = `CallMode::Explicit`); `RbTypes::ToCore` / `FromCore` / `ToString` / `ParseAiProfile` | plan step (complete; `RawBreak.Unit.Contracts.M3Enums`) |
+| `Core/RbAssetPaths.h` (M3-INT) | `BodyDir` `/Game/Generated/Body` (H), `MannequinDir` `/Game/Characters/Mannequins` (H, Epic template content), `AiDir` `/Game/Generated/Ai` (O); tags `RbWaitSpot` (opponent waiting spots: V in the dive bar, L in the test room), `RbChalkCube` (a movable chalk cube the body may use: V, L), `RbOpponent` (O's opponent actor) | plan step |
+| `RawBreak.Build.cs` (M3-INT) | private `AnimationCore` (`TwoBoneIK.h`), `AnimGraphRuntime` (H: procedural IK in C++; **no Control Rig graphs**: they cannot be authored headless reliably), `MediaAssets` (V: the TV broadcast's media player / texture opened at runtime) | plan step |
+| `DefaultGame.ini` (M3-INT) | `DirectoriesToAlwaysCook` + `/Game/Characters` (the mannequin is loaded by path) | plan step |
+| Input (`Input/RbInputSetup`, H's file) | three new actions with the ui-ux 3.4 / 9.4 / 9.5 / 9.12 keys: **Call** `C` (held: Triggered while held, Completed on release; G), **Declare** `X` (pressed: push-out / safety; G), **Chalk** `G` (pressed: chalk now; H). 19 actions; `RawBreak.Unit.Input.MappingContext` updated. Q (CycleOption) is not rebound: G's component also listens to it (pocket cycling while down, spot request in hand) | plan step (actions + mappings); handlers H / G |
+| `ARbPlayerController` (H's file) | owns `URbCallShotComponent` (`GetCallShot()`), created in the constructor; `SetupInputComponent` calls its `BindInput(Input, InputSetup)` | plan step (wiring); behaviour G |
+| `Body/RbBodyTypes.h`, `Body/RbBodyRigComponent.h` (H) | the **rig API** (below) | H (stub: stores the inputs, idles) |
+| `Game/RbMatchDirector.h` (O) | `FRbMatchSetup::Opponent` (`ERbAiProfile`, default BarRegular), `FRbMatchSetup::Calls` (`ERbCallPolicy`, default Casual); `ERbShooterKind` + `GetShooterKind(Player)` (VsAi: rules player 1 is the AI; implemented), `IsAiToAct()`, `MakeStrokeContextFor(Player)`, `RequestSpot()`, `ChooseBreaker(Breaker)`, `ChalkTip(Player, Twists, Sweep)`, `SetInstantAutoChalk(bool)` / `IsInstantAutoChalk()`, `OnDeclarationChanged(Player, Declaration)` (broadcast by `SetCalledShot` / `SetShotKind`; implemented) | O (stubs refuse / return defaults) |
+| `URbMatchDirector::StartMatch` / `SubmitStroke` (O's file) | the rules configuration comes from `RbMatchRules::MakeMatchConfig(Setup, Seed, RulesTable)` (G's file; the stub is the M2 logic moved, bitwise the same config); `SubmitStroke` executes with the commit's stance fields (`Bridge`, `BridgeLength`, `BridgeToGrip`, `StanceDifficulty`, `ShortCue`; a default commit carries the M2 defaults, so nothing changes until H fills them) | plan step (hooks); G / H / O fill them |
+| `Modes/RbMatchRules.h`, `Modes/RbCallShotComponent.h` (G) | `MakeMatchConfig`; the call component (`BindInput`, `HandleCall(bHeld)`, `HandleDeclare()`, `HandleCycle(Direction)`, `GetState()`, `GetSelectedBall/Pocket`) | G |
+| `Ai/RbAiPlannerService.h`, `Ai/RbOpponentCharacter.h`, `Ai/RbAiOpponentComponent.h`, `Ai/RbOpponentRoster.h` (O) | the planner service API, the opponent actor (body = H's rig, own cue), the brain, the roster of six opponents (profile, name, description, character seed, body appearance) | O (stubs: the service refuses, the roster lists the six profiles by their profile names) |
+| `rb_make_all.py` (M3-INT) | `rb_import_body.py` (H) before `rb_make_player.py`; the script exists as a stub that logs "not implemented yet" | plan step |
+| `db_build_all.py` (V's from M3 on) | `body/bd_build_all.py` (H) after the table bodies (missing = skipped) | plan step |
+| `rbue.py` (M3-INT) | `owners` knows the M3 table (19.2) incl. the blocks (`DefaultEngine.ini`: renderer section -> V, audio block -> O; `RbTypes.h/.cpp`: `ERbTablePart` -> L); the selftest checks every generator that **exists on disk** against the regeneration lists; ledger source `epic` with the only licence `UE-EULA` | plan step |
+
+**The URL contract** (`ARbGameMode::ParseMatchOptions`, O; built by G's venue menu): `?Mode=Practice|HotSeat|VsAi`
+`?Discipline=NineBall|EightBall|TenBall|StraightPool` (the M1 key `?Game=` stays an alias, but it is also the ENGINE's game-mode
+option - "Failed to load game mode 'NineBall' specified by URL options", 18.13 - so every new caller uses `?Discipline=`)
+`?Race=<n>` `?Opponent=Tourist|BarRegular|LeaguePlayer|LocalHustler|RoadPlayer|TouringPro` `?Calls=Casual|EveryShot`, plus the M1 / M2
+keys (`?Lag ?Seed ?Attr ?Pressure ?Noise ?Rate ?P1 ?P2`) and O's test keys `?AiThink=<scale>` (0 = act as soon as decided) and
+`?AiDeadline=<s>` (wall-clock escape, 0 = off).
+
+**The rig API** (`Body/RbBodyRigComponent.h`, frozen for O and G; additions allowed):
+
+```
+URbBodyRigComponent : USceneComponent            one per body (the player's pawn, the opponent)
+  SetView(FirstPerson | ThirdPerson)             first person: the head hidden from the owner's camera, shadows + reflections kept
+  SetAppearance(FRbBodyAppearance)               Manny / Quinn, shirt / trouser / skin colours (plain dark long-sleeve shirt default)
+  SetHandedness(Right | Left)
+  SetTable(ARbTable*) / SetCue(ARbCue*)          cloth plane and rails for the finger contacts; the cue in the hands
+  SetEyeTransform(EyeWorld, ERbCameraPreset)     first person: the camera rig's eye each frame (the head follows it; Eyes = between the
+                                                 eyes, Headcam = the mount on the head)
+  SetLookTarget(World, bActive)                  third person: where the head looks (studying the table, watching a shot)
+  BeginStance(FRbStanceRequest) / EndStance()    into / out of the stance: bridge type + length, grip distance, the shot in world space,
+                                                 a posture seed; OnStanceReady when the bridge is planted
+  SetHumanState(FRbBodyHumanState)               pressure, bridge tremor (HandPose tremor), grip tension (white knuckles), bridge slip
+                                                 (creeping fingers), sweat
+  PlayChalk(Twists, Cube) -> OnChalkTwist(i)     per visible twist (the owner then calls URbMatchDirector::ChalkTip for that twist)
+  PlayWipeHands() / PlayRollCue()                HF-17 wipe on the jeans, HF-30 / 31 roll test on the cloth
+  PlayGesture(Nod | PointAt | ShakeHead | WaveAside | Shrug, TargetWorld)
+  SetPointTarget(World, bActive)                 the cue tip points at it (the diegetic call, G)
+  SetCarriedBall(BallCentreWorld, RadiusCm, bCarrying)   the right hand holds the ball (ball in hand, a picked-up ball)
+  GetActivity() / IsBusy() / IsInStance() / GetBridgeSeat(Out) / GetGripPoint(Out)
+  OnStanceReady, OnActivityFinished(Activity), OnChalkTwist(Index), OnFootstep(FRbFootstep)
+```
+
+**The planner service API** (`Ai/RbAiPlannerService.h`, O): `URbAiPlannerService` (a tickable world subsystem) takes an
+`FRbAiRequest` (table index, the shared `FRbTableContext`, a filled `rb::ai::PlannerInput`, `PlannerConfig`, `MaxComputeSeconds`),
+returns a request id (0 = refused, busy), publishes `GetProgress` (a snapshot taken between stages) and fires
+`OnDecisionReady(RequestId, PlannedDecision)` on the game thread; `Cancel()`; `SetWorkerCount(N)` (tests); static `PlanBlocking`
+(the serial `rb::ai::PlanShot`, the reference of O1).
+
+### 19.4 M3-H — first-person arms and hands, the body rig
+
+**Body.** The Epic template mannequin of UE 5.8 (`TemplateResources/High/Characters/Content/Mannequins`: `SKM_Manny_Simple`,
+`SKM_Quinn_Simple`, `SK_Mannequin`, the control-rig assets are not used) is copied **unchanged** to `/Game/Characters/Mannequins`
+by `rb_import_body.py` (the template feature pack's own path, so the assets' internal references stay valid; ledger rows source `epic`,
+licence `UE-EULA`). Everything RAW BREAK-specific lives in `/Game/Generated/Body`: the body materials (Substrate: skin with SSS on the
+hands, a plain dark long-sleeve shirt to the wrists with a soft cuff edge, dark jeans, shoes; the region masks come from the bone
+weights, baked into a generated mesh copy or a mask texture by `rb_import_body.py` / `Tools/blender/body/`), a cuff mesh if the mask
+edge reads as paint. One full body is placed in the world at real scale (plan 5.1): first person = the same body with the head and
+neck hidden from the owner's camera (`bOwnerNoSee` + `bCastHiddenShadow`, or the 5.8 world-space representation; whichever keeps the
+head in Lumen HWRT reflections and shadows: verified, H9), never First Person Rendering FOV / scale tricks. MetaHuman replaces the
+mesh later; the rig API stays.
+
+**Pose solver (pure C++, `FRbBodyPoseSolver`, no UObjects).** Inputs: the eye (from the camera rig), the cue pose (tip dome
+centre + direction, from `ARbCue`), the bridge plan, the stance seed, the human state; output: the bone transforms of the mannequin
+skeleton, applied by the rig (`UPoseableMeshComponent` or a native `UAnimInstance` proxy; H decides). Layers: (1) **stance**: feet
+planted around the shot (at least one foot on the floor, never under the table body: the table's outer boundary from
+`rb::TableGeometry` + the cabinet's bounds), hips from the reach to the bridge, spine bent so the head reaches the eye; (2) **head**:
+the head bone is placed so the camera sits at the eye point of the preset (Eyes: the cyclopean eye point; Headcam: the mount on the
+forehead) - **the head leads, the body follows**: the torso and shoulders follow the head with a critically damped lag (60-150 ms),
+so `RbHumanMotion`'s posture changes, breathing and sway move the body through the head, never the other way; (3) **arms**: two-bone
+IK (`AnimationCore::SolveTwoBoneIK`) to the bridge palm and the grip with elbow pole vectors (grip elbow above the cue plane:
+pendulum stroke, forearm vertical at contact); (4) **hands**: authored finger poses per bridge type and grip (data in C++, from
+reference photos listed in `Docs/references/`), finger contacts snapped to the cloth plane (`z = 0` of the table frame) or the rail
+cap top, the index finger / thumb forming the seat of the cue.
+
+**Bridge choice (`RbBridgeSolver`, pure, plan 5.3 thresholds).** From the stroke situation at the get-down: **rail** when the bridge
+point (L_b behind the cue ball along the axis) lies over the cushion / rail (also the planner's rule: within 16 cm of a cushion),
+**elevated** when a ball lies under the bridge point or z_bridge > 80 mm, **open** (V) for z_bridge 30-70 mm on power / follow strokes
+and **closed** (loop) for 40-80 mm otherwise (seeded per shooter preference), **mechanical** beyond reach from a legal foot position
+(the rest exists in M3 as a pose; a mechanical-bridge prop is later). The choice and `BridgeLength` / `BridgeToGrip` /
+`StanceDifficulty` (HF-13, from the reach) / `ShortCue` go into the stroke component's `FRbStrokeContext::Situation` at the get-down,
+so `SampleHand` and `ExecuteStroke` use them (the bridge factor `m_br0` of HF-12 is real physics input). The AI passes the planner's
+`Decision.Stroke.Bridge` / `Decision.Situation` instead.
+
+**The cue in the bridge.** The cue's axis while down is the physics axis (`SampleHand` + displacement). The bridge hand is planted
+at the start of the address (the seat at `L_b` from the tip at the address pose) and stays planted; the seat follows only the
+slow drift of the axis it must cradle (an open bridge's V, a closed bridge's loop: the axis stays in the seat by sliding, a real hand
+does the same); the grip hand follows the cue displacement exactly. Practice strokes, the pause and the final stroke slide the cue
+through the seat. Over the follow-through the bridge stays planted.
+
+**Hand imperfections (human-factors, all deterministic from the shot's inputs, never random per frame).** Bridge tremor: the
+bridge fingers tremble with the HandPose tremor share scaled to the bridge (`TremorRight / Up` at the tip x `L_b / (L_b + R)`), so
+it grows with `StrokeSituation::Pressure` (HF-05, g up to 5) and the cue axis still sits in the seat; creeping fingers (HF-12):
+when the stroke's intended speed exceeds the bridge's slip speed `V_b` (HF 3.4 with the shooter's Bridge Stability), the bridge
+fingers creep 2-8 mm toward the ball during the final forward stroke and the cue rattles (audio request to O); white knuckles
+(HF-14): a material scalar `GripTension` 0..1 from the HandPose per-shot grip tension (pressure x Nerve), whitening the grip hand's
+knuckles; wiping the hands on the jeans (HF-17): seeded after a shot when the pressure was high (> 0.5) or after a miss, never while
+down or during the other player's stroke; rolling the cue on the cloth (HF-30 / 31): the A-mode roll test (1-2 s) at the first
+pickup of a cue whose bow is not known (`CueBodyState::WarpKnown`), the cue rolling under the palm with the bow's wobble.
+
+**Chalking (HF-22 "reload").** A chalk cube on a rail (`RbChalkCube`-tagged actor nearest to the shooter; fallback: the rig spawns one
+on the nearest rail cap): picked up, twisted, put back. A mode (default): the habitual twists (`rb::human::AutoChalkTwists` /
+`PerformChalking`) when the player stands at the table at the start of his visit; R mode: `G` = one more chalking at any time while
+standing (each press twists once, 0.4 s). Each visible twist fires `OnChalkTwist`; the pawn calls `URbMatchDirector::ChalkTip(Player,
+1, Sweep)` for it, so the tip state changes **only** through visible twists; the director's instant M1 auto-chalk is switched off by
+`SetInstantAutoChalk(false)` when the body chalks (headless tests without a body keep the M1 behaviour). The cue is visible in the
+hand while standing (a new `ARbCue` drive mode "Body": the rig poses it while not down; the stroke component and the playback keep
+their drives).
+
+**Ball in hand.** M2's stand-in meshes (`SM_RbHand_Carry`, `SM_RbArm_Carry`) are retired: `URbBallInHandComponent` keeps its API and
+states (M2-E's `BeginCarry` included) and sets the body's `SetCarriedBall`; the right hand holds the ball, the arm comes from the body.
+
+**Acceptance (`RawBreak.Unit.Body.*`, `RawBreak.Functional.Body.*`, captures):**
+
+| # | Test | Pass |
+|---|---|---|
+| H1 | Bridge seat: 40 seeded situations per bridge type (open, closed, rail, elevated) on both tables (9-ft, 7-ft coin-op) | the physics cue axis passes through the bridge seat: distance <= 1.0 mm at the contact frame, <= 2.0 mm over the whole address incl. practice strokes; the seat at `L_b` +- 5 mm from the tip |
+| H2 | No penetration (sampled bone capsules of the hands / fingers / forearms / sleeves vs the bed plane, the rails' rb profile and every ball) | fingertips on the cloth 0..2 mm above `z = 0` (rail bridge: on the rail cap +- 2 mm, never inside the cushion); no body part below the cloth or inside a rail; >= 5 mm to every ball (HF-60); the elevated bridge's palm >= 5 mm above the ball under it |
+| H3 | Bridge choice | `ChooseBridge` on 20 constructed cases (rail within 16 cm, ball under the bridge point, z_bridge 30 / 60 / 85 mm, out of reach) as specified; the chosen type, `BridgeLength`, `BridgeToGrip`, `StanceDifficulty` reach `ExecuteStroke` (the director's executed stroke uses the bridge of the commit) |
+| H4 | What you see is what hits | every M1 / M2 stroke and feel test unchanged (bitwise frame-split test, `SampleHand == ExecuteStroke` at contact, F1-F9); a static check: nothing in `Body/` calls `ARbCue::SetPose*` / `SetDrive` (except the standing "Body" drive) or a camera-rig setter |
+| H5 | Grip | the grip hand closed on the butt at `L_b + L_bg` from the tip; hand-to-cue offset constant within 1 mm over a full stroke; forearm within 10 deg of vertical at contact (pendulum) |
+| H6 | Head leads, body follows | during 20 seeded get-downs / stand-ups the camera sits at the preset's eye point of the head within 5 mm / 1 deg every frame; the chest's motion lags the head's by 60-150 ms (cross-correlation); 30 / 60 / 144 fps paths within 1 mm; F6 / F7 of 18.3 unchanged |
+| H7 | Imperfections | bridge tremor RMS x >= 2 from pressure 0 to 1 with the axis still in the seat (H1 bound); creep 2-8 mm only when the intended speed > `V_b` (none below); `GripTension` follows the HandPose grip tension (0 at pressure 0, > 0.5 at pressure 1 with Nerve 25); wipe only standing after a high-pressure shot or a miss (seeded, reproducible); roll test only for a cue with an unknown bow, 1-2 s |
+| H8 | Chalking | the tip coverage after a visible A-mode chalking equals `PerformChalking` with the same twists bit for bit; an interrupted chalking (stand up after k twists) keeps exactly k twists (HF-B04); `G` twists once per press; the cube ends on a rail; durations 0.4 s per twist |
+| H9 | Eyes and Headcam captures (`Tools/unreal/capture_body.py`, strict, inspected) | `Docs/images/dev/m3h/{eyes,headcam}_{closed_centre,open_break,rail,elevated,standing_cue,chalking,ball_in_hand}.png` in the test room and `{eyes,headcam}_{closed_centre,rail}_divebar.png`: both hands in frame where a player sees them, dark sleeves to the wrist, no arm geometry within 5 cm of the eye, arm shadows on the cloth, no visible gap or overlap at the bridge seat; a ball close-up shows the player's body (head included) in the reflection |
+| H10 | Third person | the same rig with `SetView(ThirdPerson)` in a look-dev camera: `opponent_{standing,closed,rail,elevated,chalking,walking}.png`; feet on the floor, at least one foot down in every stance, nothing inside the table cabinet |
+| H11 | Ball in hand | F5 green with the body (placed position == preview within 0.1 mm; the hand never jumps); no stand-in mesh used at runtime |
+| H12 | Cost | two bodies (player + opponent) <= 0.6 ms GPU at 1440p High (the 9.2 / venue 11.2 rows: 0.3 per body) and <= 0.5 ms game thread for both solvers (perf recording with the opponent spawned by a dev command) |
+
+Also (M2-F's open doubts, 18.13): the stand-in sleeve is gone (H11); the faint contact preview of the ball in hand becomes readable
+(the real hand's shadow + the preview); a non-tautological Eyes-stabilisation test (the view rotation from bob / breathing measured
+through the camera, not the formula); P3 aim through real Enhanced Input key / mouse events (`InjectStrokeKey`-style injection of the
+Look action), not only `HandleLook`.
+
+### 19.5 M3-O — the AI opponent in the game
+
+**Planner service (`URbAiPlannerService`, world subsystem).** One `rb::ai::PlannerScratch` per running decision and N
+`rb::ai::PlannerWorker`s (N = clamp(worker threads - 1, 1, 6)), allocated on the first request and reused (no allocation per
+decision, A-AI-9). The protocol of architecture.md 7.6 on UE::Tasks with **background** priority (never competing with the game /
+render threads): `Begin` on a worker task (the serial generation), then per stage `JobCount()` jobs spread over the N workers (job j on
+worker j mod N; distinct jobs concurrently), join, `Advance` on a worker task; after every `Advance` the worker publishes a
+`PlannerProgress` snapshot (lock + copy) that the game thread reads in its tick. **Wall-clock escape**: when a decision has computed
+longer than `MaxComputeSeconds` (cvar `rb.Ai.MaxComputeSeconds`, default 5 s; 0 = off), no further jobs are handed out, the running
+ones finish, and `FinishNow` decides with what is known (A-AI-14 semantics; logged as non-deterministic, never used in tests). The
+game thread never waits: the decision is handed over in the tick after it finished (`OnDecisionReady`). `Deinitialize` / `Cancel`
+stop handing out jobs and wait for the running ones on the calling thread (bounded by one job).
+
+**Input.** O fills `rb::ai::PlannerInput` on the game thread from the director: the table context's geometry / physics / balls,
+`MatchConfig` + `MatchState` (copies), `Self` = the AI's rules player, the character (`GetAiProfile(Profile)` + the roster's
+character seed), `GetPlannerProfile`, `OpponentModelFromAttributes` of the human (hot-seat guest attributes 50 unless `?Attr=`), the
+AI's equipment (its own `TipState`, `CueBodyState`, cue: a house cue of the venue for the dive bar), `HumanParams`, the situation and
+pressure inputs (stakes friendly / match), the REAL shot's `NoiseKey`, `Money = LeaguePrizeOnly` (no money mode in M3: the hustler
+plays at his rated strength).
+
+**Decisions.** `AwaitShot` (incl. break, push-out windows, ball in hand), `AwaitDecision` with the AI deciding (options), `Lag` (the AI
+lags its ball; the director still simulates both lag strokes together), `LagWinnerChooses` (`ChooseBreaker`), `RequestSpot` (rules 4.4:
+`URbMatchDirector::RequestSpot`, then a new decision). Declarations come completed by the planner (calls in 8-ball / 10-ball / 14.1,
+push-out, safety) and go through `SetShotKind` / `SetCalledShot` (`OnDeclarationChanged` -> G's lines, the body's pointing gesture).
+
+**Execution (what you see is what hits).** `rb::human::SyntheticHand(Decision.Stroke, Character, Decision.Situation, R, NoiseKey,
+History, Params)` -> the AI's `IntendedStroke`; O's stroke driver builds the cue displacement timeline from it (practice strokes until
+`ForwardStart - PauseDuration`, the pause, the final stroke reaching the planned speed at `t_c` with `ContactAcceleration`) and poses the
+AI's cue with `SampleHand(Intended, the AI's context, t)` + displacement; at `t_c` it commits an `FRbStrokeCommit` (Intended, the
+context of `MakeStrokeContextFor(AI)` with the planner's stance fields, `ContactPose`) through `SubmitStroke`. The AI's per-shot draws
+advance only its own noise history. Ball in hand: the body carries the cue ball to `CueBallPlacement`, sets it down, `PlaceCueBall`.
+Chalking: the body chalks after its own shots (habitual twists, `ChalkTip` per twist).
+
+**The opponent at the table (`ARbOpponentCharacter` + `URbAiOpponentComponent`).** A character with H's rig in third person
+(appearance from the roster), its own `ARbCue`, spawned by the game mode for a VsAi session at its waiting spot (`RbWaitSpot`-tagged
+target point nearest to the table; fallback 1.2 m off the long rail opposite the player start). States: Waiting (leans at the spot,
+watches the player's shots: look target = the cue ball) -> WalkingToTable (on its turn; a path around the table at 0.5 m from the
+rails, the shorter way round, never through the table or the player's capsule, 1.4 m/s, pauses when the player blocks the way and asks
+him with a `WaveAside` gesture) -> Studying (walks along the table toward `Progress().BestCueBall`, looks along the best shot; **think
+time** per profile, seeded per shot and longer when `Reasoning.BestPotChance` is low: tourist 2-5 s, bar regular 3-6 s, league player
+4-8 s, hustler 4-9 s, road player 5-11 s, touring pro 5-12 s, never shorter than the planner) -> Placing (ball in hand) -> GettingDown
+(`BeginStance` with the planner's bridge; `OnStanceReady`) -> Stroking (the driver) -> Watching (stays down, then stands up after the
+balls stop) -> Chalking -> next shot or WalkingBack. The player's stroke component stays Locked during the AI's turn; walking and looking
+stay possible; the player's head reacts to the AI's shot like to his own (H's watching reactions, bound to the table's playback).
+
+**Acceptance (`RawBreak.Unit.Ai.*`, `RawBreak.Functional.Ai.*`):**
+
+| # | Test | Pass |
+|---|---|---|
+| O1 | Service == serial | 30 positions (9-ball, 8-ball, 10-ball; break, ball in hand, push-out window, an option, the lag, a spot request): the service's decision with 1, 3 and 6 workers and no deadline == `PlanBlocking` bitwise (kind, stroke, declaration, placement, breaker, option) |
+| O2 | `FinishNow` | a 1 ms deadline returns a valid decision (A-AI-14), logged; `Cancel` during every stage and a map change during a decision: no crash, no leak, nothing delivered afterwards |
+| O3 | No hitch | while a touring pro decides (the costliest position of O1), no game-thread call of the service > 1 ms; frame-time p95 of a perf recording during the decision within +1 ms of the idle recording |
+| O4 | Full matches (PIE, headless, `?Rate=0`, `?AiThink=0`, seeded) | a 9-ball race to 2 against **each of the six profiles** to the end (the human side scripted through the director's API by a planner); across the seeds every decision kind occurs at least once: lag, breaker choice, break, pot, safety, push-out, an option, ball in hand, a spot request (a constructed 8-ball position, rules 4.4), called shots (8-ball and 10-ball races to 1); never an invalid declaration, never a stuck turn |
+| O5 | What you see is what hits (AI) | the AI's rendered cue pose at contact == `ExecuteStroke`'s executed pose (1e-9 rad / 1e-6 m); the commit carries the AI's attributes, equipment and noise stream; the human's noise history is untouched by the AI's shots |
+| O6 | The body flow (PIE, both venues; captures after H's merge) | the opponent walks from its spot to the shot and back, never intersects the table, a ball or the player's capsule, studies for its seeded think time, gets down with the planner's bridge, strokes, stands up, chalks, waits; `Docs/images/dev/m3o/{waiting,studying,down_closed,down_rail,chalking,placing_ball}.png` (strict, inspected) |
+| O7 | Acknowledgement | a human call (`OnDeclarationChanged` of rules player 0) -> the opponent nods within 0.3-0.8 s (rig gesture, looking at the called pocket); the AI's own call -> `PointAt` the pocket before it gets down |
+| O8 | URL and roster | 19.3's keys parsed (bad values keep the defaults); a `?Discipline=` start logs no "Failed to load game mode"; the roster lists six opponents with names (the dive bar's regulars of venue-dive-bar 1.2 for four of them, fictional names for the road player and the touring pro), descriptions and fixed character seeds |
+| O9 | M2 flows | MatchFlow, Replay, M1Flow, M1Rack, LooseBall, MultiTable, DiveBar.Rack, M2Integration green; practice and hot-seat unchanged |
+| O10 | Foley | the opponent's footsteps (AU-65) and the chalk twists of both bodies (AU-55, synthesised like M2's footsteps) are scheduled from the rig's delegates; present in a recorded VsAi rack (event log vs onsets) |
+| O11 | Docs | `audio.md` 7.3 states that `IsPausedMix` follows the world pause live (18.13 request of M2-C) |
+
+### 19.6 M3-G — game modes: 8-ball, 10-ball, calls, race-to-N, menus
+
+**Rules configuration (`RbMatchRules::MakeMatchConfig`).** Practice and hot-seat stay bitwise the M2 configuration (WPA preset of
+the discipline, `InputMode::Assisted`, calls `ObviousAssist`, race unbounded in practice). VsAi: the WPA preset, race-to-N
+(`?Race=`), calls by the setup's policy (`Casual` -> `ObviousAssist`, `EveryShot` -> `Explicit` for 8-ball, 10-ball and 14.1; 9-ball
+has no calls), the preset's break order and spotting. Every rules option stays a `RulesConfig` value (no rules code in the game).
+
+**The diegetic call (`URbCallShotComponent`, ui-ux 9.4).** Standing, `C` held: the ball nearest the view ray inside a 3 deg cone is
+selected (ties: nearest to the camera), then looking at a pocket inside a 6 deg cone selects the pocket; releasing `C` on a pocket
+calls `SetCalledShot(ball, pocket)`; releasing elsewhere cancels. While `C` is held the player's body points the cue tip at the
+selection (`SetPointTarget`, H). Down: `Q` / `E` cycle the pocket for the ball the cue aims at (ghost-ball target from the aim
+direction). 9-ball: "No calls in 9-ball" (subtitle, once). `X` toggles the one declaration the rules allow now (push-out, safety:
+`GetShotConstraints`), standing only. In hand with `ShotConstraints::MayRequestSpot`, `Q` asks for the spot (`RequestSpot`). The
+opponent acknowledges (O7); the mandatory line shows the call ("Called: 3 -> corner, foot right"; pocket names from the shooter's
+side, ui-ux 9.4).
+
+**Presentation (overlay, cards, hints; ui-ux 9.1-9.15, discreet).** Open table / group assignment as one match line ("Open table",
+"You: solids 1-7 · Nina: stripes 9-15"); the call as a mandatory line while down in explicit mode ("No call yet - [C] call your
+shot" when missing); the opponent's name and profile in the title; the AI's decisions as a 3 s mandatory line ("Big Lou: I'll shoot
+it."); the decision card for 8-ball break options and 10-ball pass-back; rack over / match over cards (9.15: "Nina wins 5:3", Confirm =
+next rack / rematch, Esc = pause -> quit to title); per-mode key hints (`[C] Call`, `[X] Push out` / `Safety`, `[Q] Ask for the spot`,
+`[G] Chalk`, only when possible now).
+
+**Venue menu (title screen, ui-ux 6.3 list style).** Venue -> Practice / Hot-seat / **Match vs AI**; the match setup: game (9-ball,
+8-ball, 10-ball), race to (1-11, default 5; practice: none), opponent (six, from O's roster: name, profile, one-line description),
+calls (Casual / Every shot); Start -> `ARbTitleGameMode::MakeVenueUrl` with 19.3's keys. Hot-seat keeps its M2 rows plus game and race.
+
+**Settings fixes (18.13 requests of M2-D).** Changes are saved when the application quits while a menu is open (Alt+F4 / window
+close: `FCoreDelegates::OnPreExit` or the viewport's close request saves pending changes); the reduced-motion switch keeps a backup of
+the motion rows it overrides and restores them when switched off, also across a restart.
+
+**Acceptance (`RawBreak.Unit.Modes.*`, `RawBreak.Functional.Modes.*`, UI tests):**
+
+| # | Test | Pass |
+|---|---|---|
+| G1 | Config | practice / hot-seat configs equal M2's field by field (all four disciplines); VsAi: race, calls per policy (8-ball / 10-ball / 14.1 Explicit with EveryShot), WPA break order |
+| G2 | Call selection | unit: 3 deg / 6 deg cones, ties, release elsewhere cancels, 9-ball refusal, pocket cycling down; functional: standing, C held, look at the 3 then at the foot-right corner, release -> `GetDeclaration()` = 3 / foot-right corner, mandatory line shown; `X` push-out only in the window; `Q` spot request only with `MayRequestSpot` |
+| G3 | 8-ball rack (scripted, practice) | open table line, group line after the first legal pot, the 8 called, the 8 in an uncalled pocket loses, 8 on the break -> the WPA options card, a scratch on the 8 loses |
+| G4 | 10-ball rack (scripted) | every pot called (explicit); an uncalled pot -> "Shoot from here / Pass it back" card; push-out after the break; the 10 on the break is spotted |
+| G5 | Menu -> URL | every combination of the match setup gives the 19.3 URL; MenuFlow: title -> dive bar -> Match vs AI, 8-ball, race to 2, Bar regular -> the map starts with those options (the full VsAi start is an integration check after O) |
+| G6 | Hints and overlay | `FRbKeyHintsModel` per discipline / phase (call hints only where calls are required, push-out only in the window, spot request only when allowed, chalk while standing); overlay model texts for open table, groups, calls, the AI's decision, match over |
+| G7 | Settings | a settings change followed by an `OnPreExit` without closing the menu is in `GameUserSettings.ini` after a restart; reduced motion on -> off restores the previous rows exactly (also after a restart) |
+| G8 | UX | UX-T05 / T07 / T09 for the new screens and rows (EN) |
+| G9 | Captures | `Docs/images/dev/m3g/{venue_match_setup,call_pointing,called_line,groups_line,decision_8ball_break,match_over,key_hints_8ball}.png` (`--show-ui`, strict, inspected) |
+| G10 | M2 menus | MenuFlow, PauseMidShot, `Unit.UI.*`, settings tests green |
+
+### 19.7 M3-V — venue polish and performance
+
+**Performance (the M2-A9 gap: GPU mean 25.0 / p95 26.6 ms under foreign load).** First an **idle-GPU baseline** (owner apps closed,
+no other agent rendering; `host.gpu_busy_before_percent` <= 10), then the profile: `stat gpu`, `ProfileGPU` (one frame per view),
+Unreal Insights (`-trace=gpu,cpu,frame`), per pass before / after in `Docs/perf/m3/divebar_profile.md`. Levers in order of "no visible
+cost": shadow casting only where a shadow is visible (36 light components; venue 11.3 allows 9 shadowed on High), VSM cache
+friendliness (no per-frame invalidation: static movers, the fan's blades already cast no shadow), volumetric shadows only on the key
+bulbs / neon proxies / headlight (4.7), light attenuation radii fitted to the room, Lumen settings in the level's post-process volume
+(final gather / reflection quality, `MaxRoughnessToTrace`, translucency reflections only where seen), translucency (back-bar bottles
+and glasses: opaque proxies beyond the front row, venue 11.2 lever), Nanite overdraw / masked materials, the fog grid (8 -> 12 px is
+the documented lever), neon proxy light counts and source textures. Every lever that changes pixels gets an A/B. Project-wide
+renderer settings live in V's renderer block of `DefaultEngine.ini`, quality rows in `DefaultScalability.ini` (High = the 3070 Ti
+tier; Epic / Cinematic are never lowered to reach the gate, decisions 2026-09-27).
+
+**Exposure bands (VDB-T2, the 18.13 request).** The 4.5 bands were set with the grey-box cloth; M2-L's real cloth is darker (V04
+measured 6.04 against 7.8-8.4). V re-derives each band from the VDB-T1 lux and the measured albedos (L reports cloth / rail albedo),
+documents the derivation in venue-dive-bar 4.5 and fixes the light where the scene (not the band) is wrong.
+
+**The ~20 grey-box elements of 18.13** at M2-B quality (Blender generators with asserted spec dimensions, VDB-T4; the 3 mm rule;
+`MI_DB_*` materials with Age; ledger rows): radiator (M19), draft curtain (M20), walk-off mat E02 + anti-fatigue mats E05 + bar mats
+C04 **with collision** (loose balls rest on them: `RbVenueBlock`-style collision for loose balls, `PM_RbSurface_Rubber`), ATM M09 with
+a real screen (text UI from `Tools/art/text_textures.py`, 150 cd/m^2, not clipping), the coolers M05 with contents C03 (bottles / cans
+behind fogged glass, the interior at its spec ~400 cd/m^2 without clipping to white), POS M08, TV-1 M04 with a believable broadcast
+(13.7: a fictional Summit Sports Network loop rendered by us in Unreal - e.g. a pool broadcast of the test-room table through the
+Broadcast preset plus a score bug - played as a media texture, muted, VDB-T8 photosensitivity), popcorn machine M10 (+ L30), tap
+tower M06, beer clock M24 (hands driven by a time source of `ARbVenueInfo`), the sconce glasses of L13-L15, the Polaroid / flyer wall
+M14 (photos rendered by us: the bar's own table, trophies, the jukebox, crowd silhouettes posed with M3-H's mannequin; washed out;
+captions in Kalam; no AI images). Any element left as a grey box is listed with its reason.
+
+**Acceptance:**
+
+| # | Test | Pass |
+|---|---|---|
+| V1 | Performance gate | packaged Development build, `rbue.py perf --exe ... --map "/Game/Generated/Maps/L_DiveBar?Mode=Practice" --perf-exec "rb.Match.Break 9"` (2560x1440, High, `r.ScreenPercentage 66.67`, 600 frames) on an idle GPU: **GPU p95 <= 16.7 ms and frame p95 <= 16.7 ms**; the same through `--camera RbCam_DB_V01` .. `V09` (300 frames each): GPU p95 <= 16.7 ms in every view; game thread < 6 ms; no hitch > 50 ms after the warm-up; the 10.3 / 11.1 ms target logged (`Docs/perf/m3/divebar_*.json`) |
+| V2 | No visible quality loss | A/B captures V01..V12 + TH1..TH7 before / after the perf changes at the same lighting with grain off (`Tools/unreal/perf_divebar.py --ab`): per view abs(dEV100) <= 0.15, mean luminance difference <= 3 %, SSIM >= 0.95 at 960x540; every pair inspected side by side; a view outside is justified in the profile report or the lever is reverted |
+| V3 | Exposure | re-derived bands in venue-dive-bar 4.5; Open: V01..V05, V08, V12 inside (+- 0.25 EV), Lights-Up V01 inside (`capture_divebar.py`, 12 s warm-up, `ev_report.txt`) |
+| V4 | Props | the 12 families above generated (`rbbl.py all -- --strict`), imported, placed; the venue validator reports **0 grey boxes** for them; dimensions within VDB-T4; screens and coolers within +-20 % of their spec luminance (no channel clipped in V05 / TH7); the TV loop passes VDB-T8; ledger rows |
+| V5 | Mats | a loose ball dropped on E05 / E02 rests on the mat (rubber surface type), none falls through (functional test on `L_DiveBar`) |
+| V6 | Markers | `RbWaitSpot` on W1 (and W2), the rail chalk cubes H06a / H06b movable and tagged `RbChalkCube`; the validator checks both |
+| V7 | Requests of 18.13 | `capture_divebar.py` passes no `?Game=` (no "Failed to load game mode" in its log); the VDB-T3 class split documented / fixed; TH3's macro focus checked |
+| V8 | Captures | `Docs/images/divebar/m3/{V01..V12,TH1..TH7}.png` + `ev_report.txt` + an M2 vs M3 sheet, strict, inspected |
+| V9 | Regressions | `Functional.DiveBar.*`, `M2Integration.DiveBar`, `Unit.Venue.*`, settings read-backs (with G) green; `rbbl.py all -- --strict` and `rb_make_all.py --strict` + `--compare` identical |
+
+### 19.8 M3-L — table realism round 2
+
+**Hard rule** (as 18.7): every physics-relevant surface stays exactly on `rb::TableGeometry` (nose line 0.01 mm, bed `z = 0`,
+facings / jaws, pocket cut and drop, rail-cap height, sights); detail is added only where the ball cannot reach, and **no rendered
+surface ever lies inside the space a ball may occupy** (it may only recede from the physics profile).
+
+**What reads as a game at V04 and must change** (compared against web reference photos listed in `Docs/references/table-lookdev.md`
+with URL and what to compare; images are downloaded to the git-ignored `Art/Third/References/` for the side-by-side sheets and never
+committed unless their licence allows): cushions as hard prisms -> real K-66 / bar cushion profiles with a rounded nose, the rubber
+under a 1-2 mm cloth wrap, the cloth's fold and pleats at the facings, the seam line and staples where the cloth goes under the rail
+(9-ft) / the coin-op rail joint (7-ft); rail tops -> rounded edges (4-6 mm), wood / laminate with lacquer depth (Substrate coat over
+figured veneer; the bar's black laminate with wear), sights as inlays (diamond / dot inserts flush with a fine bezel, not painted
+shapes); pockets -> leather / rubber facings and pocket liners (9-ft drop pockets), the coin-op castings and gully with their real
+lips (7-ft); cloth -> worsted micro-structure (weave normal at fibre scale), the sheen lobe at grazing angles tuned against references
+(V04 and the 18.7 cushion-grazing view), subtle chalk dust at the head string and around the pockets, faint ball tracks along the
+lanes, the bar cloth's nap and pilling kept.
+
+**Acceptance:**
+
+| # | Test | Pass |
+|---|---|---|
+| L1 | Physics surfaces | M1 / M2 table tests green; 400 sample points per cushion: the rendered surface never protrudes beyond the rb cushion profile (<= 0.05 mm), the nose point at `h` on the nose line within 0.01 mm; facings / jaws on rb within 0.01 mm; collision meshes == physics surfaces |
+| L2 | Detail geometry | nose rounding >= 12 segments; cloth wrap 1.0-2.0 mm and inside the rail outline; rail-cap edge radius 4-6 mm with >= 8 segments; sight inlays flush (+-0.1 mm) with a bezel; 7-ft casting / jaw clearance >= 2 mm (M2 test) |
+| L3 | Cloth | weave micro-normal at 0.2-0.3 mm pitch without moire at 1440p chin-on-cue (TSR), sheen lobe tuned per round, chalk / track masks present on both tables; albedo still in the 0.05-0.10 linear band (known-albedo card), reported for V |
+| L4 | Captures per round | `Docs/images/dev/m3l/r<N>/{9ft,7ft}_{chin_on_cue,standing,rail_closeup,pocket_closeup,cushion_grazing}.png` + `divebar_{V03,V04}.png` (rendered read-only from V's level) + a reference sheet per round; Claude's written verdict per view; at most 4 rounds |
+| L5 | M1 captures | `Docs/images/m1/*` re-captured (A7) |
+| L6 | Cost | the table materials cost <= +0.3 ms GPU vs M2 at V04, 1440p High (`rbue.py perf --camera RbCam_DB_V04` on an idle GPU, or the base-pass delta in `ProfileGPU`) |
+| L7 | Requests | `ARbLookDevCamera`'s fallback cue lookup goes through `URbTableSubsystem` (18.13; O then removes the pending entry of `NoSingleTableLookups` at the merge); the test room gets an `RbWaitSpot` marker and an `RbChalkCube` on a rail |
+| L8 | Regeneration | `rb_make_all.py --strict` twice, `--compare` identical; `rbbl.py all -- --strict` OK |
+
+### 19.9 The open M2 requests (18.13) -> M3 packages
+
+| Request (18.13) | Package |
+|---|---|
+| Settings saved only when a menu closes (Alt+F4 inside the settings loses changes); no backup of the motion rows on a reduced-motion upgrade | M3-G (G7) |
+| `ARbLookDevCamera`'s fallback cue lookup (the pending entry of `NoSingleTableLookups`) | M3-L (L7), the test entry: M3-O |
+| audio.md 7.3: `IsPausedMix` follows the world pause live | M3-O (O11) |
+| `capture_divebar.py`'s `?Game=NineBall` (the engine's game-mode option) | M3-V (V7); the key itself: `?Discipline=` (O, 19.3) |
+| E05 / E02 mats let loose balls fall through | M3-V (V5) |
+| Clipped grey-box screens (ATM, coolers), TV-1 half-noise picture | M3-V (V4) |
+| VDB-T2 band re-derivation for M2-L's cloth; VDB-T3 class split | M3-V (V3, V7) |
+| The dive bar's GPU cost | M3-V (V1, V2) |
+| M2-F's doubts (stand-in sleeve, faint contact preview, Eyes stabilisation test, P3 through real input events) | M3-H (end of 19.4) |
+| TH3's soft 100 mm macro | M3-V (V7) |
+| M2-C's open list (T1 / T2 voice reduction, replay low-pass, `PauseLowPassHz`, loudness -32.4 LUFS vs -29) | stays open for the audio round after the owner's listening test (M3-O may take it if time allows) |
+
+### 19.10 M3 acceptance (integration round)
+
+Branch `integ/m3` = `main` + the reviewed packages in the order of 19.2 (L, V, H, G, O). Per merge: `rbue.py owners --package M3-<x>
+--branch <reviewed>`, `git merge --no-ff`, the package's requests, `rbue.py unity`, both builds, the full suite with `--sound`,
+`ledger`, `selftest`, the cook-list preflight.
+
+| # | Check | How |
+|---|---|---|
+| M3-A1 | Build clean | editor and game target: 0 errors, 0 project warnings |
+| M3-A2 | Regenerate | `rbbl.py all -- --strict`, `rb_make_all.py --strict` twice (second `--compare`), validators OK (M1 room, dive bar incl. "0 grey boxes" for the M3 families); `rb_import_body.py` copies the mannequin and builds the body content |
+| M3-A3 | Tests | `rbue.py test --filter RawBreak. --sound`: all green (285 + the packages' new tests + `Contracts.M3Enums` + the new `RawBreak.Functional.M3Integration.*`); `rbue.py core` 938 / 938 (BilliardsCore unchanged); `ledger --check`, `selftest`, `unity` clean |
+| M3-A4 | Body | H1-H12; Eyes + Headcam captures in both venues re-inspected on the merged tree |
+| M3-A5 | AI match | `RawBreak.Functional.M3Integration.VsAi` (new, M3-INT): in `L_DiveBar` an 8-ball race to 2 against the bar regular and a 9-ball race to 1 against the touring pro with the opponent's body, real-time playback x4, through the menu's URL; every shot's audio scheduled; the opponent never blocks the player's shot position; plus a packaged run of one rack (video frames captured as PNGs for the owner) |
+| M3-A6 | Modes | 8-ball / 9-ball / 10-ball through the title menu (MenuFlow VsAi), calls acknowledged by the opponent |
+| M3-A7 | Look | `capture_table.py` (both tables), `capture_divebar.py --set m3` (V / TH views), body captures; `Docs/images/m3/**`; strict, inspected |
+| M3-A8 | **Performance gate** | V1 on the merged tree (L's materials, both bodies, the opponent deciding during the recording: `--perf-exec "rb.Match.Break 9"` in a VsAi match): GPU p95 <= 16.7 ms, frame p95 <= 16.7 ms on an idle GPU; game thread < 6 ms; the planner's decision causes no frame > 25 ms |
+| M3-A9 | Package | `rbue.py package --label M3`: preflight `[]`, `BuildCookRun` OK, the mannequin and the body content cooked (`/Game/Characters` in `DirectoriesToAlwaysCook`) |
+| M3-A10 | **Owner playtest** | the packaged M3 build (German start instructions next to it): a match against an opponent in the dive bar, 8-ball with calls, the hands; his verdicts in `Docs/playtests/` |
+
+### 19.11 Risks
+
+| Risk | Mitigation |
+|---|---|
+| The mannequin reads as a plastic dummy, hands as a game | materials first (skin SSS on the hands, fabric sleeves), the hands are what the player sees: finger poses from reference photos, 4 capture rounds; MetaHuman later behind the same rig API |
+| Procedural C++ IK without Control Rig gives stiff poses | the solver is layered (stance, head, arms, fingers), driven by the eye and the cue (which already move humanly); seeded stance variations; reviewed in captures of both presets |
+| The body breaks "what you see is what hits" or the P1 / P5 feel | the body only follows (H4 static + dynamic checks), the cue and the eye are never written by it; all F-tests stay green |
+| AI planning causes hitches | background-priority tasks, no game-thread wait (O3), the wall-clock escape; perf gate with a deciding AI (M3-A8) |
+| Wall-clock `FinishNow` makes decisions machine-dependent | off in tests; logged when it triggers; the default 5 s is far above the measured worst case (0.3 s on 6 threads) |
+| Director contention between O and G | one owner (O); G's needs are contract hooks of the plan step; G's cross checks run at integration |
+| Perf gains eaten by the bodies, the opponent, L's materials | budgets per package (H12, L6), the gate on the merged tree (M3-A8), V's levers documented for a second pass |
+| Perf numbers under foreign GPU load | idle-GPU rule; `rbue.py perf` records the foreign load; the integration round repeats the gate |
+| `?Game=` collides with the engine's game-mode option | `?Discipline=` from M3 on, `?Game=` kept as an alias |
+| Epic template content licence / size | UE EULA (UE projects only), ledger rows, copied unchanged; ~100 MB LFS once |
+| Five packages on one machine | the waves of 19.2; at most three rendering; never leave Unreal / Blender running |
+
+### 19.12 Plan step results
+
+Filled by the plan step's stub commit (below).
